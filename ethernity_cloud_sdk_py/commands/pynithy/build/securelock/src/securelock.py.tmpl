@@ -1,0 +1,411 @@
+#!/usr/bin/python
+
+# update 29.12.2022
+import binascii
+import hashlib
+import os
+import re
+import string
+import random
+import io
+import time
+
+from etny_crypto import etny_crypto as crypto
+from web3 import Web3
+from eth_account import Account
+from web3.middleware import geth_poa_middleware
+from key_generation import get_wallet_address
+from etny_exec import execute_task, TaskStatus
+from models import *
+from swift_stream_service import SwiftStreamService
+from eth_account.messages import defunct_hash_message
+
+
+# todo: remove EtnyResultPoc.debug
+class EtnySecureLock:
+    debug = False
+
+    def __init__(self, swiftStreamClient):
+        self.swift_stream_service = swiftStreamClient
+        self.version = 'v3'
+        print(f'ETNY Pynithy [{self.version}]')
+        self.__set_initializers()
+        self.save_pub_cert()
+        self.__load_env()
+        # self.read_client_challenge()
+        # self.generate_challenge()
+        # self.generate_eth_compatible_wallet()
+        # print('wallet = ', self.publickey)
+        # print('private = ', self.privatekey)
+        self.read_contract_abi()
+        self.init_web3()
+        self.print_env()
+        # if not EtnySecureLock.debug:
+        #    self.reset_cert_file()
+
+    @staticmethod
+    def read_env(env_file):
+        with open(env_file, 'r') as f:
+            # Read each line of the file
+            for line in f:
+                # Split the line at the first '=' character
+                key, value = line.split('=', 1)
+                # Set the environment variable
+                os.environ[key] = value
+
+    @staticmethod
+    def read_env_str(env_str):
+        with io.StringIO(env_str) as f:
+            # Read each line of the string
+            for line in f:
+                # Split the line at the first '=' character
+                key, value = line.split('=', 1)
+                # Set the environment variable and remove new line
+                os.environ[key] = re.sub(r'\n', '', value)
+
+    def __extract_signer(self, checksum, signature):
+        signer = self.w3.eth.account.recoverHash(defunct_hash_message(text=checksum), signature=signature)
+        return signer
+
+    def __set_initializers(self):
+        self.is_valid_client_data = True
+        self.key_file = "/private/__ENCLAVE_NAME_SECURELOCK__/key.pem"
+        self.cert_file = "/app/__ENCLAVE_NAME_SECURELOCK__/cert.pem"
+        self.pub_cert_file = "/app/__ENCLAVE_NAME_SECURELOCK__/enclave_pub_cert.pem"
+        self.payload = 'payload.etny.securelock'
+        self.input = 'input.txt.securelock'
+        self.result_file = '/app/result.txt'
+        self.transaction_file = '/app/transaction.txt'
+        self.smart_contract_address = '__SMART_CONTRACT_ADDRESS__'
+        self.image_registry_address = '__IMAGE_REGISTRY_ADDRESS__'
+        self.chain_id = __CHAIN_ID__
+        self.web3_provider = '__RPC_URL__'
+        self.etny_bucket = "__BUCKET_NAME__"
+        self.trusted_zone_public_key = ''
+        if EtnySecureLock.debug:
+            self.key_file = "./app/cert1-ca1-clean.key"
+            self.cert_file = "./app/cert1-ca1-clean.crt"
+            self.payload = 'payload.py'
+            self.input = 'input.txt'
+            self.result_file = './app/result.txt'
+            self.transaction_file = './app/transaction.txt'
+            self.pub_cert_file = "./app/enclave_pub_cert.pem"
+            # self.trustedzone_public_key = "./app/enclave_pub_cert.pem"
+
+    def validate_client_payload(self, payload_data, input_data):
+        self.get_do_request_metadata()
+        if self._metadata.payload_metadata_obj.checksum is not None:
+            #print('Computing payload checksum: ')
+            payload_checksum = self.compute_sha256_checksum(payload_data)
+            #print('payload checksum: ', payload_checksum)
+            # check the wallet address that signed payload checksum is the one from order metadata
+            payload_signer = self.__extract_signer(payload_checksum, self._metadata.payload_metadata_obj.checksum)
+            if payload_signer.lower() != self.order_metadata.do_owner.lower():
+                self.task_code = TaskStatus.PAYLOAD_CHECKSUM_ERROR
+                self.task_result = 'PAYLOAD CHECKSUM DOESN\'T MATCH'
+                self.is_valid_client_data = False
+                return
+
+        if self._metadata.input_metadata_obj.checksum is not None:
+            input_checksum = self.compute_sha256_checksum(input_data)
+            #print('input checksum: ', input_checksum)
+            # check the wallet address that signed input checksum is the one from order metadata
+            input_signer = self.__extract_signer(input_checksum, self._metadata.input_metadata_obj.checksum)
+            if input_signer.lower() != self.order_metadata.do_owner.lower():
+                self.task_code = TaskStatus.INPUT_CHECKSUM_ERROR
+                self.task_result = 'INPUT CHECKSUM DOESN\'T MATCH'
+                self.is_valid_client_data = False
+                return
+
+    def wait_for_payload_and_input(self):
+        print('Waiting for payload and input')
+        self.wait_for_trustedzone(self.etny_bucket, self.payload)
+        self.wait_for_trustedzone(self.etny_bucket, self.input)
+
+    def wait_for_trustedzone(self, bucket_name, object_name, timeout=3600):
+        i = 0
+        print(f'Checking if object {object_name} exists in bucket {bucket_name}')
+        while True:
+            time.sleep(1)
+            i = i + 1
+            if i > timeout:
+                break
+            (status, result) = self.swift_stream_service.is_object_in_bucket(bucket_name, object_name)
+            if status:
+                break
+
+        print('secure lock finished the execution')
+
+    def get_do_request_metadata(self):
+        order = Order(self.etny.caller()._getOrder(self.order_id), self.order_id)
+        #print('order', order)
+        self._metadata = DOReqMetadata(self.etny.caller()._getDORequestMetadata(order.do_req), order.do_req)
+        self.order_metadata = order
+        #print('metadata', self._metadata)
+
+    def compute_sha256_checksum(self, file_data):
+        if type(file_data) is str:
+            file_data = file_data.encode('utf-8')
+
+        return hashlib.sha256(file_data).hexdigest()
+
+    # h = hashlib.sha256()
+    # file = io.BytesIO(file_data)
+    # while True:
+    # Reading is buffered, so we can read smaller chunks.
+    #     chunk = file.read(h.block_size)
+    #     if not chunk:
+    #        break
+    #    h.update(chunk)
+    #    return h.hexdigest()
+
+    def reset_cert_file(self):
+        #print('Resetting the cert file')
+        try:
+            with open(self.key_file, 'r+') as f:
+                f.truncate(0)
+        except Exception as e:
+            print('Error while removing the private key file content', e)
+
+        #with open(self.key_file, 'r') as f:
+        #    print('cert file content', f.read(), '##################')
+
+    def generate_eth_compatible_wallet(self):
+        decrypted_string = crypto.decrypt(
+            private_key_file=self.key_file,
+            encrypted_msg=self.encrypted_tuple
+        )
+        #print('decrypted_string = ', decrypted_string)
+        (public, private) = get_wallet_address(decrypted_string.decode(), self.enclave_challenge)
+        self.publickey = public
+        self.privatekey = private
+
+    def print_env(self):
+        print('chain id:', self.chain_id)
+        print('smart contract address:', self.smart_contract_address)
+        print('web3 provider:', self.web3_provider)
+        print('encrypted challenge:', self.client_challenge)
+        print('order id:', self.order_id)
+
+    def init_web3(self):
+        self.w3 = Web3(Web3.HTTPProvider(self.web3_provider))
+        self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+
+        # self.acct = Account.privateKeyToAccount(self.privatekey)
+        self.etny = self.w3.eth.contract(address=self.w3.toChecksumAddress(self.smart_contract_address),
+                                         abi=self.contract_abi)
+        self.image_registry = self.w3.eth.contract(address=self.w3.toChecksumAddress(self.image_registry_address),
+                                                   abi=self.image_registry_abi)
+
+    def read_contract_abi(self):
+        self.contract_abi = self.__read_contract_abi('pox.abi')
+        self.image_registry_abi = self.__read_contract_abi('image_registry.abi')
+
+    def __read_contract_abi(self, contract_name):
+        f = open(os.path.dirname(os.path.realpath(__file__)) + f'/{contract_name}')
+        contract_abi = f.read()
+        f.close()
+        return contract_abi
+
+    def __load_env(self):
+        if os.getenv('ETNY_CHAIN_ID') is not None:
+            self.chain_id = int(os.getenv('ETNY_CHAIN_ID'))
+
+        if os.getenv('ETNY_SMART_CONTRACT_ADDRESS') is not None:
+            self.smart_contract_address = os.getenv('ETNY_SMART_CONTRACT_ADDRESS').rstrip()
+
+        if os.getenv('ETNY_WEB3_PROVIDER') is not None:
+            self.web3_provider = os.getenv('ETNY_WEB3_PROVIDER').rstrip()
+
+        self.client_challenge = os.getenv('ETNY_CLIENT_CHALLENGE')
+        self.order_id = int(os.getenv('ETNY_ORDER_ID'))
+
+    def read_client_challenge(self):
+        self.encrypted_tuple = crypto.encrypted_data_from_base64_json(self.client_challenge)
+
+    def generate_challenge(self, length=20):
+        lowercase_only = ''.join(
+            random.choice(string.ascii_lowercase) for _ in range(length)
+        )
+        #print('random challenge:', lowercase_only)
+        self.enclave_challenge = lowercase_only
+        return self.enclave_challenge
+
+    def build_result(self):
+        self.result = (f'{self.version}:{self.task_code}:{self.task_result_checksum}:{self.enclave_challenge}:')
+
+    def addResult(self):
+        self.build_result()
+        print(f'adding result to order {self.order_id}')
+        nonce = self.w3.eth.getTransactionCount(self.publickey)
+        unicorn_txn = self.etny.functions._addResultToOrder(
+            self.order_id, self.result
+        ).buildTransaction({
+            'gas': 1000000,
+            'chainId': self.chain_id,
+            'nonce': nonce,
+            'gasPrice': self.w3.toWei("1", "mwei"),
+        })
+
+        signed_txn = self.w3.eth.account.sign_transaction(unicorn_txn, private_key=self.acct.key)
+        self.w3.eth.sendRawTransaction(signed_txn.rawTransaction)
+        # self.transaction = unicorn_tx signed
+        hash = self.w3.toHex(self.w3.sha3(signed_txn.rawTransaction))
+
+        try:
+            receipt = self.w3.eth.waitForTransactionReceipt(hash)
+        except Exception as e:
+            print(f'An error occurred while sending transaction result {self.order_id}: ', e)
+            raise
+
+        #print('transaction status: ', receipt.status)
+        #print('transaction receipt: ', receipt)
+        if receipt.status == 1:
+            print("Result transaction was successful!")
+        else:
+            print("Result transaction was UNSUCCESSFUL!")
+
+        #print("Result payload: %s" % self.result)
+        #print("TX Raw: %s" % signed_txn.rawTransaction)
+        #print("TX Hash: %s" % hash)
+
+    def build_transaction(self):
+        self.build_result()
+        print(f'adding result to order {self.order_id}')
+        nonce = self.w3.eth.getTransactionCount(self.publickey)
+        unicorn_txn = self.etny.functions._addResultToOrder(
+            self.order_id, self.result
+        ).buildTransaction({
+            'gas': 1000000,
+            'chainId': self.chain_id,
+            'nonce': nonce,
+            'gasPrice': self.w3.toWei("1", "mwei"),
+        })
+
+        signed_txn = self.w3.eth.account.sign_transaction(unicorn_txn, private_key=self.acct.key)
+        signed_tx_as_bytes = binascii.hexlify(signed_txn.rawTransaction)
+        self.signed_tx_as_bytes = signed_tx_as_bytes
+
+    def get_result_checksum(self):
+        self.task_result_checksum = hashlib.sha256(self.task_result.encode("utf-8")).hexdigest()
+
+    def save_result(self):
+        self.__get_latest_trusted_zone_public_key()
+        self.encrypt_file_and_push_to_swifstream(str(self.task_result), "result.txt")
+        self.encrypt_file_and_push_to_swifstream(str(self.task_code), "result_code.txt")
+
+    def save_pub_cert(self):
+        self.swift_stream_service.create_bucket(self.etny_bucket)
+        self.swift_stream_service.put_file_content(self.etny_bucket,
+                                                   "cert.pem",
+                                                   self.cert_file)
+
+    def save_transaction(self):
+        self.swift_stream_service.create_bucket(self.etny_bucket)
+        transaction = io.BytesIO(self.signed_tx_as_bytes)
+        self.swift_stream_service.put_file_content(self.etny_bucket,
+                                                   "transaction.txt",
+                                                   self.transaction_file,
+                                                   transaction)
+
+    def execute(self):
+        payload_data = self.__get_file_content_and_decrypt(self.payload)
+        input_data = self.__get_file_content_and_decrypt(self.input)
+        print('Validate client payload and input')
+        self.validate_client_payload(payload_data, input_data)
+        if app.is_valid_client_data:
+            print('Client payload and input are valid')
+        else:
+            print('Client payload and input are NOT valid')
+            return
+
+        task_result = execute_task(payload_data, input_data)
+        print('TASK RESULT (code, data):', task_result)
+        self.task_code = str(task_result[0])
+        self.task_result = task_result[1]
+
+    def __get_file_content_and_decrypt(self, object_name):
+        status, encrypted_base64 = self.swift_stream_service.get_file_content(self.etny_bucket, object_name)
+        if not status:
+            print(f'Failed to get {object_name} file')
+            raise Exception(f'Failed to get {object_name} file')
+
+        encrypted_tuple = crypto.encrypted_data_from_base64_json(encrypted_base64.encode('utf-8'))
+        decrypted_result = crypto.decrypt(self.key_file, encrypted_tuple)
+        return decrypted_result.decode('utf-8')
+
+    def encrypt_file_and_push_to_swifstream(self, file_data, file_name):
+        encrypted_input = crypto.encrypt_with_pub_key(self.trusted_zone_public_key, file_data.encode('utf-8'))
+        encrypted_input_base64 = crypto.encrypted_data_to_base64_json(encrypted_input)
+
+        # file name should end with secure lock '.securelock' extension
+        file_name = file_name + '.securelock'
+        self.swift_stream_service.create_bucket(self.etny_bucket)
+        data = io.BytesIO(encrypted_input_base64)
+        status, _ = self.swift_stream_service.put_file_content(self.etny_bucket,
+                                                               file_name,
+                                                               "",
+                                                               data)
+        if status:
+            print(f'File {file_name} encrypted and saved to swift stream successfully')
+
+    def __get_trusted_zone_public_key(self):
+        print('getting the public key of the trusted zone enclave')
+        image_hash = self._metadata.image_hash
+        if EtnySecureLock.debug:
+            image_hash = 'v3-hash-1'
+        self.trusted_zone_public_key = self.image_registry.caller().getTrustedZoneImageCertPublicKey(
+            image_hash)
+
+    def __get_latest_trusted_zone_public_key(self):
+        print('getting latest public key of the trusted zone enclave')
+        self.trusted_zone_public_key = self.image_registry.caller().getLatestTrustedZoneImageCertPublicKey(
+            '__TRUSTED_ZONE_IMAGE__', 'v3')[1]
+
+
+if __name__ == '__main__':
+    print('[SecureLock] Loading env variables..')
+    try:
+        if EtnySecureLock.debug:
+            swiftStreamClient = SwiftStreamService("localhost:9000",
+                                                   "swiftstreamadmin",
+                                                   "swiftstreamadmin")
+        else:
+            swiftStreamClient = SwiftStreamService("etny-swift-stream:9000",
+                                                   "swiftstreamadmin",
+                                                   "swiftstreamadmin")
+
+        status, env_content = swiftStreamClient.get_file_content("etny-pynithy-testnet-v3", ".env")
+        if not status:
+            print("Failed to get .env file")
+            raise Exception("Failed to get .env file")
+        EtnySecureLock.read_env_str(env_content)
+    except:
+        cert_file = "/app/__ENCLAVE_NAME_SECURELOCK__/cert.pem"
+        with open(cert_file, 'r') as f:
+            print("PUBLIC_CERT:", f.read())
+        exit(1)
+
+    if not EtnySecureLock.debug:
+        with open("/app/__ENCLAVE_NAME_SECURELOCK__/cert.pem", 'r') as f:
+            print("PUBLIC_CERT:", f.read())
+
+    print('Initializing..')
+    app = EtnySecureLock(swiftStreamClient)
+    print('Validate client payload and input')
+    app.wait_for_payload_and_input()
+
+    if app.is_valid_client_data:
+        print('Executing client code..')
+        app.execute()
+    else:
+        print('Failed client payload and input validation')
+    # print('Generating task result checksum..')
+    # app.get_result_checksum()
+    # print('Building transaction..')
+    # app.build_transaction()
+    # print('Saving transaction...')
+    # app.save_transaction()
+    # print('Saving the result..')
+    app.save_result()
+    print('Finished the execution')

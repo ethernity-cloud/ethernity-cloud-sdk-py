@@ -1,0 +1,59 @@
+version: '3.2'
+services:
+    las:
+        container_name: las
+        privileged: true
+        image: localhost:5000/etny-las
+        entrypoint: "/las_entrypoint.sh"
+        command: "bash -c '/las_entrypoint.sh && /usr/local/bin/las | tee /var/log/las.log'"
+        restart: unless-stopped
+        networks:
+          - ethernity
+        ports:
+          - target: 18766
+            published: 18766
+            protocol: tcp
+            mode: host
+
+    etny-securelock:
+        container_name: etny-securelock
+        privileged: true
+        image: localhost:5000/etny-securelock
+        entrypoint: ""
+        command: [ "/usr/local/bin/python", "/etny-securelock/securelock.py" ]
+        environment:
+          - SCONE_CAS_ADDR=scone-cas.cf
+          - SCONE_LAS_ADDR=las
+          - SCONE_CONFIG_ID=__ENCLAVE_NAME_SECURELOCK__/application
+          - SCONE_HEAP=1024M
+          - SCONE_LOG=DEBUG
+          - SCONE_ALLOW_DLOPEN=1
+          - SCONE_EXTENSIONS_PATH=/lib/libbinary-fs.so
+        restart: on-failure
+        networks:
+          - ethernity
+        depends_on:
+          - las
+
+    etny-trustedzone:
+      container_name: etny-trustedzone
+      privileged: true
+      image: localhost:5000/etny-trustedzone
+      entrypoint: ""
+      command: [ "/usr/local/bin/python", "/etny-trustedzone/trustedzone.py" ]
+      environment:
+        - SCONE_CAS_ADDR=scone-cas.cf
+        - SCONE_LAS_ADDR=las
+        - SCONE_CONFIG_ID=__ENCLAVE_NAME_TRUSTEDZONE__/application
+        - SCONE_HEAP=256M
+        - SCONE_LOG=DEBUG
+        - SCONE_ALLOW_DLOPEN=1
+        - SCONE_EXTENSIONS_PATH=/lib/libbinary-fs.so
+      restart: on-failure
+      networks:
+        - ethernity
+      depends_on:
+        - las
+networks:
+  ethernity:
+    external: true
