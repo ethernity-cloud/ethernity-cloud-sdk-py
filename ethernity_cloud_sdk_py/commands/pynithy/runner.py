@@ -13,6 +13,7 @@ from cryptography import x509
 from cryptography.x509.oid import NameOID, ExtensionOID
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
+import time
 
 
 def write_env(key, value):
@@ -81,7 +82,7 @@ def run_docker_command(service):
             line
             for line in output.split("\n")
             if not re.search(
-                r"Creating|Created|Pulling|latest|Digest|Starting|Started", line
+                r"Creating|Created|Pulling|latest|Digest|Starting|Started|msg=", line
             )
         )
         return filtered_output
@@ -166,9 +167,9 @@ def main():
 
     replacements_securelock = {
         "PREDECESSOR": (
-            f"# predecessor: {envPredecessor}"
-            if envPredecessor == "EMPTY"
-            else f"predecessor: {envPredecessor}"
+            f"# predecessor: {PREDECESSOR_HASH_SECURELOCK}"
+            if PREDECESSOR_HASH_SECURELOCK == "EMPTY"
+            else f"predecessor: {PREDECESSOR_HASH_SECURELOCK}"
         ),
         "MRENCLAVE": mrenclave_securelock,
         "ENCLAVE_NAME": ENCLAVE_NAME_SECURELOCK,
@@ -184,7 +185,7 @@ def main():
     key_pem_path = "key.pem"
     cert_pem_path = "cert.pem"
     if (
-        envPredecessor != "EMPTY"
+        PREDECESSOR_HASH_SECURELOCK != "EMPTY"
         and os.path.exists(key_pem_path)
         and os.path.exists(cert_pem_path)
     ):
@@ -276,70 +277,71 @@ def main():
 
         print("# Generated cert.pem and key.pem files")
 
-        # Read certificates and data
-        with open(cert_pem_path, "rb") as f:
-            cert_data = f.read()
-        with open(key_pem_path, "rb") as f:
-            key_data = f.read()
-        with open("etny-securelock-test.yaml", "rb") as f:
-            yaml_data = f.read()
+    # Read certificates and data
+    with open(cert_pem_path, "rb") as f:
+        cert_data = f.read()
+    with open(key_pem_path, "rb") as f:
+        key_data = f.read()
+    with open("etny-securelock-test.yaml", "rb") as f:
+        yaml_data = f.read()
 
-        # Set up the request headers
-        headers = {"Content-Type": "application/octet-stream"}
-        print()
-        # Perform the HTTPS POST request
-        try:
-            # Create a session to manage certificates and SSL settings
-            session = requests.Session()
-            session.verify = False  # Equivalent to rejectUnauthorized: false
-            session.cert = ("cert.pem", "key.pem")  # Provide the client cert and key
+    # Set up the request headers
+    headers = {"Content-Type": "application/octet-stream"}
+    print()
+    # Perform the HTTPS POST request
+    try:
+        # Create a session to manage certificates and SSL settings
+        session = requests.Session()
+        session.verify = False  # Equivalent to rejectUnauthorized: false
+        session.cert = ("cert.pem", "key.pem")  # Provide the client cert and key
 
-            # Perform the POST request
-            response = session.post(
-                "https://scone-cas.cf:8081/session", data=yaml_data, headers=headers
+        # Perform the POST request
+        response = session.post(
+            "https://scone-cas.cf:8081/session", data=yaml_data, headers=headers
+        )
+        print(f"{response.json()}")
+        # response.raise_for_status()  # Raise an exception for HTTP errors
+        # print(f"Response status code: {response.status_code}")
+        # print(f"Response text: {response.text}")
+        # Write the response data to 'predecessor.json'
+        with open("predecessor.json", "w", encoding="utf-8") as f:
+            json.dump(response.json(), f, indent=2)
+        print("# Updated session file for securelock and saved to predecessor.json")
+
+        response_data = response.json()
+        pred = response_data.get("hash", "EMPTY")
+        project_name = os.getenv("PROJECT_NAME")
+        version = os.getenv("VERSION")
+
+        if pred != "EMPTY":
+            predecessor_hash_securelock = (
+                f"{pred}$$$%${project_name}$$$%${version}" or "EMPTY"
             )
-            # response.raise_for_status()  # Raise an exception for HTTP errors
-            # print(f"Response status code: {response.status_code}")
-            # print(f"Response text: {response.text}")
-            # Write the response data to 'predecessor.json'
-            with open("predecessor.json", "w", encoding="utf-8") as f:
-                json.dump(response.json(), f, indent=2)
-            print("# Updated session file for securelock and saved to predecessor.json")
+            write_env("PREDECESSOR_HASH_SECURELOCK", predecessor_hash_securelock)
+            os.environ["PREDECESSOR_HASH_SECURELOCK"] = predecessor_hash_securelock
+        else:
+            predecessor_hash_securelock = "EMPTY"
+            write_env("PREDECESSOR_HASH_SECURELOCK", predecessor_hash_securelock)
+            os.environ["PREDECESSOR_HASH_SECURELOCK"] = predecessor_hash_securelock
 
-            response_data = response.json()
-            pred = response_data.get("hash", "EMPTY")
-            project_name = os.getenv("PROJECT_NAME")
-            version = os.getenv("VERSION")
-
-            if pred != "EMPTY":
-                predecessor_hash_securelock = (
-                    f"{pred}$$$%${project_name}$$$%${version}" or "EMPTY"
-                )
-                write_env("PREDECESSOR_HASH_SECURELOCK", predecessor_hash_securelock)
-                os.environ["PREDECESSOR_HASH_SECURELOCK"] = predecessor_hash_securelock
-            else:
-                predecessor_hash_securelock = "EMPTY"
-                write_env("PREDECESSOR_HASH_SECURELOCK", predecessor_hash_securelock)
-                os.environ["PREDECESSOR_HASH_SECURELOCK"] = predecessor_hash_securelock
-
-            if predecessor_hash_securelock == "EMPTY":
-                print("Error: Could not update session file for securelock")
-                print(
-                    "Please change the name/version of your project (using ecld-init or by editing .env file) and run the scripts again. Exiting."
-                )
-                sys.exit(1)
-
-            print()
-            print("Scone CAS registration successful.")
-            print()
-
-        except requests.RequestException as error:
-            print("Scone CAS error:", error)
+        if predecessor_hash_securelock == "EMPTY":
             print("Error: Could not update session file for securelock")
             print(
                 "Please change the name/version of your project (using ecld-init or by editing .env file) and run the scripts again. Exiting."
             )
             sys.exit(1)
+
+        print()
+        print("Scone CAS registration successful.")
+        print()
+
+    except requests.RequestException as error:
+        print("Scone CAS error:", error)
+        print("Error: Could not update session file for securelock")
+        print(
+            "Please change the name/version of your project (using ecld-init or by editing .env file) and run the scripts again. Exiting."
+        )
+        sys.exit(1)
 
     ENCLAVE_NAME_TRUSTEDZONE = "etny-pynithy-trustedzone-v3-testnet-0.1.12"
     if isMainnet:
@@ -401,8 +403,8 @@ def main():
     if not PUBLIC_KEY_SECURELOCK_RES:
         print("\n\nIt seems that your machine is not SGX compatible.\n")
         should_generate_certificates = prompt(
-            "Do you want to continue by generating the necessary certificates using the Ethernity Cloud public certificate extraction services? (yes/no) (default: no):",
-            default_value="no",
+            "Do you want to continue by generating the necessary certificates using the Ethernity Cloud public certificate extraction services? (yes/no):",
+            default_value="yes",
         ).lower()
         print()
         if should_generate_certificates != "yes":
@@ -493,8 +495,10 @@ def main():
             print("Error: PUBLIC_KEY_SECURELOCK not found")
             sys.exit(1)
         CERTIFICATE_CONTENT_SECURELOCK = (
-        "-----BEGIN CERTIFICATE-----\n"+CERTIFICATE_CONTENT_SECURELOCK+"\n-----END CERTIFICATE-----"
-    )
+            "-----BEGIN CERTIFICATE-----\n"
+            + CERTIFICATE_CONTENT_SECURELOCK
+            + "\n-----END CERTIFICATE-----"
+        )
         with open("certificate.securelock.crt", "w") as f:
             f.write(CERTIFICATE_CONTENT_SECURELOCK)
         print("Listing certificate PUBLIC_KEY_SECURELOCK:")
@@ -534,7 +538,9 @@ def main():
     print("Listing certificate PUBLIC_KEY_TRUSTEDZONE:")
     print(trustedZoneCert)
     PUBLIC_KEY_TRUSTEDZONE = (
-        "-----BEGIN CERTIFICATE-----\n"+trustedZoneCert+"\n-----END CERTIFICATE-----"
+        "-----BEGIN CERTIFICATE-----\n"
+        + trustedZoneCert
+        + "\n-----END CERTIFICATE-----"
     )
     with open("certificate.trustedzone.crt", "w") as f:
         f.write(PUBLIC_KEY_TRUSTEDZONE)
@@ -554,12 +560,15 @@ def main():
         action="upload",
         folderPath=registry_path,
     )
+    time.sleep(10)
     if not os.path.exists("IPFS_HASH.ipfs"):
         print("Error: Could not upload docker registry to IPFS")
         sys.exit(1)
+
     with open("IPFS_HASH.ipfs", "r") as f:
         IPFS_HASH = f.read().strip()
     write_env("IPFS_HASH", IPFS_HASH)
+    time.sleep(10)
     print("**** Finished ipfs pining ****")
     print()
     os.chdir(current_dir)

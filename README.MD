@@ -33,11 +33,13 @@ After installation, you can use the provided scripts to build, publish, and init
 The sdk requires the following to be installed on your system:
 - python 3.10+
 - docker (daemon running in the background for build and publish scripts)
+- docker-compose (for the build and publish scripts)
 
 
 ## Operating System compatibility
 The sdk has been tested on the following operating systems:
 - Windows 10
+- linux (Ubuntu 20.04)
 
 ## Blockchain compatibility
 - Bloxberg:

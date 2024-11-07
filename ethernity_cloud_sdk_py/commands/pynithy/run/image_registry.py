@@ -383,7 +383,7 @@ def main(
                     f"!!! Image: '{project_name}' is owned by '{image_owner}'.\nYou are not the account holder of the image.\nPlease change the project name and try again.\n"
                 )
                 return "You are not the account holder of the image."
-    if image_owner:
+    if image_owner and not private_key_arg:
         print(
             f"Image: '{project_name}' is owned by '{image_owner}'.\nIf you are not the account holder, you will not be able to publish your project with the current name. Please change the project name and try again.\n"
         )

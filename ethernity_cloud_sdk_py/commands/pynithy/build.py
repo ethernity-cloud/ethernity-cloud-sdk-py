@@ -130,6 +130,14 @@ def main():
     if dockerPS:
         run_command(f'docker stop {" ".join(dockerPS.splitlines())}')
 
+    remainingContainers = get_command_output("docker ps --filter 'name=etny' -a -q")
+    if remainingContainers:
+        run_command(f"docker stop {remainingContainers} -f")
+
+    remainingContainers = get_command_output("docker ps --filter 'name=las' -a -q")
+    if remainingContainers:
+        run_command(f"docker stop {remainingContainers} -f")
+
     dockeri = get_command_output("docker ps --filter name=las -q")
     if dockeri:
         run_command(f'docker stop {" ".join(dockeri.splitlines())}')

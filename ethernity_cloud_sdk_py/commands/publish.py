@@ -71,7 +71,7 @@ def main():
 
     if not (PROJECT_NAME and BLOCKCHAIN_NETWORK and PRIVATE_KEY and DEVELOPER_FEE):
         has_wallet = prompt(
-            "Do you have an existing wallet?", default_value="no"
+            "Do you have an existing wallet?", default_value="yes"
         ).lower()
         print()
         if has_wallet != "yes":
@@ -236,6 +236,7 @@ def main():
         #     )
         # except subprocess.CalledProcessError as e:
         #     result = ""
+        private_key = PRIVATE_KEY
         try:
             result = image_registry.main("", "", "", str(private_key), "checkBalance")
         except Exception as e:
@@ -244,7 +245,7 @@ def main():
 
         print(f"Available funds: {result}")
         print()
-        private_key = PRIVATE_KEY
+
         # try:
         #     result = (
         #         subprocess.check_output(
