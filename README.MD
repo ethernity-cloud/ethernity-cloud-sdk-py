@@ -1,7 +1,15 @@
 
+<p align="center">
+  <a href="https://ethernity.cloud" title="Ethernity Cloud">
+    <img src="https://ethernity.cloud/images/dark_gradient_logo.svg" alt="Ethernity Cloud logo" width="244" />
+  </a>
+</p>
+
+<h3 align="center">The Python implementation of the Ethernity CLOUD SDK protocol</h3>
+
 # Ethernity Cloud SDK PY
 
-This project provides a set of tools and scripts to work with the Ethernity Cloud SDK in a JavaScript environment.
+This project provides a set of tools and scripts to work with the Ethernity Cloud SDK in a python environment.
 
 ## Table of Contents
 
@@ -22,7 +30,7 @@ python -m venv venv
 source venv/bin/activate # for MacOS and Linux
 venv\Scripts\activate # for Windows
 
-pip install ethernity-cloud-sdk-py-dev
+pip install ethernity-cloud-sdk-py
 ```
 
 ## Usage
