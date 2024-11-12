@@ -101,12 +101,21 @@ class IPFSClient:
             )
 
             # Perform the upload
+            # response = requests.post(
+            #     add_url,
+            #     data=monitor,
+            #     headers={**self.headers, "Content-Type": monitor.content_type},
+            # )
             response = requests.post(
                 add_url,
                 data=monitor,
-                headers={**self.headers, "Content-Type": monitor.content_type},
+                headers={
+                    **self.headers,
+                    "Content-Type": monitor.content_type,
+                    "Content-Length": str(total_size),
+                    "Expect": "100-continue",
+                },
             )
-
         if response.status_code == 200:
             try:
                 response_data = json.loads(

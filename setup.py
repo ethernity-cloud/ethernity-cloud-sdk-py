@@ -1,8 +1,8 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="ethernity-cloud-sdk-py-dev",
-    version="0.1.25",
+    name="ethernity-cloud-sdk-py",
+    version="0.1.28",
     packages=find_packages(),
     include_package_data=True,
     package_data={
@@ -16,7 +16,7 @@ setup(
         "requests_toolbelt",
         "cryptography",
         "typing-extensions==4.12",
-        "ethernity-cloud-runner-py-dev",
+        "ethernity-cloud-runner-py",
         # Add other dependencies here
     ],
     entry_points={

@@ -8,7 +8,7 @@ from ethernity_cloud_runner_py.runner import EthernityCloudRunner  # type: ignor
 
 
 def execute_task() -> None:
-    ipfs_address = "http://ipfs-sdk.ethernity.cloud:5001/api/v0"
+    ipfs_address = "http://ipfs.ethernity.cloud:5001/api/v0"
 
     code = 'hello("Hello, Python World!")'
 

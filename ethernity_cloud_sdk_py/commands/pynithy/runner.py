@@ -564,16 +564,22 @@ def main():
     if not os.path.exists("IPFS_HASH.ipfs"):
         print("Error: Could not upload docker registry to IPFS")
         sys.exit(1)
+    with open("IPFS_DOCKER_COMPOSE_HASH.ipfs", "r") as f:
+        IPFS_DOCKER_COMPOSE_HASH = f.read().strip()
+    write_env("IPFS_DOCKER_COMPOSE_HASH", IPFS_DOCKER_COMPOSE_HASH)
+    os.environ["IPFS_DOCKER_COMPOSE_HASH"] = IPFS_DOCKER_COMPOSE_HASH
 
     with open("IPFS_HASH.ipfs", "r") as f:
         IPFS_HASH = f.read().strip()
     write_env("IPFS_HASH", IPFS_HASH)
+    os.environ["IPFS_HASH"] = IPFS_HASH
     time.sleep(10)
     print("**** Finished ipfs pining ****")
     print()
     os.chdir(current_dir)
     print("Adding certificates for SECURELOCK into IMAGE REGISTRY smart contract...")
     print()
+    load_dotenv()
     try:
         image_registry.main(
             os.getenv("BLOCKCHAIN_NETWORK", ""),
