@@ -5,10 +5,10 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 setup(
     name="ethernity-cloud-sdk-py",
-    version="0.1.30",
+    version="0.1.31",
     url="https://github.com/ethernity-cloud/ethernity-cloud-sdk-py",
     author="Ethernity Cloud Team",
-    author_email="alexlga@gmail.com",
+    author_email="contact@ethernity.cloud",
     description="Ethernity Cloud SDK Python",
     long_description=long_description,
     long_description_content_type="text/markdown",
