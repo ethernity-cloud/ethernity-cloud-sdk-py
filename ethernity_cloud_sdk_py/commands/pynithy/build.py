@@ -100,7 +100,7 @@ def get_command_output(command):
         command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
     if result.returncode != 0:
-        return ""
+        return None
     return result.stdout.decode("utf-8").strip()
 
 
@@ -110,6 +110,16 @@ def main():
     # Set current directory
     current_dir = os.getcwd()
     VERSION = os.getenv("VERSION")
+    print(f"Checking requirements for {VERSION}")
+    dockerPS = get_command_output("docker version")
+
+    if dockerPS == None:
+        print("""
+Docker daemon is not running. Please start docker to continue.
+More information about installing and running Docker can be founde here: https://docs.docker.com/engine/install/
+""")
+        sys.exit(1)
+  
     print(f"Building {VERSION}")
     # Determine template name based on the blockchain network
     BLOCKCHAIN_NETWORK = os.getenv("BLOCKCHAIN_NETWORK", "Bloxberg_Testnet")
