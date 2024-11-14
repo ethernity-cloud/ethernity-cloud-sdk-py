@@ -1,0 +1,78 @@
+# FROM registry.scontain.com:5050/sconecuratedimages/apps:python3.10.5-alpine3.15-scone5.8-pre-release as release
+FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps:python3.10.5-alpine3.15-scone5.8-pre-release as release
+
+
+
+RUN apk update
+
+RUN cd /
+RUN apk add bash openrc bind-tools sudo npm binutils curl
+RUN pip3 install --upgrade pip
+RUN pip3 install --upgrade setuptools
+RUN pip3 install python-dotenv
+RUN pip3 install web3==5.31.0
+RUN pip3 install cryptography==42.0.7
+RUN pip3 install ecdsa
+RUN pip3 install pyasn1
+RUN pip3 install tinyec
+RUN pip3 install pyinstaller
+RUN pip3 install minio
+RUN pip3 install pynacl
+RUN pip3 install pytest
+RUN pip3 install numpy
+RUN pip3 install scipy
+RUN pip3 install hypothesis
+RUN pip3 install pooch
+RUN pip3 install ipywidgets
+
+#RUN pip3 install requests
+#RUN pip3 install beautifulsoup4
+#RUN pip3 install tokenizers
+#RUN pip3 install transformers
+#RUN pip3 install tensorflow
+
+
+ENV ENCLAVE_NAME_SECURELOCK=__ENCLAVE_NAME_SECURELOCK__
+ENV BUCKET_NAME=__BUCKET_NAME__
+ENV SMART_CONTRACT_ADDRESS=__SMART_CONTRACT_ADDRESS__
+ENV IMAGE_REGISTRY_ADDRESS=__IMAGE_REGISTRY_ADDRESS__
+ENV RPC_URL=__RPC_URL__
+ENV CHAIN_ID=__CHAIN_ID__
+ENV TRUSTED_ZONE_IMAGE=__TRUSTED_ZONE_IMAGE__
+
+
+RUN mkdir binary-fs-dir
+
+COPY ./src /etny-securelock/
+COPY ./scripts/* /etny-securelock/
+
+RUN etny-securelock/binary-fs-build.sh
+
+FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers as build
+
+COPY --from=release /binary-fs-dir /.
+
+RUN scone gcc ./binary_fs_blob.s ./libbinary_fs_template.a -shared -o /libbinary-fs.so
+
+FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps:python3.10.5-alpine3.15-scone5.8-pre-release
+
+COPY --from=build /usr/local/bin/scone /usr/local/bin/scone
+
+#RUN scone cas attest scone-cas.cf 3061b9feb7fa67f3815336a085f629a13f04b0a1667c93b14ff35581dc8271e4 -GCS --only_for_testing-debug --only_for_testing-ignore-signer
+
+COPY --from=build /libbinary-fs.so /lib/libbinary-fs.so
+
+RUN openssl genrsa -3 -out /enclave-key.pem 3072
+
+ENV SCONE_LOG=INFO
+ENV SCONE_HEAP=1024M
+ENV SCONE_ALLOW_DLOPEN=1
+ENV SCONE_EXTENSIONS_PATH=/lib/libbinary-fs.so
+
+# Disabled production mode for testnet
+# RUN scone-signer sign --key=/enclave-key.pem --env --production /usr/local/bin/python3
+
+RUN rm -rf /enclave-key.pem
+
+
+ENTRYPOINT ["/usr/local/bin/python", "/etny-securelock/securelock.py"]
