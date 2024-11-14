@@ -220,6 +220,7 @@ More information about installing and running Docker can be founde here: https:/
         .replace("__RPC_URL__", ECRunner[templateName][2])
         .replace("__CHAIN_ID__", str(ECRunner[templateName][3]))
         .replace("__TRUSTED_ZONE_IMAGE__", templateName)
+        .replace("__IMAGE_PATH__", templateName)
     )
     imagesTag = BLOCKCHAIN_NETWORK.lower()
     if isMainnet:

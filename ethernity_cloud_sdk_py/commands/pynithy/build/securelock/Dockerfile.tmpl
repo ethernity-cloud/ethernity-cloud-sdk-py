@@ -1,12 +1,10 @@
 # FROM registry.scontain.com:5050/sconecuratedimages/apps:python3.10.5-alpine3.15-scone5.8-pre-release as release
-FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps:python3.10.5-alpine3.15-scone5.8-pre-release as release
-
-
+FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/__IMAGE_PATH__/python3.10.5-alpine3.15-scone5.8-pre-release AS release
 
 RUN apk update
 
 RUN cd /
-RUN apk add bash openrc bind-tools sudo npm binutils curl
+RUN apk add bash openrc bind-tools sudo npm binutils curl binutils
 RUN pip3 install --upgrade pip
 RUN pip3 install --upgrade setuptools
 RUN pip3 install python-dotenv
@@ -24,6 +22,7 @@ RUN pip3 install scipy
 RUN pip3 install hypothesis
 RUN pip3 install pooch
 RUN pip3 install ipywidgets
+RUN pip3 install pyinstaller
 
 #RUN pip3 install requests
 #RUN pip3 install beautifulsoup4
@@ -46,15 +45,15 @@ RUN mkdir binary-fs-dir
 COPY ./src /etny-securelock/
 COPY ./scripts/* /etny-securelock/
 
-RUN etny-securelock/binary-fs-build.sh
+RUN /etny-securelock/binary-fs-build.sh
 
-FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers as build
+FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers AS build
 
 COPY --from=release /binary-fs-dir /.
 
 RUN scone gcc ./binary_fs_blob.s ./libbinary_fs_template.a -shared -o /libbinary-fs.so
 
-FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps:python3.10.5-alpine3.15-scone5.8-pre-release
+FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/__IMAGE_PATH__/python3.10.5-alpine3.15-scone5.8-pre-release
 
 COPY --from=build /usr/local/bin/scone /usr/local/bin/scone
 

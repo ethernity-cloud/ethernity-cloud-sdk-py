@@ -1,8 +1,4 @@
-#!/bin/bash -v
-
-
-pip3 install pyinstaller
-apk add binutils
+#!/bin/bash
 
 cd /etny-securelock
 
@@ -19,7 +15,7 @@ mv securelock.py.tmp securelock.py
 
 pyinstaller securelock.py
 
-EXEC=(scone binaryfs / /binary-fs-dir -v \
+EXEC=(scone binary-fs / /binary-fs-dir -v \
   --include '/usr/local/lib/python3.10/*' \
   --include '/etny-securelock/*' \
   --host-path=/etc/resolv.conf \
