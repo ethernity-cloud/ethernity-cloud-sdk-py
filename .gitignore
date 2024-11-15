@@ -166,3 +166,14 @@ src/ethernity_task.py
 src/serverless/__init__.py
 src/serverless/backend.py
 ethernity_cloud_sdk_py/commands/pynithy/build/securelock/Dockerfile
+ethernity_cloud_sdk_py/commands/pynithy/run/cert.pem
+ethernity_cloud_sdk_py/commands/pynithy/run/certificate.securelock.crt
+ethernity_cloud_sdk_py/commands/pynithy/run/certificate.trustedzone.crt
+ethernity_cloud_sdk_py/commands/pynithy/run/docker-compose-final.yml
+ethernity_cloud_sdk_py/commands/pynithy/run/docker-compose.yml
+ethernity_cloud_sdk_py/commands/pynithy/run/etny-securelock-test.yaml
+ethernity_cloud_sdk_py/commands/pynithy/run/IPFS_DOCKER_COMPOSE_HASH.ipfs
+ethernity_cloud_sdk_py/commands/pynithy/run/IPFS_HASH.ipfs
+ethernity_cloud_sdk_py/commands/pynithy/run/key.pem
+ethernity_cloud_sdk_py/commands/pynithy/run/predecessor.json
+ethernity_cloud_sdk_py/commands/pynithy/run/PUBLIC_KEY.txt

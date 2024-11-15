@@ -42,7 +42,11 @@ def main():
         try:
             buildScript.main()
             print(
-                "Build script finished. You can now proceed to publish: ecld-publish."
+                """
+Build script finished. You can now proceed to publish by running:
+
+    ecld-publish
+"""
             )
         except Exception as e:
             print(f"Error running the build script: {e}")

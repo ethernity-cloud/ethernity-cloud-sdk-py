@@ -593,10 +593,13 @@ def main():
         exit()
 
     print()
-    print(
-        (
-            "Script completed successfully. You can start testing the application now. (eg. python src/ethernity_task.py)"
-        )
+    print("""
+Your backend funcions were published successfully!
+          
+You can run the example cli application like this:
+
+    python src/ethernity_task.py
+        """
     )
 
 
