@@ -4,7 +4,7 @@ FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/
 RUN apk update
 
 RUN cd /
-RUN apk add bash openrc bind-tools sudo npm binutils curl binutils
+RUN apk add bash openrc bind-tools sudo npm binutils curl binutils gcc g++ git openblas-dev
 RUN pip3 install --upgrade pip
 RUN pip3 install --upgrade setuptools
 RUN pip3 install python-dotenv
@@ -13,7 +13,6 @@ RUN pip3 install cryptography==42.0.7
 RUN pip3 install ecdsa
 RUN pip3 install pyasn1
 RUN pip3 install tinyec
-RUN pip3 install pyinstaller
 RUN pip3 install minio
 RUN pip3 install pynacl
 RUN pip3 install pytest
@@ -23,6 +22,8 @@ RUN pip3 install hypothesis
 RUN pip3 install pooch
 RUN pip3 install ipywidgets
 RUN pip3 install pyinstaller
+RUN pip3 install requests
+RUN CMAKE_ARGS="-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS" pip install llama-cpp-python
 
 #RUN pip3 install requests
 #RUN pip3 install beautifulsoup4
@@ -63,8 +64,8 @@ COPY --from=build /libbinary-fs.so /lib/libbinary-fs.so
 
 RUN openssl genrsa -3 -out /enclave-key.pem 3072
 
-ENV SCONE_LOG=INFO
-ENV SCONE_HEAP=1024M
+ENV SCONE_LOG=FATAL
+ENV SCONE_HEAP=8192M
 ENV SCONE_ALLOW_DLOPEN=1
 ENV SCONE_EXTENSIONS_PATH=/lib/libbinary-fs.so
 

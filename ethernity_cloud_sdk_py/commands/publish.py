@@ -226,7 +226,7 @@ Please fill the wallet wit at least 0.001 POL
 
         print()
         task_percentage = prompt(
-            "Please specify the % of a task which will be transferred to your wallet upon successful execution",
+            "Each time this enclave runs, you will be rewarded with a percentage of the execution price.\n\nPlease specify the percentage.",
             default_value="10",
         )
         write_env("DEVELOPER_FEE", task_percentage)

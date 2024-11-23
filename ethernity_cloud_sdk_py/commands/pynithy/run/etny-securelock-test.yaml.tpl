@@ -13,8 +13,6 @@ services:
      mrenclaves: [ "__MRENCLAVE__" ]
      command: /usr/local/bin/python /etny-securelock/securelock.py
      pwd: /
-     environment:
-        GREETING: hello ETNY!!!!
 
 images:
    - name: application_image

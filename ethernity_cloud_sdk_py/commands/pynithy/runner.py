@@ -401,9 +401,9 @@ def main():
         PUBLIC_KEY_SECURELOCK_RES = ""
 
     if not PUBLIC_KEY_SECURELOCK_RES:
-        print("\n\nIt seems that your machine is not SGX compatible.\n")
+        print("\n\nFor publishing the eclave, the public key needs to be extracted and for this SGX technology is required.\nIt seems that your machine is not SGX compatible.\n")
         should_generate_certificates = prompt(
-            "Do you want to continue by generating the necessary certificates using the Ethernity Cloud public certificate extraction services? (yes/no):",
+            "Do you want to use Ethernity Cloud public public key extraction service? (yes/no):",
             default_value="yes",
         ).lower()
         print()
@@ -412,7 +412,7 @@ def main():
             sys.exit(1)
         print()
         print(
-            "\nGenerating certificates using the Ethernity Cloud signing service...\n"
+            "\nExtracting certificate using the Ethernity Cloud certificate extraction service...\n"
         )
         print("**** Started ipfs initial pining ****")
         if os.path.exists("IPFS_HASH.ipfs"):

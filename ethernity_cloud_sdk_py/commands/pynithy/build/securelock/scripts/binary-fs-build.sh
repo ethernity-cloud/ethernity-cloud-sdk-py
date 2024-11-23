@@ -16,6 +16,25 @@ mv securelock.py.tmp securelock.py
 pyinstaller securelock.py
 
 EXEC=(scone binary-fs / /binary-fs-dir -v \
+  --include '/usr/lib/libstdc++.so' \
+  --include '/usr/lib/libstdc++.so.6' \
+  --include '/usr/lib/libstdc++.so.6.0.28' \
+  --include '/usr/lib/libgcc_s.so' \
+  --include '/usr/lib/libgcc_s.so.1' \
+  --include '/usr/lib/libgomp.so.1' \
+  --include '/usr/lib/libgomp.so.1.0.0' \
+  --include '/usr/lib/libopenblas.so' \
+  --include '/usr/lib/libopenblas.so.3' \
+  --include '/usr/lib/libopenblasp-r0.3.18.so' \
+  --include '/usr/lib/libopenblas64_.so' \
+  --include '/usr/lib/libopenblas64_.so.3' \
+  --include '/usr/lib/libopenblas64_p-r0.3.18.so' \
+  --include '/usr/lib/libgfortran.so' \
+  --include '/usr/lib/libgfortran.so.5' \
+  --include '/usr/lib/libgfortran.so.5.0.0' \
+  --include '/usr/lib/libquadmath.so' \
+  --include '/usr/lib/libquadmath.so.0' \
+  --include '/usr/lib/libquadmath.so.0.0.0' \
   --include '/usr/local/lib/python3.10/*' \
   --include '/etny-securelock/*' \
   --host-path=/etc/resolv.conf \

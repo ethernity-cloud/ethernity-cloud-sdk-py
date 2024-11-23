@@ -43,7 +43,7 @@ def main():
             buildScript.main()
             print(
                 """
-Build script finished. You can now proceed to publish by running:
+Build process was successful! You can now proceed to publish by running:
 
     ecld-publish
 """
