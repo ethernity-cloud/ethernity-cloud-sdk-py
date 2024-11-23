@@ -1,4 +1,5 @@
 import os.path
+import ast
 
 try:
     import serverless.backend as backend
@@ -45,9 +46,24 @@ def Exec(payload_data, input_data, globals=None, locals=None):
         if payload_data is not None:
             if input_data is not None:
                 globals["___etny_data_set___"] = input_data
-                return ___etny_result___(eval(payload_data, globals, locals))
-            else:
-                return ___etny_result___(eval(payload_data, globals, locals))
+            module = ast.parse(payload_data)
+            outputs = []
+            for node in module.body:
+                if isinstance(node, ast.Expr):
+                    expr_code = compile(
+                        ast.Expression(node.value), filename="<ast>", mode="eval"
+                    )
+                    result = eval(expr_code, globals, locals)
+                    outputs.append(result)
+                else:
+                    # Handle statements if needed
+                    exec(
+                        compile(ast.Module([node]), filename="<ast>", mode="exec"),
+                        globals,
+                        locals,
+                    )
+
+            return ___etny_result___("\n".join(outputs))
         else:
             return (
                 TaskStatus.PAYLOAD_NOT_DEFINED,
@@ -69,6 +85,13 @@ def Exec(payload_data, input_data, globals=None, locals=None):
                 return TaskStatus.BASE_EXCEPTION, e.args[0]
         except Exception as e:
             return TaskStatus.BASE_EXCEPTION, e.args[0]
+
+
+# payload_data = """hello('Iosif')
+# hello('Luca')
+# hello('World')"""
+# print(execute_task(payload_data, None))
+# print(execute_task(payload_data, None)[1])
 
 
 # result = Exec('./v1/src/app/payload.py', './v1/src/app/input.txt',
