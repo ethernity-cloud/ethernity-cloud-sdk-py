@@ -179,7 +179,7 @@ def main():
             "Enter the access token to be used when calling the IPFS pinning service: "
         ).strip()
     else:
-        custom_url = "http://ipfs.ethernity.cloud:5001"
+        custom_url = "https://ipfs.ethernity.cloud"
 
     os.makedirs("src/serverless", exist_ok=True)
 
