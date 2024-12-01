@@ -76,13 +76,14 @@ def run_docker_command(service):
             .decode()
             .strip()
         )
+
         print(f"Output of {command}: {output}")
         # Filter the output
         filtered_output = "\n".join(
             line
             for line in output.split("\n")
             if not re.search(
-                r"Creating|Created|Pulling|latest|Digest|Starting|Started|msg=", line
+                r"Creating|Created|Recreated|Recreating|Pulling|latest|Digest|Starting|Started|msg=", line
             )
         )
         return filtered_output

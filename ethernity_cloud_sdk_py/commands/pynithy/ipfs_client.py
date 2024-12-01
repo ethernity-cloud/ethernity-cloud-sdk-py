@@ -59,7 +59,7 @@ class IPFSClient:
             return None
 
     def upload_folder_to_ipfs(self, folder_path: str) -> None:
-        add_url = f"{self.api_url}/api/v0/add?wrap-with-directory=true&pin=true"
+        add_url = f"{self.api_url}/api/v0/add?wrap-with-directory=true&pin=true&progress=true&fscache=true"
         files = []
         for root, dirs, filenames in os.walk(folder_path):
             for filename in filenames:
@@ -77,7 +77,7 @@ class IPFSClient:
             def upload_with_progress(file):
                 with open(file[1][0], "rb") as f:
                     while True:
-                        chunk = f.read(1024)
+                        chunk = f.read(16384)
                         if not chunk:
                             break
                         yield chunk
