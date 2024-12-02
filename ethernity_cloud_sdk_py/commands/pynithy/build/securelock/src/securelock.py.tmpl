@@ -65,6 +65,7 @@ class EtnySecureLock:
 
     def __extract_signer(self, checksum, signature):
         signer = self.w3.eth.account.recoverHash(defunct_hash_message(text=checksum), signature=signature)
+
         return signer
 
     def __set_initializers(self):
@@ -99,8 +100,15 @@ class EtnySecureLock:
             payload_checksum = self.compute_sha256_checksum(payload_data)
             #print('payload checksum: ', payload_checksum)
             # check the wallet address that signed payload checksum is the one from order metadata
-            payload_signer = self.__extract_signer(payload_checksum, self._metadata.payload_metadata_obj.checksum)
-            if payload_signer.lower() != self.order_metadata.do_owner.lower():
+            if self._metadata.payload_metadata_obj.checksum.startswith('0x'):
+                checksum_signer = self.__extract_signer(payload_checksum, self._metadata.payload_metadata_obj.checksum)
+                transaction_checksum = payload_checksum
+            else:
+                checksum_signer  = self.order_metadata.do_owner
+                transaction_checksum = self._metadata.payload_metadata_obj.checksum
+                
+
+            if checksum_signer.lower() != self.order_metadata.do_owner.lower() and transaction_checksum != payload_checksum:
                 self.task_code = TaskStatus.PAYLOAD_CHECKSUM_ERROR
                 self.task_result = 'PAYLOAD CHECKSUM DOESN\'T MATCH'
                 self.is_valid_client_data = False
@@ -110,8 +118,14 @@ class EtnySecureLock:
             input_checksum = self.compute_sha256_checksum(input_data)
             #print('input checksum: ', input_checksum)
             # check the wallet address that signed input checksum is the one from order metadata
-            input_signer = self.__extract_signer(input_checksum, self._metadata.input_metadata_obj.checksum)
-            if input_signer.lower() != self.order_metadata.do_owner.lower():
+            if self._metadata.input_metadata_obj.checksum.startswith('0x'):
+                checksum_signer = self.__extract_signer(input_checksum, self._metadata.input_metadata_obj.checksum)
+                transaction_checksum = input_checksum
+            else:
+                checksum_signer  = self.order_metadata.do_owner
+                transaction_checksum = self._metadata.input_metadata_obj.checksum
+
+            if checksum_signer.lower() != self.order_metadata.do_owner.lower() and transaction_checksum != input_checksum:
                 self.task_code = TaskStatus.INPUT_CHECKSUM_ERROR
                 self.task_result = 'INPUT CHECKSUM DOESN\'T MATCH'
                 self.is_valid_client_data = False
@@ -320,7 +334,7 @@ class EtnySecureLock:
             return
 
         task_result = execute_task(payload_data, input_data)
-        print('TASK RESULT (code, data):', task_result)
+        #print('TASK RESULT (code, data):', task_result)
         self.task_code = str(task_result[0])
         self.task_result = task_result[1]
 
@@ -386,9 +400,9 @@ if __name__ == '__main__':
             print("PUBLIC_CERT:", f.read())
         exit(1)
 
-    if not EtnySecureLock.debug:
-        with open("/app/__ENCLAVE_NAME_SECURELOCK__/cert.pem", 'r') as f:
-            print("PUBLIC_CERT:", f.read())
+    #if not EtnySecureLock.debug:
+    #    with open("/app/__ENCLAVE_NAME_SECURELOCK__/cert.pem", 'r') as f:
+    #        print("PUBLIC_CERT:", f.read())
 
     print('Initializing..')
     app = EtnySecureLock(swiftStreamClient)

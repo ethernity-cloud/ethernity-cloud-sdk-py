@@ -172,6 +172,7 @@ class ImageRegistry:
                 print("Adding trusted zone cert transaction was successful!")
             else:
                 print("Adding trusted zone cert transaction was UNSUCCESSFUL!")
+                sys.exit(1)
         except Exception as e:
             print(f"An error occurred while sending transaction: {e}")
 

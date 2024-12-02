@@ -11,7 +11,7 @@ from requests_toolbelt.multipart.encoder import (
 
 class IPFSClient:
     def __init__(
-        self, api_url: str = "http://ipfs.ethernity.cloud:5001", token: str = ""
+        self, api_url: str = "https://ipfs.ethernity.cloud", token: str = ""
     ) -> None:
         self.api_url = api_url
         self.headers = {}
@@ -59,7 +59,7 @@ class IPFSClient:
             return None
 
     def upload_folder_to_ipfs(self, folder_path: str) -> None:
-        add_url = f"{self.api_url}/api/v0/add?wrap-with-directory=true&pin=true"
+        add_url = f"{self.api_url}/api/v0/add?wrap-with-directory=true&pin=true&progress=true&fscache=true"
         files = []
         for root, dirs, filenames in os.walk(folder_path):
             for filename in filenames:
@@ -77,7 +77,7 @@ class IPFSClient:
             def upload_with_progress(file):
                 with open(file[1][0], "rb") as f:
                     while True:
-                        chunk = f.read(1024)
+                        chunk = f.read(16384)
                         if not chunk:
                             break
                         yield chunk
@@ -169,7 +169,7 @@ class IPFSClient:
 
 
 def main(
-    host="http://ipfs.ethernity.cloud:5001",
+    host="https://ipfs.ethernity.cloud",
     protocol="http",
     port=5001,
     token="",
@@ -228,7 +228,7 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="IPFS Client")
     parser.add_argument(
-        "--host", help="IPFS host", default="http://ipfs.ethernity.cloud:5001"
+        "--host", help="IPFS host", default="https://ipfs.ethernity.cloud"
     )
     parser.add_argument("--protocol", help="Protocol (http or https)", default="http")
     parser.add_argument("--port", help="IPFS port", type=int, default=5001)

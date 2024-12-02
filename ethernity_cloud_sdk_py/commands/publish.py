@@ -142,7 +142,7 @@ def main():
         print("Inputted Private key is valid.")
         write_env("PRIVATE_KEY", private_key)
         print()
-        print("Checking blockchain for required funds...")
+        print("Checking blockchain for required gas...")
         # try:
         #     result = (
         #         subprocess.check_output(
@@ -166,8 +166,25 @@ def main():
         except Exception as e:
             print(e)
             result = ""
+            sys.exit(1)
 
-        print(f"Available funds: {result}")
+        if float(result) < 0.001:
+            print("""
+Insufficient gas. Please make sure you have enough gas to deploy the service.
+""")
+            if BLOCKCHAIN_NETWORK=="Bloxberg_Testnet" or BLOCKCHAIN_NETWORK=="Bloxberg_Mainnet":
+                print ("""
+Please use the faucet here to fill your wallet with BERGs:
+                                        
+    https://faucet.bloxberg.org
+""")
+            if BLOCKCHAIN_NETWORK=="Polygon_Testnet" or BLOCKCHAIN_NETWORK=="Polygon_Mainnet":
+                print ("""  
+Please fill the wallet wit at least 0.001 POL
+""")
+            sys.exit(1) 
+        
+        print(f"Available gas: {result}")
 
         print()
         print(
@@ -209,7 +226,7 @@ def main():
 
         print()
         task_percentage = prompt(
-            "Please specify the % of a task which will be transferred to your wallet upon successful execution",
+            "Each time this enclave runs, you will be rewarded with a percentage of the execution price.\n\nPlease specify the percentage.",
             default_value="10",
         )
         write_env("DEVELOPER_FEE", task_percentage)
@@ -217,7 +234,7 @@ def main():
         print(
             "Using PROJECT_NAME, BLOCKCHAIN_NETWORK, PRIVATE_KEY, DEVELOPER_FEE from .env"
         )
-        print("Checking blockchain for required funds...")
+        print("Checking blockchain for required gas...")
         # try:
         #     result = (
         #         subprocess.check_output(
@@ -242,8 +259,27 @@ def main():
         except Exception as e:
             print(e)
             result = ""
+            sys.exit(1)
 
-        print(f"Available funds: {result}")
+        if float(result) < 0.001:
+            print("""
+Insufficient gas. Please make sure you have enough gas to deploy the service.
+""")
+            if BLOCKCHAIN_NETWORK=="Bloxberg_Testnet" or BLOCKCHAIN_NETWORK=="Bloxberg_Mainnet":
+                print ("""
+Please use the faucet here to fill your wallet with BERGs:
+                                        
+    https://faucet.bloxberg.org
+""")
+                
+            if BLOCKCHAIN_NETWORK=="Polygon_Testnet" or BLOCKCHAIN_NETWORK=="Polygon_Mainnet":
+                print ("""  
+Please fill the wallet wit at least 0.001 POL
+
+""")
+            sys.exit(1)
+
+        print(f"Available gas: {result}")
         print()
 
         # try:
@@ -353,7 +389,7 @@ def main():
     elif SERVICE_TYPE == "Pynithy":
         print("Adding prerequisites for Pynithy...")
         # script_path = Path(__file__).resolve().parent / "pynithy" / "run.py"
-        print(f"Running script: runScript")
+        # print(f"Running script: runScript")
         # try:
         #     subprocess.run(["python", str(script_path)], check=True)
         #     print("")

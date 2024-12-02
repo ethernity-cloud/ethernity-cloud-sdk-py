@@ -73,26 +73,26 @@ def prompt_options(message, options, default_option):
 
 def print_intro():
     intro = """
-        ╔───────────────────────────────────────────────────────────────────────────────────────────────────────────────╗
-        │                                                                                                               │
-        │        .... -+++++++. ....                                                                                    │
-        │     -++++++++-     .++++++++.      _____ _   _                     _ _             ____ _                 _   │
-        │   .++-     ..    .++-     .++-    | ____| |_| |__   ___ _ __ _ __ (_) |_ _   _    / ___| | ___  _   _  __| |  │
-        │  --++----      .++-         ...   |  _| | __| '_ \\ / _ \\ '__| '_ \\| | __| | | |  | |   | |/ _ \\| | | |/ _` |  │
-        │  --++----    .++-.          ...   | |___| |_| | | |  __/ |  | | | | | |_| |_| |  | |___| | (_) | |_| | (_| |  │
-        │   .++-     .+++.    .     .--.    |_____|\\__|_| |_|\\___|_|  |_| |_|_|\\__|\\__, |   \\____|_|\\___/ \\__,_|\\__,_|  │
-        │     -++++++++.    .---------.                                            |___/                                │
-        │        .... .-------. ....                                                                                    │
-        │                                                                                                               │
-        ╚───────────────────────────────────────────────────────────────────────────────────────────────────────────────╝
-                                              Welcome to the Ethernity Cloud SDK
+    ╔───────────────────────────────────────────────────────────────────────────────────────────────────────────────╗
+    │                                                                                                               │
+    │        .... -+++++++. ....                                                                                    │
+    │     -++++++++-     .++++++++.      _____ _   _                     _ _             ____ _                 _   │
+    │   .++-     ..    .++-     .++-    | ____| |_| |__   ___ _ __ _ __ (_) |_ _   _    / ___| | ___  _   _  __| |  │
+    │  --++----      .++-         ...   |  _| | __| '_ \\ / _ \\ '__| '_ \\| | __| | | |  | |   | |/ _ \\| | | |/ _` |  │
+    │  --++----    .++-.          ...   | |___| |_| | | |  __/ |  | | | | | |_| |_| |  | |___| | (_) | |_| | (_| |  │
+    │   .++-     .+++.    .     .--.    |_____|\\__|_| |_|\\___|_|  |_| |_|_|\\__|\\__, |   \\____|_|\\___/ \\__,_|\\__,_|  │
+    │     -++++++++.    .---------.                                            |___/                                │
+    │        .... .-------. ....                                                                                    │
+    │                                                                                                               │
+    ╚───────────────────────────────────────────────────────────────────────────────────────────────────────────────╝
+                                          Welcome to the Ethernity Cloud SDK
 
-           The Ethernity Cloud SDK is a comprehensive toolkit designed to facilitate the development and management of
-          decentralized applications (dApps) and serverless binaries on the Ethernity Cloud ecosystem. Geared towards
-          developers proficient in Python or Node.js, this toolkit aims to help you effectively harness the key features
-          of the ecosystem, such as data security, decentralized processing, and blockchain-driven transparency and
-          trustless model for real-time data processing.
-        """
+       The Ethernity Cloud SDK is a comprehensive toolkit designed to facilitate the development and management of
+      decentralized applications (dApps) and serverless binaries on the Ethernity Cloud ecosystem. Geared towards
+      developers proficient in Python or Node.js, this toolkit aims to help you effectively harness the key features
+      of the ecosystem, such as data security, decentralized processing, and blockchain-driven transparency and
+      trustless model for real-time data processing.
+    """
     print(intro)
 
 
@@ -179,7 +179,7 @@ def main():
             "Enter the access token to be used when calling the IPFS pinning service: "
         ).strip()
     else:
-        custom_url = "http://ipfs.ethernity.cloud:5001"
+        custom_url = "https://ipfs.ethernity.cloud"
 
     os.makedirs("src/serverless", exist_ok=True)
 
@@ -192,9 +192,9 @@ def main():
     )
 
     if use_app_template == "yes":
-        print("Bringing Frontend/Backend templates...")
-        print("  src/serverless/backend.js (Hello World function)")
-        print("  src/ec_helloworld_example.js (Hello World function call - Frontend)")
+        print("Bringing Cli/Backend templates...")
+        print("  src/serverless/backend.py (Hello World function)")
+        print("  src/ethernity_task.py (Hello World function call - Cli)")
         # Copy the 'src' and 'public' directories from the package to the current directory
         # We need to use package resources for this
         package_name = "ethernity_cloud_sdk_py"
@@ -238,7 +238,7 @@ def main():
         #     sys.exit(1)
     else:
         print(
-            "Define backend functions in src/serverless to be available for Frontend interaction."
+            "Define backend functions in src/serverless to be available for cli interaction."
         )
 
     write_env("PROJECT_NAME", project_name.replace(" ", "_"))
@@ -270,7 +270,16 @@ def main():
 
     print()
     print(
-        "You can proceed to run ecld-build, once you set up the serverless functions or directly if you want to test with the provided template."
+        """=================================================================================================================
+
+The customize the backend edit serverless/backend.py with your desired functions.
+Please skip this step if you only want to run the helloworld example.
+
+Now you are ready to build!
+To start the build process run:
+
+    ecld-build
+        """
     )
 
 
