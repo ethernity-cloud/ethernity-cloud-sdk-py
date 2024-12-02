@@ -13,6 +13,7 @@ This project provides a set of tools and scripts to work with the Ethernity Clou
 
 ## Table of Contents
 
+- [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage](#usage)
   - [Scripts](#scripts)
