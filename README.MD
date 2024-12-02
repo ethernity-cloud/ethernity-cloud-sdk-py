@@ -13,7 +13,7 @@ This project provides a set of tools and scripts to work with the Ethernity Clou
 
 ## Table of Contents
 
-- [Requirements](#requirements)
+- [Pre-requisites](#pre-requisites)
 - [Installation](#installation)
 - [Usage](#usage)
   - [Scripts](#scripts)
@@ -21,13 +21,21 @@ This project provides a set of tools and scripts to work with the Ethernity Clou
 - [Contributing](#contributing)
 - [License](#license)
 
-## Requirements
-
+## Pre-requisites
 Linux:
-gcc, cmake
+- build-essentials
+- Python 3.10+
+- docker 
+- docker-compose
 
 Windows:
-Visual Studio Express 
+- Microsoft Visual Studio Community 2022+ (https://visualstudio.microsoft.com/)
+  - MSVC++ 14.3+ build tools
+  - C++ CMake tools for Windows
+  - Windows SDK (for current running version)
+  - Reboot required
+- Python 3.13
+- Docker Desktop
 
 ## Installation
 
@@ -45,13 +53,6 @@ pip install ethernity-cloud-sdk-py
 ## Usage
 
 After installation, you can use the provided scripts to build, publish, and initialize your project.
-
-## Pre-requisites
-The sdk requires the following to be installed on your system:
-- python 3.10+
-- docker (daemon running in the background for build and publish scripts)
-- docker-compose (for the build and publish scripts)
-
 
 ## Operating System compatibility
 The sdk has been tested on the following operating systems:
