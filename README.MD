@@ -20,6 +20,14 @@ This project provides a set of tools and scripts to work with the Ethernity Clou
 - [Contributing](#contributing)
 - [License](#license)
 
+## Requirements
+
+Linux:
+gcc, cmake
+
+Windows:
+Visual Studio Express 
+
 ## Installation
 
 To install the package and its dependencies, run:
