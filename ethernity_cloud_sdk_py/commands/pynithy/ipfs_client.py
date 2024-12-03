@@ -8,6 +8,8 @@ from requests_toolbelt.multipart.encoder import (
     MultipartEncoderMonitor,
 )
 
+RETRY_COUNT = 10
+
 
 class IPFSClient:
     def __init__(
@@ -59,7 +61,7 @@ class IPFSClient:
             return None
 
     def upload_folder_to_ipfs(self, folder_path: str) -> None:
-        add_url = f"{self.api_url}/api/v0/add?wrap-with-directory=true&pin=true&progress=true&fscache=true"
+        add_url = f"{self.api_url}/api/v0/add?wrap-with-directory=true&pin=true"
         files = []
         for root, dirs, filenames in os.walk(folder_path):
             for filename in filenames:
@@ -184,29 +186,25 @@ def main(
 
     if action == "upload":
         if filePath:
-            hhash = ipfs_client.upload_file(filePath)
-            print(f"{hhash}")
-            with open("IPFS_DOCKER_COMPOSE_HASH.ipfs", "w") as f:
-                f.write(hhash)
-
+            try:
+                hhash = ipfs_client.upload_file(filePath)
+                return hhash
+            except Exception as e:
+                print(f"Error uploading file: {e}")
+                sys.exit(1)
         elif folderPath:
             retry_count = 0
             hhash = None
-            while (not hhash or hhash == "Upload failed.") and retry_count < 3:
+            while retry_count < RETRY_COUNT:
                 try:
                     hhash = ipfs_client.upload_folder_to_ipfs(folderPath)
-                    with open("./IPFS_HASH.ipfs", "w") as f:
-                        f.write(hhash)
-                    print(f"{hhash}")
+                    if hhash and hhash != "Upload failed.":
+                        return hhash
                 except Exception as e:
                     print(f"Error uploading folder: {e}")
-                if not hhash or hhash == "Upload failed.":
-                    retry_count += 1
-                    print(f"Retrying... ({retry_count}/3)")
-                    # add a delay here
-                    time.sleep(5)
-            if not hhash or hhash == "Upload failed.":
-                print("Failed to upload folder to IPFS, please try again.")
+                retry_count += 1
+                print(f"Retrying... ({retry_count}/{RETRY_COUNT})")
+            print("Failed to upload folder to IPFS, please try again.")
         else:
             print("Please provide a filePath or folderPath for upload.")
     # elif action == "download":

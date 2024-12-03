@@ -109,7 +109,7 @@ def main():
             result = ""
 
         while result != "OK":
-            print(result)
+            #print(result)
             private_key = prompt(
                 "Invalid private key. Please enter a valid private key:"
             )
@@ -139,7 +139,7 @@ def main():
                 print(e)
                 result = ""
 
-        print("Inputted Private key is valid.")
+        #print("Inputted Private key is valid.")
         write_env("PRIVATE_KEY", private_key)
         print()
         print("Checking blockchain for required gas...")
@@ -184,9 +184,9 @@ Please fill the wallet wit at least 0.001 POL
 """)
             sys.exit(1) 
         
-        print(f"Available gas: {result}")
+        #print(f"Available gas: {result}")
 
-        print()
+        #print()
         print(
             f"Checking if project name is available on {BLOCKCHAIN_NETWORK} network and ownership..."
         )
@@ -231,9 +231,9 @@ Please fill the wallet wit at least 0.001 POL
         )
         write_env("DEVELOPER_FEE", task_percentage)
     else:
-        print(
-            "Using PROJECT_NAME, BLOCKCHAIN_NETWORK, PRIVATE_KEY, DEVELOPER_FEE from .env"
-        )
+        #print(
+        #    "Using PROJECT_NAME, BLOCKCHAIN_NETWORK, PRIVATE_KEY, DEVELOPER_FEE from .env"
+        #)
         print("Checking blockchain for required gas...")
         # try:
         #     result = (
@@ -279,8 +279,8 @@ Please fill the wallet wit at least 0.001 POL
 """)
             sys.exit(1)
 
-        print(f"Available gas: {result}")
-        print()
+        #print(f"Available gas: {result}")
+        #print()
 
         # try:
         #     result = (
@@ -309,7 +309,7 @@ Please fill the wallet wit at least 0.001 POL
             result = ""
 
         while result != "OK":
-            print(result)
+            #print(result)
             private_key = prompt(
                 "Invalid private key. Please enter a valid private key:"
             )

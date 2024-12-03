@@ -5,7 +5,8 @@ import pathlib
 from dotenv import load_dotenv
 from eth_utils.address import to_checksum_address
 from web3 import Web3
-from web3.middleware.geth_poa import geth_poa_middleware
+#from web3.middleware.geth_poa import geth_poa_middleware
+from web3.middleware import ExtraDataToPOAMiddleware
 from eth_account import Account
 
 current_dir = os.getcwd()
@@ -94,7 +95,7 @@ class ImageRegistry:
         try:
             self.image_registry_abi = self.read_contract_abi("image_registry.abi")
             self.image_registry_address = IMAGE_REGISTRY_ADDRESS
-            print(f"imageRegistryAddress: {self.image_registry_address}")
+            # print(f"imageRegistryAddress: {self.image_registry_address}")
             # self.provider = Web3(Web3.HTTPProvider(NETWORK_RPC))
             # print(f"Network RPC: {NETWORK_RPC}")
             self.provider = self.newProvider(NETWORK_RPC)
@@ -121,8 +122,8 @@ class ImageRegistry:
 
     def newProvider(self, url: str) -> Web3:
         _w3 = Web3(Web3.HTTPProvider(url))
-        _w3.enable_unstable_package_management_api()
-        _w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        #_w3.enable_unstable_package_management_api()
+        _w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         return _w3
 
     def read_contract_abi(self, contract_name):
@@ -164,7 +165,7 @@ class ImageRegistry:
             signed_txn = self.provider.eth.account.sign_transaction(
                 txn, private_key=PRIVATE_KEY
             )
-            tx_hash = self.provider.eth.send_raw_transaction(signed_txn.rawTransaction)
+            tx_hash = self.provider.eth.send_raw_transaction(signed_txn.raw_transaction)
             print(f"Transaction sent: {tx_hash.hex()}")
 
             receipt = self.provider.eth.wait_for_transaction_receipt(tx_hash)
@@ -223,7 +224,7 @@ class ImageRegistry:
             signed_txn = self.provider.eth.account.sign_transaction(
                 txn, private_key=PRIVATE_KEY
             )
-            tx_hash = self.provider.eth.send_raw_transaction(signed_txn.rawTransaction)
+            tx_hash = self.provider.eth.send_raw_transaction(signed_txn.raw_transaction)
             print(f"Transaction sent: {tx_hash.hex()}")
 
             receipt = self.provider.eth.wait_for_transaction_receipt(tx_hash)
@@ -242,7 +243,7 @@ class ImageRegistry:
             cert = self.image_registry_contract.functions.getImageCertPublicKey(
                 ipfs_hash
             ).call()
-            print("Image Public Key Certificate:", cert)
+            #print("Image Public Key Certificate:", cert)
             return cert
         except Exception as e:
             print(f"Error retrieving image public key certificate: {str(e)}")
@@ -300,7 +301,7 @@ def main(
         res = "OK"
         if private_key_arg:
             res = is_string_private_key(private_key_arg)
-        print(res)
+        #print(res)
         # sys.exit(0)
         return res
 
@@ -311,7 +312,7 @@ def main(
 
     if action == "checkBalance":
         balance = check_account_balance()
-        print(f"{balance} gas")
+        #print(f"{balance} gas")
         return str(balance)
         # sys.exit(0)
 
