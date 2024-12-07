@@ -20,7 +20,7 @@ def execute_task(code) -> None:
     runner = EthernityCloudRunner()
     runner.set_log_level("DEBUG")
 
-    runner.set_private_key(os.environ.get("PRIVATE_KEY"))
+    runner.set_private_key(os.getenv("PRIVATE_KEY"))
     runner.set_network("Bloxberg", "Testnet")
     runner.set_storage_ipfs("https://ipfs.ethernity.cloud/api/v0")
 

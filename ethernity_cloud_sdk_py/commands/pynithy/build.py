@@ -3,7 +3,11 @@ import sys
 import shutil
 import subprocess
 from pathlib import Path
-from dotenv import load_dotenv
+from ethernity_cloud_sdk_py.commands.config import Config, config
+from ethernity_cloud_sdk_py.commands.spinner import Spinner
+
+config = Config(Path(".config.json").resolve())
+config.load()
 
 # For accessing package resources
 try:
@@ -58,38 +62,17 @@ ECRunner = {
     ],
 }
 
+def run_command(command, redirect_output=False):
+    """
+    Execute a shell command without producing output on the terminal.
+    """
 
-def write_env(key, value, env_file=".env"):
-    """
-    Write or update key-value pairs in a .env file in the current working directory.
-    """
-    env_path = os.path.join(current_dir, env_file)
-    if not os.path.exists(env_path):
-        with open(env_path, "w") as f:
-            f.write(f"{key}={value}\n")
-    else:
-        replaced = False
-        with open(env_path, "r") as f:
-            lines = f.readlines()
-        with open(env_path, "w") as f:
-            for line in lines:
-                if line.startswith(f"{key}="):
-                    f.write(f"{key}={value}\n")
-                    replaced = True
-                else:
-                    f.write(line)
-            if not replaced:
-                f.write(f"{key}={value}\n")
+    stdout = subprocess.DEVNULL if redirect_output else None  # Redirect standard output to devnull
+    stderr = subprocess.DEVNULL if redirect_output else None
 
+    result = subprocess.run(command, stdout=stdout, stderr=stderr, text=True, shell=True)
 
-def run_command(command, can_pass=False):
-    """
-    Execute a shell command.
-    """
-    result = subprocess.run(command, shell=True)
-    if result.returncode != 0 and not can_pass:
-        print(f"Error executing command: {command}")
-        sys.exit(1)
+    return result
 
 
 def get_command_output(command):
@@ -104,123 +87,207 @@ def get_command_output(command):
     return result.stdout.decode("utf-8").strip()
 
 
-def main():
-    load_dotenv()
-    global current_dir
-    # Set current directory
-    current_dir = os.getcwd()
-    VERSION = os.getenv("VERSION")
-    print(f"Checking requirements for {VERSION}")
-    dockerPS = get_command_output("docker version")
+def get_docker_server_info():
+    try:
+        # Run the 'docker info' command and capture the output
+        result = subprocess.check_output("docker info", text=True, stderr=subprocess.DEVNULL)
 
-    if dockerPS == None:
-        print("""
-Docker daemon is not running. Please start docker to continue.
-More information about installing and running Docker can be founde here: https://docs.docker.com/engine/install/
-""")
-        sys.exit(1)
-  
-    print(f"Building {VERSION}")
-    # Determine template name based on the blockchain network
-    BLOCKCHAIN_NETWORK = os.getenv("BLOCKCHAIN_NETWORK", "Bloxberg_Testnet")
-    templateName = os.getenv("TRUSTED_ZONE_IMAGE", "etny-pynithy-testnet")
-    ENCLAVE_NAME_TRUSTEDZONE = templateName
-    isMainnet = False if "testnet" in templateName.lower() else True
+        # Find the Server section in the output
+        server_info_started = False
+        server_info = []
+        
+        for line in result.splitlines():
+            if server_info_started:
+                if line.strip() == "":  # End of Server section
+                    break
+                server_info.append(line.strip())
+            elif line.startswith("Server:"):
+                server_info_started = True
+                server_info.append(line.strip())
+        if len(server_info) > 10:
+            #subprocess.check_output("docker stop las", text=True, stderr=subprocess.DEVNULL)
+            #subprocess.check_output("docker rm las", text=True, stderr=subprocess.DEVNULL)
+            return True
+        return False
+    except subprocess.CalledProcessError as e:
+        return False
+    except FileNotFoundError:
+        return False
 
-    PROJECT_NAME = os.getenv("PROJECT_NAME")
-
+def clean_up_registry():
     # Remove the 'registry' directory if it exists
     shutil.rmtree("./registry", ignore_errors=True)
 
-    # Set the build directory path
-    build_dir = Path(__file__).resolve().parent / "build"
-
     # Stop and remove any running Docker containers or images that might conflict
-    dockerPS = get_command_output("docker ps --filter name=registry -q")
+    dockerPS = get_command_output("docker ps --filter name=registry -q", True)
     if dockerPS:
-        run_command(f'docker stop {" ".join(dockerPS.splitlines())}')
+        run_command(f'docker stop {" ".join(dockerPS.splitlines())}', True)
 
-    remainingContainers = get_command_output("docker ps --filter 'name=etny' -a -q")
+    remainingContainers = get_command_output("docker ps --filter 'name=etny' -a -q", True)
     if remainingContainers:
-        run_command(f"docker stop {remainingContainers} -f")
+        run_command(f"docker stop {remainingContainers} -f", True)
 
-    remainingContainers = get_command_output("docker ps --filter 'name=las' -a -q")
+    remainingContainers = get_command_output("docker ps --filter 'name=las' -a -q", True)
     if remainingContainers:
-        run_command(f"docker stop {remainingContainers} -f")
+        run_command(f"docker stop {remainingContainers} -f", True)
 
-    dockeri = get_command_output("docker ps --filter name=las -q")
+    dockeri = get_command_output("docker ps --filter name=las -q", True)
     if dockeri:
-        run_command(f'docker stop {" ".join(dockeri.splitlines())}')
+        run_command(f'docker stop {" ".join(dockeri.splitlines())}', True)
 
-    dockerRm = get_command_output("docker ps --filter name=registry -q")
+    dockerRm = get_command_output("docker ps --filter name=registry -q", True)
     if dockerRm:
-        run_command(f'docker rm {" ".join(dockerRm.splitlines())} -f')
+        run_command(f'docker rm {" ".join(dockerRm.splitlines())} -f', True)
 
-    dockerImg = get_command_output('docker images --filter reference="*etny*" -q')
+    dockerImg = get_command_output('docker images --filter reference="*etny*" -q', True)
     if dockerImg:
-        run_command(f'docker rmi {" ".join(dockerImg.splitlines())} -f')
+        run_command(f'docker rmi {" ".join(dockerImg.splitlines())} -f', True)
 
     dockerImgReg = get_command_output(
-        'docker images --filter reference="*registry*" -q'
+        'docker images --filter reference="*registry*" -q', True
     )
     if dockerImgReg:
-        run_command(f'docker rmi {" ".join(dockerImgReg.splitlines())} -f')
+        run_command(f'docker rmi {" ".join(dockerImgReg.splitlines())} -f', True)
 
-    run_command("docker rm registry -f", can_pass=True)
-
+def copy_backend_to_build_dir(build_dir):
     # Copy serverless source code to the build directory
+
     src_dir = "./src/serverless"
     dest_dir = os.path.join(build_dir, "securelock", "src", "serverless")
-    print(f"Creating destination directory: {dest_dir}")
+    #print(f"Creating destination directory: {dest_dir}")
     os.makedirs(dest_dir, exist_ok=True)
 
-    print(f"Copying files from {src_dir} to {dest_dir}")
+    #print(f"Copying files from {src_dir} to {dest_dir}")
     for file_name in os.listdir(src_dir):
         src_file = os.path.join(src_dir, file_name)
         dest_file = os.path.join(dest_dir, file_name)
         if os.path.isfile(src_file):
             shutil.copy(src_file, dest_file)
 
-    # Change directory to the build directory
-    os.chdir(build_dir)
+    return True
 
-    # Set up Docker registry
-    run_command("docker pull registry:2")
-    run_command(
-        "docker run -d --restart=always -p 5000:5000 --name registry registry:2"
-    )
+def update_dockerfile():
+    PROJECT_NAME = config.read("PROJECT_NAME")
+    BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
+    VERSION = config.read("VERSION")
+    TRUSTED_ZONE_IMAGE = config.read("TRUSTED_ZONE_IMAGE")
 
     # Generate the enclave name for securelock
-    ENCLAVE_NAME_SECURELOCK = f"{PROJECT_NAME}-SECURELOCK-V3-{BLOCKCHAIN_NETWORK.split('_')[1].lower()}-{VERSION}".replace(
+    SECURELOCK_SESSION = f"{PROJECT_NAME}-SECURELOCK-V3-{BLOCKCHAIN_NETWORK.split('_')[1].lower()}-{VERSION}".replace(
         "/", "_"
     ).replace(
         "-", "_"
     )
-    print(f"ENCLAVE_NAME_SECURELOCK: {ENCLAVE_NAME_SECURELOCK}")
-    write_env("ENCLAVE_NAME_SECURELOCK", ENCLAVE_NAME_SECURELOCK)
 
-    # Build etny-securelock Docker image
-    print("Building etny-securelock")
+    config.write("SECURELOCK_SESSION", SECURELOCK_SESSION)
+
     os.chdir("securelock")
-
+   
     # Modify Dockerfile based on the template
-    with open("Dockerfile.tmpl", "r") as f:
+    with open("Dockerfile.base.tpl", "r") as f:
+        dockerfile_secure_template = f.read()
+
+    dockerfile_secure_content = (
+        dockerfile_secure_template.replace("__IMAGE_PATH__", TRUSTED_ZONE_IMAGE)
+    )
+
+    with open("Dockerfile.base", "w") as f:
+        f.write(dockerfile_secure_content)
+
+    return True
+
+
+def start_local_registry():
+    # Set up Docker registry
+    run_command("docker pull registry:2", True)
+    run_command("docker run -d --restart=always -p 5000:5000 --name registry registry:2", True)
+
+    return True
+
+def main():
+    global current_dir
+    # Set current directory
+    current_dir = os.getcwd()
+    # Set the build directory path
+    build_dir = Path(__file__).resolve().parent / "build"
+    spinner = Spinner()
+    
+
+    VERSION = config.read("VERSION")
+    PROJECT_NAME = config.read("PROJECT_NAME")
+    BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
+    TRUSTED_ZONE_IMAGE = config.read("TRUSTED_ZONE_IMAGE")
+
+    
+    isMainnet = False if "testnet" in TRUSTED_ZONE_IMAGE.lower() else True
+
+    dockerPS = spinner.spin_till_done("Checking docker service", get_docker_server_info)
+
+    if dockerPS == None:
+        print("""
+\t\tDocker service is not running. Please start docker to continue.
+\t\tMore information about installing and running Docker can be founde here: https://docs.docker.com/engine/install/
+""")
+        exit(1)
+  
+
+    spinner.spin_till_done("Cleanup local registry", get_docker_server_info)
+
+    spinner.spin_till_done("Copy backend files from src to build directory", copy_backend_to_build_dir, build_dir)
+
+    spinner.spin_till_done("Start local registry", start_local_registry)
+
+    
+    # Change directory to the build directory
+    
+    os.chdir(build_dir)
+
+    spinner.spin_till_done("Update dockerfile ", update_dockerfile)
+
+    SECURELOCK_SESSION = config.read("SECURELOCK_SESSION")
+    
+    # Adding dockerfile customizations
+
+    # Build and push Docker image for etny-securelock-base
+
+    print()
+    print(f"\u276f\u276f Building base image")
+    print()
+
+    run_command("docker build -f Dockerfile.base -t etny-securelock-base:latest .")
+    #run_command("docker push localhost:5000/etny-securelock-base:latest")
+
+
+    if os.path.exists("src/serverless/Dockerfile.serverless"):
+        print()
+        print(f"\u276f\u276f Adding customizations from Dockerfile.serverless")
+        print()
+
+        run_command("docker build -f src/serverless/Dockerfile.serverless -t etny-securelock-serverless:latest .")
+    else:
+        run_command("docker tag localhost:5000/etny-securelock-base:latest etny-securelock-serverless:latest")
+
+    print()
+    print(f"\u276f\u276f Building securelock image")
+    print()
+
+    with open("Dockerfile.tpl", "r") as f:
         dockerfile_secure_template = f.read()
 
     dockerfile_secure_content = (
         dockerfile_secure_template.replace(
-            "__ENCLAVE_NAME_SECURELOCK__", ENCLAVE_NAME_SECURELOCK
+            "__SECURELOCK_SESSION__", SECURELOCK_SESSION
         )
-        .replace("__BUCKET_NAME__", templateName + "-v3")
+        .replace("__BUCKET_NAME__", TRUSTED_ZONE_IMAGE + "-v3")
         .replace(
             "__SMART_CONTRACT_ADDRESS__",
-            ECRunner[templateName][0],
+            ECRunner[TRUSTED_ZONE_IMAGE][0],
         )
-        .replace("__IMAGE_REGISTRY_ADDRESS__", ECRunner[templateName][1])
-        .replace("__RPC_URL__", ECRunner[templateName][2])
-        .replace("__CHAIN_ID__", str(ECRunner[templateName][3]))
-        .replace("__TRUSTED_ZONE_IMAGE__", templateName)
-        .replace("__IMAGE_PATH__", templateName)
+        .replace("__IMAGE_REGISTRY_ADDRESS__", ECRunner[TRUSTED_ZONE_IMAGE][1])
+        .replace("__RPC_URL__", ECRunner[TRUSTED_ZONE_IMAGE][2])
+        .replace("__CHAIN_ID__", str(ECRunner[TRUSTED_ZONE_IMAGE][3]))
+        .replace("__TRUSTED_ZONE_IMAGE__", TRUSTED_ZONE_IMAGE)
+        .replace("__IMAGE_PATH__", TRUSTED_ZONE_IMAGE)
     )
     imagesTag = BLOCKCHAIN_NETWORK.lower()
     if isMainnet:
@@ -232,21 +299,32 @@ More information about installing and running Docker can be founde here: https:/
     with open("Dockerfile", "w") as f:
         f.write(dockerfile_secure_content)
 
+
+    # Adding dockerfile customizations
+
     # Build and push Docker image for etny-securelock
+    
     run_command(
-        f"docker build --build-arg ENCLAVE_NAME_SECURELOCK={ENCLAVE_NAME_SECURELOCK} -t etny-securelock:latest ."
+        f"docker build --build-arg SECURELOCK_SESSION={SECURELOCK_SESSION} -t etny-securelock:latest ."
     )
     run_command("docker tag etny-securelock localhost:5000/etny-securelock")
+
+    print()
+    print(f"\u276f\u276f Pushing securelock image to local registry")
+    print()
+
     run_command("docker push localhost:5000/etny-securelock")
 
     # Return to the build directory
     os.chdir("..")
 
-    print(f"ENCLAVE_NAME_TRUSTEDZONE: {ENCLAVE_NAME_TRUSTEDZONE}")
-    write_env("ENCLAVE_NAME_TRUSTEDZONE", ENCLAVE_NAME_TRUSTEDZONE)
+    print(f"TRUSTED_ZONE_IMAGE: {TRUSTED_ZONE_IMAGE}")
+    config.write("TRUSTED_ZONE_IMAGE", TRUSTED_ZONE_IMAGE)
 
     # Build etny-trustedzone
-    print("Building etny-trustedzone")
+    print()
+    print(f"\u276f\u276f Building trustedzone image")
+    print()
 
     run_command(
         f"docker pull registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ethernity/etny-trustedzone:py_{imagesTag}"
@@ -254,6 +332,11 @@ More information about installing and running Docker can be founde here: https:/
     run_command(
         f"docker tag registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ethernity/etny-trustedzone:py_{imagesTag} localhost:5000/etny-trustedzone"
     )
+
+    print()
+    print(f"\u276f\u276f Pushing trustedzone image to local registry")
+    print()
+
     run_command("docker push localhost:5000/etny-trustedzone")
 
     # # Build etny-validator
@@ -264,23 +347,28 @@ More information about installing and running Docker can be founde here: https:/
     # run_command("docker push localhost:5000/etny-validator")
 
     # Build etny-las
-    print("Building etny-las")
+    print()
+    print(f"\u276f\u276f Building las image")
+    print()
+
     run_command(
         f"docker pull registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ethernity/etny-las:py_{imagesTag}"
     )
     run_command(
         f"docker tag registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ethernity/etny-las:py_{imagesTag} localhost:5000/etny-las"
     )
+
+    print()
+    print(f"\u276f\u276f Pushing las image to local registry")
+    print()
+
     run_command("docker push localhost:5000/etny-las")
 
+    print()
+    print(f"\u276f\u276f Cleaning up")
+    print()
     # Return to the original directory
     os.chdir(current_dir)
     run_command("docker cp registry:/var/lib/registry registry")
 
-    # Clean up
-    print("Cleaning up")
-    shutil.rmtree(dest_dir, ignore_errors=True)
-
-
-if __name__ == "__main__":
-    main()
+    shutil.rmtree(build_dir + "src/serverless", ignore_errors=True)

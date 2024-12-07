@@ -1,5 +1,6 @@
 import requests
 import time
+import sys
 BASE_URL = "https://publickey.ethernity.cloud"
 
 
@@ -44,54 +45,71 @@ def main(
     protocol_version,
     network,
     template_version,
-    hhash="",
+    ipfs_hash="",
     docker_composer_hash="",
 ):
-    print("Enclave Name:", enclave_name)
-    print("Protocol Version:", protocol_version)
-    print("Network:", network)
-    print("Template Version:", template_version)
-
-    if not hhash:
+    if not ipfs_hash:
         return
 
-    print()
-    print("IPFS Hash:", hhash)
-    print("Docker Composer Hash:", docker_composer_hash)
-    print()
+    SPINNER_FRAMES = [
+            "■",
+            "□",
+            "▪",
+            "▫"
+    ]
+
+    CHECK = "\033[92m\u2714\033[0m  "
+    FAIL = "\033[91m\u2718\033[0m  "
 
     # Submit IPFS Hash
     response = submit_ipfs_hash(
-        hhash,
+        ipfs_hash,
         enclave_name,
         protocol_version,
         network,
         template_version,
         docker_composer_hash,
     )
-    print("Recieved the following queueId:", response["queueId"])
+    #print("Recieved the following queueId:", response["queueId"])
 
+    frame_index = 0
+    
+    print()
+    message = f"Waiting for publc key extraction to complete..."
+
+    sys.stdout.write(f"\t{SPINNER_FRAMES[frame_index]}  {message}")
+    sys.stdout.flush()
+        
     # Check IPFS Hash Status
     while True:
-        check_response = check_ipfs_hash_status(hhash)
+        check_response = check_ipfs_hash_status(ipfs_hash)
         if "publicKey" in check_response:
             if check_response["publicKey"] == 0:
-                print(
-                    f"Public key not available yet. Queue position: {check_response.get('queuePosition', 'Unknown')}"
-                )
-            elif check_response["publicKey"] == -1:
-                print("Hash is not derived from Eternity Cloud SDK.")
-                exit(1)
-            else:
-                #print("Public Key:", check_response["publicKey"])
-                # save public key to file
-                with open("PUBLIC_KEY.txt", "w") as f:
-                    f.write(check_response["publicKey"])
-                break
-        else:
-            print("Unexpected response:", check_response)
-            exit(1)
+                frame_index = (frame_index + 1) % len(SPINNER_FRAMES)
+                if check_response.get('queuePosition') == "Running":
+                    message = f"Public key extraction is running now. Waiting for completion..."
+                else:
+                    message = f"Waiting for publc key extraction to start. Queue position: {check_response.get('queuePosition', 'Unknown')}"
 
-        time.sleep(10)  # Wait for 10 seconds before checking again
+                sys.stdout.write("\r" + f"\t{SPINNER_FRAMES[frame_index]}  {message}")
+                sys.stdout.flush()
+                time.sleep(1)
+            elif check_response["publicKey"] == -1:
+                message = f"\t{FAIL}Public key extraction\n"
+                sys.stdout.write("\r" + " " * 128 + "\r")
+                sys.stdout.write("\r" + f"{message}")
+                sys.stdout.flush()
+                print("\t\tThe certificate extraction process failed. Make sure the enclave is built using the latest version of the SDK")
+                print()
+                return False
+            else:
+                message = f"\t{CHECK}Public key extraction\n"
+                sys.stdout.write("\r" + " " * 128 + "\r")
+                sys.stdout.write("\r" + f"{message}")
+                sys.stdout.flush()
+                return check_response["publicKey"]
+        else:
+            print("\t\tThe Ethernity cloud certificate extraction service is unavailable at this time. Please try again later.", check_response)
+            return False
 
 

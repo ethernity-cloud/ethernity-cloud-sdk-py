@@ -12,13 +12,28 @@ RETRY_COUNT = 10
 
 
 class IPFSClient:
+
+    SPINNER_FRAMES = [
+        '⠋', '⠙', '⠹', '⠸', '⠼',
+        '⠴', '⠦', '⠧', '⠇', '⠏'
+    ]
+
+    CHECK = "\033[92m\u2714\033[0m  "
+    FAIL = "\033[91m\u2718\033[0m  "
+
     def __init__(
-        self, api_url: str = "https://ipfs.ethernity.cloud", token: str = ""
+        self, ipfs_endpoint, token = None
     ) -> None:
-        self.api_url = api_url
+        self.api_url = ipfs_endpoint
+        self.add_url = f"{self.api_url}/api/v0/add"
+        self.frame_index = 0
         self.headers = {}
+        self.folder_path = ""
+        self.files = []
+        self.total_size = 0
+
         if token:
-            self.headers = {"authorization": token}
+            self.headers = {"Authorization": token}
 
     def upload_file(self, file_path: str) -> None:
         add_url = f"{self.api_url}/api/v0/add"
@@ -31,7 +46,6 @@ class IPFSClient:
             try:
                 response_data = response.json()
                 ipfs_hash = response_data["Hash"]
-                print(f"Successfully uploaded to IPFS. Hash: {ipfs_hash}")
                 return ipfs_hash
             except Exception as e:
                 print(f"Failed to upload to IPFS. Error: {e}")
@@ -41,99 +55,88 @@ class IPFSClient:
             print(response.text)
             return None
 
-    def upload_to_ipfs(self, data: str) -> None:
-        add_url = f"{self.api_url}/api/v0/add"
-        files = {"file": data}
-        response = requests.post(add_url, files=files, headers=self.headers)
+    def update_progress(self, monitor):
+        mb_total = self.total_size / (1024 * 1024)
+        mb_read = monitor.bytes_read / (1024 * 1024)
+
+        # Convert the currently read bytes into whole MB for updating
+        current_mb = int(mb_read)  # integer MB boundary
+
+        if not hasattr(self, "_last_shown_mb"):
+            self._last_shown_mb = -1
+
+        # Update output only when a new MB has been fully read
+        if current_mb > self._last_shown_mb:
+            # Update the spinner frame
+            self.frame_index = (self.frame_index + 1) % len(self.SPINNER_FRAMES)
+            self._last_shown_mb = current_mb
+            sys.stdout.write(
+                f"\r\t{self.SPINNER_FRAMES[self.frame_index]}  Uploading and pinning enclave to IPFS... {current_mb}MB/{int(mb_total)}MB"
+            )
+            sys.stdout.flush()
+
+    def upload_dir(self, dir_path):
+        # Ensure directory path is absolute and valid for Windows
+        dir_path = os.path.abspath(dir_path)
+
+        # Gather all files in the directory as a list of file paths
+        self.files = []
+        for root, dirs, files in os.walk(dir_path):
+            for filename in files:
+                filepath = os.path.join(root, filename)
+                self.files.append(filepath)
+
+        # Compute total size of all files
+        self.total_size = sum(os.path.getsize(filepath) for filepath in self.files)
+
+        # Create the MultipartEncoder fields
+        # Use relative paths as keys and values as per IPFS HTTP API expectations
+        fields = {
+            os.path.relpath(filepath, dir_path).replace("\\", "/"): (
+                os.path.relpath(filepath, dir_path).replace("\\", "/"),
+                open(filepath, "rb")
+            )
+            for filepath in self.files
+        }
+
+        encoder = MultipartEncoder(fields=fields)
+        monitor = MultipartEncoderMonitor(encoder, self.update_progress)
+
+        response = requests.post(
+            self.add_url + "?quieter=true&stream-channels=true&wrap-with-directory=true&progress=false&timeout=5m",
+            data=monitor,
+            stream=True,
+            headers={
+                **self.headers,
+                "Content-Type": monitor.content_type,
+                "Content-Length": str(self.total_size),
+                "Expect": "100-continue",
+            },
+        )
+
+        # Once done, move to the next line to avoid overwriting the last spinner line
+        #sys.stdout.write("\n")
 
         if response.status_code == 200:
             try:
-                response_data = response.json()
-                ipfs_hash = response_data["Hash"]
-                print(f"Successfully uploaded to IPFS. Hash: {ipfs_hash}")
-                return ipfs_hash
-            except Exception as e:
-                print(f"Failed to upload to IPFS. Error: {e}")
-                return None
-        else:
-            print(f"Failed to upload to IPFS. Status code: {response.status_code}")
-            print(response.text)
-            return None
-
-    def upload_folder_to_ipfs(self, folder_path: str) -> None:
-        add_url = f"{self.api_url}/api/v0/add?wrap-with-directory=true&pin=true"
-        files = []
-        for root, dirs, filenames in os.walk(folder_path):
-            for filename in filenames:
-                file_path = os.path.join(root, filename).replace("\\", "/")
-                files.append(("file", (file_path, open(file_path, "rb"))))
-
-        # Calculate the total size of the files to be uploaded
-        total_size = sum(os.path.getsize(file[1][0]) for file in files)
-
-        # Create a progress bar
-        with tqdm(
-            total=total_size, unit="B", unit_scale=True, desc="Uploading"
-        ) as pbar:
-
-            def upload_with_progress(file):
-                with open(file[1][0], "rb") as f:
-                    while True:
-                        chunk = f.read(16384)
-                        if not chunk:
-                            break
-                        yield chunk
-                        pbar.update(len(chunk))
-
-            # relative_file_path = os.path.relpath(file_path, folder_path)
-            # Create a MultipartEncoder for the files
-            encoder = MultipartEncoder(
-                fields={
-                    file[1][0]: (
-                        os.path.relpath(file[1][0], folder_path).replace("\\", "/"),
-                        open(file[1][0], "rb"),
-                    )
-                    for file in files
-                }
-            )
-
-            # Create a monitor for the encoder to update the progress bar
-            monitor = MultipartEncoderMonitor(
-                encoder, lambda monitor: pbar.update(monitor.bytes_read - pbar.n)
-            )
-
-            # Perform the upload
-            # response = requests.post(
-            #     add_url,
-            #     data=monitor,
-            #     headers={**self.headers, "Content-Type": monitor.content_type},
-            # )
-            response = requests.post(
-                add_url,
-                data=monitor,
-                headers={
-                    **self.headers,
-                    "Content-Type": monitor.content_type,
-                    "Content-Length": str(total_size),
-                    "Expect": "100-continue",
-                },
-            )
-        if response.status_code == 200:
-            try:
-                response_data = json.loads(
-                    "[" + response.text.replace("\n", ",")[:-1] + "]"
-                )
-                for file in response_data:
-                    if file["Name"] == "":
-                        ipfs_hash = file["Hash"]
-                        print(f"Successfully uploaded to IPFS. Hash: {ipfs_hash}")
+                # IPFS add endpoint often returns newline-delimited JSON. Convert it into valid JSON.
+                # Example: Each line is a JSON object, so we join them with commas into an array.
+                response_data = json.loads("[" + response.text.replace("\n", ",")[:-1] + "]")
+                for file_info in response_data:
+                    # An empty "Name" often indicates the root hash of the added directory
+                    if file_info["Name"] == "":
+                        ipfs_hash = file_info["Hash"]
+                        sys.stdout.write("\r" + f"\t{self.CHECK}Uploading and pinning enclave to IPFS")
                         return ipfs_hash
             except Exception as e:
+                sys.stdout.write("\r" + f"\t{self.FAIL}Uploading and pinning enclave to IPFS")
                 print(f"Failed to upload to IPFS. Error: {e}")
-                return None
+                return False
         else:
+            sys.stdout.write("\r" + f"\t{self.FAIL}Uploading and pinning enclave to IPFS")
             print(f"Failed to upload to IPFS. Status code: {response.status_code}")
-            print(response.text)
+            #print(response.text)
+            return False
 
     def download_file(
         self, ipfs_hash: str, download_path: str, attempt: int = 0
@@ -168,90 +171,14 @@ class IPFSClient:
                 self.get_file_content(ipfs_hash, attempt + 1)
 
         return None
-
-
-def main(
-    host="https://ipfs.ethernity.cloud",
-    protocol="http",
-    port=5001,
-    token="",
-    hhash="",
-    filePath="",
-    folderPath="",
-    action="upload",
-    output="",
-):
-    global ipfs_client
-    ipfs_client = IPFSClient(host, token)
-
-    if action == "upload":
-        if filePath:
-            try:
-                hhash = ipfs_client.upload_file(filePath)
-                return hhash
-            except Exception as e:
-                print(f"Error uploading file: {e}")
-                sys.exit(1)
-        elif folderPath:
-            retry_count = 0
-            hhash = None
-            while retry_count < RETRY_COUNT:
-                try:
-                    hhash = ipfs_client.upload_folder_to_ipfs(folderPath)
-                    if hhash and hhash != "Upload failed.":
-                        return hhash
-                except Exception as e:
-                    print(f"Error uploading folder: {e}")
-                retry_count += 1
-                print(f"Retrying... ({retry_count}/{RETRY_COUNT})")
-            print("Failed to upload folder to IPFS, please try again.")
+    
+    def upload(self, path: str) -> str:
+        if os.path.isfile(path):
+            # It's a single file
+            return self.upload_file(path)
+        elif os.path.isdir(path):
+            # It's a directory
+            return self.upload_dir(path)
         else:
-            print("Please provide a filePath or folderPath for upload.")
-    # elif action == "download":
-    #     if filePath:
-    #         print(f"Downloading file from IPFS: {hhash}")
-    #         get_from_ipfs(hhash, filePath)
-    #         print(f"File downloaded. {hhash}")
-    #     elif folderPath:
-    #         print(f"Downloading folder from IPFS: {hhash}")
-    #         download_folder_from_ipfs(hhash, folderPath)
-    #         print(f"Folder downloaded. {hhash}")
-    #     else:
-    #         print("Please provide a filePath or folderPath for download.")
-    else:
-        print("Please provide a valid action (upload, download).")
-
-
-# Example usage
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="IPFS Client")
-    parser.add_argument(
-        "--host", help="IPFS host", default="https://ipfs.ethernity.cloud"
-    )
-    parser.add_argument("--protocol", help="Protocol (http or https)", default="http")
-    parser.add_argument("--port", help="IPFS port", type=int, default=5001)
-    parser.add_argument("--token", help="Authorization token", default="")
-    parser.add_argument("--hhash", help="IPFS hash", default="")
-    parser.add_argument("--filePath", help="Path to the file", default="")
-    parser.add_argument("--folderPath", help="Path to the folder", default="")
-    parser.add_argument(
-        "--action",
-        help="Action to perform (upload, download)",
-        required=True,
-        default="",
-    )
-    parser.add_argument("--output", help="Output path for download")
-
-    args = parser.parse_args()
-
-    main(
-        host=args.host,
-        protocol=args.protocol,
-        port=args.port,
-        token=args.token,
-        hhash=args.hhash,
-        filePath=args.filePath,
-        folderPath=args.folderPath,
-        action=args.action,
-        output=args.output,
-    )
+            print(f"Path {path} is neither a file nor a directory.")
+            return None

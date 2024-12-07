@@ -4,7 +4,11 @@ import shutil
 import subprocess
 import re
 from pathlib import Path
-from dotenv import load_dotenv, set_key
+from ethernity_cloud_sdk_py.commands.config import Config, config
+
+config = Config(Path(".config.json").resolve())
+config.load()
+
 
 # For accessing package resources
 try:
@@ -13,29 +17,19 @@ except ImportError:
     # For Python versions < 3.7
     from importlib_resources import path as resources_path  # type: ignore
 
+config = None
 
-def write_env(key, value, env_file=".env"):
+def initialize_config(file_path):
     """
-    Write or update key-value pairs in a .env file in the current working directory.
-    """
-    env_path = os.path.join(os.getcwd(), env_file)
-    if not os.path.exists(env_path):
-        with open(env_path, "w") as f:
-            f.write(f"{key}={value}\n")
-    else:
-        replaced = False
-        with open(env_path, "r") as f:
-            lines = f.readlines()
-        with open(env_path, "w") as f:
-            for line in lines:
-                if line.startswith(f"{key}="):
-                    f.write(f"{key}={value}\n")
-                    replaced = True
-                else:
-                    f.write(line)
-            if not replaced:
-                f.write(f"{key}={value}\n")
+    Initialize the global config variable with the specified file path.
 
+    Args:
+        file_path (str): Path to the configuration file.
+    """
+    global config
+    config = Config(file_path)
+    config.load()
+    #print("Configuration loaded:", config.config)
 
 def get_project_name():
     """
@@ -132,30 +126,9 @@ def main():
     )
     import ethernity_cloud_sdk_py.commands.pynithy.run.image_registry as image_registry
 
-    # Execute the external script (image_registry.py)
-    # script_path = (
-    #     Path(__file__).resolve().parent / "pynithy" / "run" / "image_registry.py"
-    # )
     print(f"Running script image_registry...")
     print(os.getcwd())
-    # if not script_path.exists():
-    #     print(f"Error: Script {script_path} not found.")
-    #     sys.exit(1)
-
-    # try:
-    #     subprocess.run(
-    #         [
-    #             "python",
-    #             str(script_path),
-    #             blockchain_network.replace(" ", "_"),
-    #             project_name.replace(" ", "-"),
-    #             "v3",
-    #         ],
-    #         check=True,
-    #     )
-    # except subprocess.CalledProcessError as e:
-    #     print(f"Error executing script {script_path}")
-    #     sys.exit(1)
+  
     image_registry.main(
         blockchain_network.replace(" ", "_"),
         project_name.replace(" ", "-"),
@@ -203,67 +176,35 @@ def main():
             shutil.copytree(
                 src_path, os.path.join(os.getcwd(), "src"), dirs_exist_ok=True
             )
-        # Simulate copying files
-        # script_dir = os.path.dirname(os.path.abspath(__file__))
-
-        # source_src = os.path.join(script_dir, "src")
-        # target_src = "src/"
-        # # source_public = os.path.join(script_dir, "public")
-        # # target_public = "public/"
-
-        # shutil.copytree(source_src, target_src, dirs_exist_ok=True)
-        # shutil.copytree(source_public, target_public, dirs_exist_ok=True)
-        # print("Installing required packages...")
-        # # Simulate npm install
-        # try:
-        #     subprocess.run(
-        #         [
-        #             "npm",
-        #             "install",
-        #             "@ethernity-cloud/runner@0.0.26",
-        #             "@testing-library/jest-dom@5.17.0",
-        #             "@testing-library/react@13.4.0",
-        #             "@testing-library/user-event@13.5.0",
-        #             "react@18.3.1",
-        #             "react-dom@18.3.1",
-        #             "react-scripts@5.0.1",
-        #             "web-vitals@2.1.4",
-        #             "web3@4.9.0",
-        #             "dotenv@16.4.5",
-        #         ],
-        #         check=True,
-        #     )
-        # except subprocess.CalledProcessError as e:
-        #     print("Error installing npm packages.")
-        #     sys.exit(1)
+       
     else:
         print(
             "Define backend functions in src/serverless to be available for cli interaction."
         )
 
-    write_env("PROJECT_NAME", project_name.replace(" ", "_"))
-    write_env("SERVICE_TYPE", service_type)
+    config.write("PROJECT_NAME", project_name.replace(" ", "_"))
+    config.write("SERVICE_TYPE", service_type)
     if service_type == "Custom":
-        write_env("BASE_IMAGE_TAG", base_image_tag or "")
-        write_env("DOCKER_REPO_URL", docker_repo_url)
-        write_env("DOCKER_LOGIN", docker_login)
-        write_env("DOCKER_PASSWORD", docker_password)
+        config.write("BASE_IMAGE_TAG", base_image_tag or "")
+        config.write("DOCKER_REPO_URL", docker_repo_url)
+        config.write("DOCKER_LOGIN", docker_login)
+        config.write("DOCKER_PASSWORD", docker_password)
     elif service_type == "Nodenithy":
-        write_env("BASE_IMAGE_TAG", "")
-        write_env("DOCKER_REPO_URL", "")
-        write_env("DOCKER_LOGIN", "")
-        write_env("DOCKER_PASSWORD", "")
+        config.write("BASE_IMAGE_TAG", "")
+        config.write("DOCKER_REPO_URL", "")
+        config.write("DOCKER_LOGIN", "")
+        config.write("DOCKER_PASSWORD", "")
     elif service_type == "Pynithy":
-        write_env("BASE_IMAGE_TAG", "")
-        write_env("DOCKER_REPO_URL", "")
-        write_env("DOCKER_LOGIN", "")
-        write_env("DOCKER_PASSWORD", "")
-    write_env("BLOCKCHAIN_NETWORK", blockchain_network.replace(" ", "_"))
-    write_env("IPFS_ENDPOINT", custom_url)
-    write_env("IPFS_TOKEN", ipfs_token or "")
-    write_env("VERSION", "v1")
+        config.write("BASE_IMAGE_TAG", "")
+        config.write("DOCKER_REPO_URL", "")
+        config.write("DOCKER_LOGIN", "")
+        config.write("DOCKER_PASSWORD", "")
+    config.write("BLOCKCHAIN_NETWORK", blockchain_network.replace(" ", "_"))
+    config.write("IPFS_ENDPOINT", custom_url)
+    config.write("IPFS_TOKEN", ipfs_token or "")
+    config.write("VERSION", "v1")
 
-    write_env(
+    config.write(
         "TRUSTED_ZONE_IMAGE",
         f"{'ecld' if 'polygon' in blockchain_network.lower() else 'etny'}-{service_type.lower()}-{'testnet' if 'testnet' in blockchain_network.lower() else ''}",
     )
@@ -281,7 +222,3 @@ To start the build process run:
     ecld-build
         """
     )
-
-
-if __name__ == "__main__":
-    main()
