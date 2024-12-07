@@ -2,9 +2,9 @@
 
 cd /etny-securelock
 
-echo "ENCLAVE_NAME_SECURE_LOCK = ${ENCLAVE_NAME_SECURELOCK}"
+echo "SECURELOCK_SESSION = ${SECURELOCK_SESSION}"
 
-cat securelock.py.tmpl | sed  s/"__ENCLAVE_NAME_SECURELOCK__"/"${ENCLAVE_NAME_SECURELOCK}"/g > securelock.py.tmp
+cat securelock.py.tmpl | sed  s/"__SECURELOCK_SESSION__"/"${SECURELOCK_SESSION}"/g > securelock.py.tmp
 sed -i "s/__BUCKET_NAME__/${BUCKET_NAME}/g" securelock.py.tmp
 sed -i "s/__SMART_CONTRACT_ADDRESS__/${SMART_CONTRACT_ADDRESS}/g" securelock.py.tmp
 sed -i "s/__IMAGE_REGISTRY_ADDRESS__/${IMAGE_REGISTRY_ADDRESS}/g" securelock.py.tmp

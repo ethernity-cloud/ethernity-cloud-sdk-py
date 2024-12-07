@@ -3,7 +3,7 @@ FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/
 RUN apk update
 
 RUN cd /
-RUN apk add bash openrc bind-tools sudo npm binutils curl binutils
+RUN apk add bash openrc bind-tools sudo binutils curl 
 RUN pip3 install --upgrade pip
 RUN pip3 install --upgrade setuptools
 RUN pip3 install python-dotenv
@@ -14,3 +14,4 @@ RUN pip3 install pyasn1
 RUN pip3 install tinyec
 RUN pip3 install minio
 RUN pip3 install pynacl
+RUN pip3 install pyinstaller

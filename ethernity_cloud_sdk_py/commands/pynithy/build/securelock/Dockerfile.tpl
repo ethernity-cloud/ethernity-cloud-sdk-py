@@ -1,17 +1,16 @@
 FROM etny-securelock-serverless:latest AS release
 
-ENV ENCLAVE_NAME_SECURELOCK=__ENCLAVE_NAME_SECURELOCK__
+COPY ./src/serverless/requirements.txt /requirements.txt
+RUN pip3 install -r /requirements.txt
+RUN rm -rf /requirements.txt
+
+ENV SECURELOCK_SESSION=__SECURELOCK_SESSION__
 ENV BUCKET_NAME=__BUCKET_NAME__
 ENV SMART_CONTRACT_ADDRESS=__SMART_CONTRACT_ADDRESS__
 ENV IMAGE_REGISTRY_ADDRESS=__IMAGE_REGISTRY_ADDRESS__
 ENV RPC_URL=__RPC_URL__
 ENV CHAIN_ID=__CHAIN_ID__
 ENV TRUSTED_ZONE_IMAGE=__TRUSTED_ZONE_IMAGE__
-
-
-COPY ./src/serverless/requirements.txt /requirements.txt
-RUN pip3 install -r /requirements.txt
-RUN rm -rf /requirements.txt
 
 RUN mkdir binary-fs-dir
 

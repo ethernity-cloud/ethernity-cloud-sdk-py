@@ -127,7 +127,7 @@ def execute_task() -> None:
         code,
         "0xd58f5C1834279ABD601df85b3E4b2323aDD4E75e",
         resources,
-        os.getenv("ENCLAVE_NAME_TRUSTEDZONE", ""),
+        os.getenv("TRUSTED_ZONE_IMAGE", ""),
     )
 
 

@@ -371,4 +371,5 @@ def main():
     os.chdir(current_dir)
     run_command("docker cp registry:/var/lib/registry registry")
 
-    shutil.rmtree(build_dir + "src/serverless", ignore_errors=True)
+    dest_dir = os.path.join(build_dir, "securelock", "src", "serverless")
+    shutil.rmtree(dest_dir, ignore_errors=True)
