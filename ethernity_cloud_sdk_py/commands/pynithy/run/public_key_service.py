@@ -89,19 +89,19 @@ def main(
                 if check_response.get('queuePosition') == "Running":
                     message = f"Public key extraction is running now. Waiting for completion..."
                 else:
-                    message = f"Waiting for publc key extraction to start. Queue position: {check_response.get('queuePosition', 'Unknown')}"
+                    message = f"Waiting for public key extraction to start. Queue position: {check_response.get('queuePosition', 'Unknown')}"
 
                 sys.stdout.write("\r" + f"\t{SPINNER_FRAMES[frame_index]}  {message}")
                 sys.stdout.flush()
                 time.sleep(1)
-            elif check_response["publicKey"] == -1:
+            elif check_response["publicKey"] == "-1":
                 message = f"\t{FAIL}Public key extraction\n"
                 sys.stdout.write("\r" + " " * 128 + "\r")
                 sys.stdout.write("\r" + f"{message}")
                 sys.stdout.flush()
                 print("\t\tThe certificate extraction process failed. Make sure the enclave is built using the latest version of the SDK")
                 print()
-                return False
+                exit()
             else:
                 message = f"\t{CHECK}Public key extraction\n"
                 sys.stdout.write("\r" + " " * 128 + "\r")
@@ -110,6 +110,6 @@ def main(
                 return check_response["publicKey"]
         else:
             print("\t\tThe Ethernity cloud certificate extraction service is unavailable at this time. Please try again later.", check_response)
-            return False
+            exit()
 
 

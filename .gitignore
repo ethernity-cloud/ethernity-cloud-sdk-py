@@ -166,6 +166,7 @@ ethernity_cloud_sdk_py/commands/pynithy/build/securelock/src/serverless/backend.
 src/ethernity_task.py
 src/serverless/__init__.py
 src/serverless/backend.py
+ethernity_cloud_sdk_py/commands/pynithy/build/securelock/Dockerfile.base
 ethernity_cloud_sdk_py/commands/pynithy/build/securelock/Dockerfile
 ethernity_cloud_sdk_py/commands/pynithy/run/cert.pem
 ethernity_cloud_sdk_py/commands/pynithy/run/certificate.securelock.crt

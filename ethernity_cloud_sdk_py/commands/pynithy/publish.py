@@ -401,7 +401,7 @@ def main(private_key):
     spinner = Spinner()
     image_registry = ImageRegistry(private_key)
     ipfs_client = IPFSClient(config.read("IPFS_ENDPOINT"))
-
+    BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
 
     IPFS_HASH = ""
     IPFS_DOCKER_COMPOSE_HASH = ""
@@ -534,7 +534,7 @@ def main(private_key):
 
 
     os.chdir(current_dir)
-    print('\n\u276f\u276f Registering enclave on {BLOCKCHAIN_NETWORK}')
+    print(f'\n\u276f\u276f Registering enclave on {BLOCKCHAIN_NETWORK}')
 
     try:
         image_registry.register_securelock_image(ENCLAVE_PUBLIC_KEY)

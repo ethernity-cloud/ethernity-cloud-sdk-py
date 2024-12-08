@@ -119,35 +119,35 @@ def clean_up_registry():
     shutil.rmtree("./registry", ignore_errors=True)
 
     # Stop and remove any running Docker containers or images that might conflict
-    dockerPS = get_command_output("docker ps --filter name=registry -q", True)
+    dockerPS = get_command_output("docker ps --filter name=registry -a -q")
     if dockerPS:
-        run_command(f'docker stop {" ".join(dockerPS.splitlines())}', True)
+        run_command(f'docker stop {dockerPS}', True)
+        run_command(f"docker rm {dockerPS} -f", True)
 
-    remainingContainers = get_command_output("docker ps --filter 'name=etny' -a -q", True)
+    remainingContainers = get_command_output("docker ps --filter 'name=*etny*' -a -q")
     if remainingContainers:
         run_command(f"docker stop {remainingContainers} -f", True)
+        run_command(f"docker rm {remainingContainers} -f", True)
 
-    remainingContainers = get_command_output("docker ps --filter 'name=las' -a -q", True)
+    remainingContainers = get_command_output("docker ps --filter 'name=las' -a -q")
     if remainingContainers:
         run_command(f"docker stop {remainingContainers} -f", True)
-
-    dockeri = get_command_output("docker ps --filter name=las -q", True)
-    if dockeri:
-        run_command(f'docker stop {" ".join(dockeri.splitlines())}', True)
-
-    dockerRm = get_command_output("docker ps --filter name=registry -q", True)
-    if dockerRm:
-        run_command(f'docker rm {" ".join(dockerRm.splitlines())} -f', True)
-
-    dockerImg = get_command_output('docker images --filter reference="*etny*" -q', True)
-    if dockerImg:
-        run_command(f'docker rmi {" ".join(dockerImg.splitlines())} -f', True)
+        run_command(f"docker rm {remainingContainers} -f", True)
 
     dockerImgReg = get_command_output(
-        'docker images --filter reference="*registry*" -q', True
+        'docker images --filter reference="*registry*" -q'
+    )
+
+    if dockerImgReg:
+        run_command(f'docker rmi {" ".join(dockerImgReg.splitlines())} -f', True)
+
+    dockerImgReg = get_command_output(
+        'docker images --filter reference="*etny*" -q'
     )
     if dockerImgReg:
         run_command(f'docker rmi {" ".join(dockerImgReg.splitlines())} -f', True)
+
+    return True
 
 def copy_backend_to_build_dir(build_dir):
     # Copy serverless source code to the build directory
@@ -231,7 +231,7 @@ def main():
         exit(1)
   
 
-    spinner.spin_till_done("Cleanup local registry", get_docker_server_info)
+    spinner.spin_till_done("Cleanup local registry", clean_up_registry)
 
     spinner.spin_till_done("Copy backend files from src to build directory", copy_backend_to_build_dir, build_dir)
 

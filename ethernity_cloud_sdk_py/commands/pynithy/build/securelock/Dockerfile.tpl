@@ -1,4 +1,4 @@
-FROM etny-securelock-serverless:latest AS release
+FROM etny-securelock-serverless AS release
 
 COPY ./src/serverless/requirements.txt /requirements.txt
 RUN pip3 install -r /requirements.txt
@@ -25,7 +25,7 @@ COPY --from=release /binary-fs-dir /.
 
 RUN scone gcc ./binary_fs_blob.s ./libbinary_fs_template.a -shared -o /libbinary-fs.so
 
-FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/__IMAGE_PATH__/python3.10.5-alpine3.15-scone5.8-pre-release
+FROM etny-securelock-serverless
 
 COPY --from=build /usr/local/bin/scone /usr/local/bin/scone
 
@@ -36,7 +36,7 @@ COPY --from=build /libbinary-fs.so /lib/libbinary-fs.so
 RUN openssl genrsa -3 -out /enclave-key.pem 3072
 
 
-ENV SCONE_HEAP=1024M
+ENV SCONE_HEAP=3072M
 ENV SCONE_LOG=FATAL
 ENV SCONE_STACK=4M
 ENV SCONE_ALLOW_DLOPEN=1

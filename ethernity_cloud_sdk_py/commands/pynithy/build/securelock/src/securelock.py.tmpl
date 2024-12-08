@@ -71,7 +71,7 @@ class EtnySecureLock:
     def __set_initializers(self):
         self.is_valid_client_data = True
         self.key_file = "/private/__SECURELOCK_SESSION__/key.pem"
-        self.cert_file = "/app/__SECURELOCK_SESSIONK__/cert.pem"
+        self.cert_file = "/app/__SECURELOCK_SESSION__/cert.pem"
         self.pub_cert_file = "/app/__SECURELOCK_SESSION__/enclave_pub_cert.pem"
         self.payload = 'payload.etny.securelock'
         self.input = 'input.txt.securelock'
