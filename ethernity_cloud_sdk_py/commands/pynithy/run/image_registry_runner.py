@@ -38,8 +38,8 @@ try:
     ipfs_docker_compose_hash = ipfs_docker_compose_hash.strip()
     print("IPFS_HASH: " + ipfs_hash)
     imageRegistry = ImageRegistry()
-    imageRegistry.add_trusted_zone_cert(trusted_zone, ipfs_hash, 'etny-pynithy-testnet', ipfs_docker_compose_hash, os.getenv("ENCLAVE_NAME_TRUSTEDZONE"), 10)
-    imageRegistry.add_secure_lock_and_validate_image_cert(secure_lock, ipfs_hash, 'etny-pynithy-testnet', ipfs_docker_compose_hash, os.getenv("ENCLAVE_NAME_SECURELOCK"), 0)
+    imageRegistry.add_trusted_zone_cert(trusted_zone, ipfs_hash, 'etny-pynithy-testnet', ipfs_docker_compose_hash, os.getenv("TRUSTED_ZONE_IMAGE"), 10)
+    imageRegistry.add_secure_lock_and_validate_image_cert(secure_lock, ipfs_hash, 'etny-pynithy-testnet', ipfs_docker_compose_hash, os.getenv("TRUSTED_ZONE_IMAGE"), 0)
     print("************************")
 except Exception as e:
     print("An exception occurred: " + str(e))

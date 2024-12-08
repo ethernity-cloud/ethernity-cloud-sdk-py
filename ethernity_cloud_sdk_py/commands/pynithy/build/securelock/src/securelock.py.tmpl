@@ -70,9 +70,9 @@ class EtnySecureLock:
 
     def __set_initializers(self):
         self.is_valid_client_data = True
-        self.key_file = "/private/__ENCLAVE_NAME_SECURELOCK__/key.pem"
-        self.cert_file = "/app/__ENCLAVE_NAME_SECURELOCK__/cert.pem"
-        self.pub_cert_file = "/app/__ENCLAVE_NAME_SECURELOCK__/enclave_pub_cert.pem"
+        self.key_file = "/private/__SECURELOCK_SESSION__/key.pem"
+        self.cert_file = "/app/__SECURELOCK_SESSION__/cert.pem"
+        self.pub_cert_file = "/app/__SECURELOCK_SESSION__/enclave_pub_cert.pem"
         self.payload = 'payload.etny.securelock'
         self.input = 'input.txt.securelock'
         self.result_file = '/app/result.txt'
@@ -395,13 +395,13 @@ if __name__ == '__main__':
             raise Exception("Failed to get .env file")
         EtnySecureLock.read_env_str(env_content)
     except:
-        cert_file = "/app/__ENCLAVE_NAME_SECURELOCK__/cert.pem"
+        cert_file = "/app/__SECURELOCK_SESSION__/cert.pem"
         with open(cert_file, 'r') as f:
             print("PUBLIC_CERT:", f.read())
         exit(1)
 
     #if not EtnySecureLock.debug:
-    #    with open("/app/__ENCLAVE_NAME_SECURELOCK__/cert.pem", 'r') as f:
+    #    with open("/app/__SECURELOCK_SESSION__/cert.pem", 'r') as f:
     #        print("PUBLIC_CERT:", f.read())
 
     print('Initializing..')

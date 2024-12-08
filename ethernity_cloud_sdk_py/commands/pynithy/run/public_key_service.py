@@ -1,7 +1,6 @@
 import requests
 import time
-import argparse
-
+import sys
 BASE_URL = "https://publickey.ethernity.cloud"
 
 
@@ -23,7 +22,7 @@ def submit_ipfs_hash(
         "docker_composer_hash": docker_composer_hash,
     }
     response = requests.post(url, json=payload)
-    print(f"response:{response}")
+    #print(f"response:{response}")
     if response.status_code == 200:
         return response.json()
     else:
@@ -46,89 +45,71 @@ def main(
     protocol_version,
     network,
     template_version,
-    hhash="",
+    ipfs_hash="",
     docker_composer_hash="",
 ):
-    print("Enclave Name:", enclave_name)
-    print("Protocol Version:", protocol_version)
-    print("Network:", network)
-    print("Template Version:", template_version)
+    if not ipfs_hash:
+        return
 
-    if not hhash:
-        with open("IPFS_HASH.ipfs", "r") as f:
-            hhash = f.read().strip()
-        with open("IPFS_DOCKER_COMPOSE_HASH.ipfs", "r") as f:
-            docker_composer_hash = f.read().strip()
+    SPINNER_FRAMES = [
+            "■",
+            "□",
+            "▪",
+            "▫"
+    ]
 
-    print()
-    print("IPFS Hash:", hhash)
-    print("Docker Composer Hash:", docker_composer_hash)
-    print()
+    CHECK = "\033[92m\u2714\033[0m  "
+    FAIL = "\033[91m\u2718\033[0m  "
 
     # Submit IPFS Hash
-    submit_response = submit_ipfs_hash(
-        hhash,
+    response = submit_ipfs_hash(
+        ipfs_hash,
         enclave_name,
         protocol_version,
         network,
         template_version,
         docker_composer_hash,
     )
-    print("Submit IPFS Hash Response:", submit_response)
+    #print("Recieved the following queueId:", response["queueId"])
 
+    frame_index = 0
+    
+    print()
+    message = f"Waiting for publc key extraction to complete..."
+
+    sys.stdout.write(f"\t{SPINNER_FRAMES[frame_index]}  {message}")
+    sys.stdout.flush()
+        
     # Check IPFS Hash Status
     while True:
-        check_response = check_ipfs_hash_status(hhash)
+        check_response = check_ipfs_hash_status(ipfs_hash)
         if "publicKey" in check_response:
             if check_response["publicKey"] == 0:
-                print(
-                    f"Public key not available yet. Queue position: {check_response.get('queuePosition', 'Unknown')}"
-                )
-            elif check_response["publicKey"] == -1:
-                print("Hash is not derived from Eternity Cloud SDK.")
-                exit(1)
+                frame_index = (frame_index + 1) % len(SPINNER_FRAMES)
+                if check_response.get('queuePosition') == "Running":
+                    message = f"Public key extraction is running now. Waiting for completion..."
+                else:
+                    message = f"Waiting for public key extraction to start. Queue position: {check_response.get('queuePosition', 'Unknown')}"
+
+                sys.stdout.write("\r" + f"\t{SPINNER_FRAMES[frame_index]}  {message}")
+                sys.stdout.flush()
+                time.sleep(1)
+            elif check_response["publicKey"] == "-1":
+                message = f"\t{FAIL}Public key extraction\n"
+                sys.stdout.write("\r" + " " * 128 + "\r")
+                sys.stdout.write("\r" + f"{message}")
+                sys.stdout.flush()
+                print("\t\tThe certificate extraction process failed. Make sure the enclave is built using the latest version of the SDK")
+                print()
+                exit()
             else:
-                print("Public Key:", check_response["publicKey"])
-                # save public key to file
-                with open("PUBLIC_KEY.txt", "w") as f:
-                    f.write(check_response["publicKey"])
-                break
+                message = f"\t{CHECK}Public key extraction\n"
+                sys.stdout.write("\r" + " " * 128 + "\r")
+                sys.stdout.write("\r" + f"{message}")
+                sys.stdout.flush()
+                return check_response["publicKey"]
         else:
-            print("Unexpected response:", check_response)
-            exit(1)
-
-        time.sleep(10)  # Wait for 10 seconds before checking again
+            print("\t\tThe Ethernity cloud certificate extraction service is unavailable at this time. Please try again later.", check_response)
+            exit()
 
 
-if __name__ == "__main__":
-    # Example usage
-    # python3 ./public_key_service.py --enclave_name ${ENCLAVE_NAME_SECURELOCK} --protocol_version ${VERSION} --network ${BLOCKCHAIN_NETWORK} --template_version ${VERSION}
-
-    # read enclave_name, protocol_version, network, template_version from command line arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--enclave_name", help="Enclave name", required=True)
-    parser.add_argument("--protocol_version", help="Protocol version", required=True)
-    parser.add_argument("--network", help="Network", required=True)
-    parser.add_argument("--template_version", help="Template version", required=True)
-
-    args = parser.parse_args()
-    enclave_name = args.enclave_name
-    protocol_version = args.protocol_version
-    network = args.network.lower().split("_")[1]
-    template_version = args.template_version
-
-    hhash = ""
-    with open("IPFS_HASH.ipfs", "r") as f:
-        hhash = f.read().strip()
-    docker_composer_hash = ""
-    with open("IPFS_DOCKER_COMPOSE_HASH.ipfs", "r") as f:
-        docker_composer_hash = f.read().strip()
-
-    main(
-        enclave_name=enclave_name,
-        protocol_version=protocol_version,
-        network=network,
-        template_version=template_version,
-        hhash=hhash,
-        docker_composer_hash=docker_composer_hash,
-    )
