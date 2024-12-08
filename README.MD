@@ -29,11 +29,6 @@ Linux:
 - docker-compose
 
 Windows:
-- Microsoft Visual Studio Community 2022+ (https://visualstudio.microsoft.com/)
-  - MSVC++ 14.3+ build tools
-  - C++ CMake tools for Windows
-  - Windows SDK (for current running version)
-  - Reboot required
 - Python 3.13
 - Docker Desktop
 
