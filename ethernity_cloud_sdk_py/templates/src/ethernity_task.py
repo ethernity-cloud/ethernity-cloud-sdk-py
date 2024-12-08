@@ -1,32 +1,58 @@
 import os
-import sys
 import warnings
 import time
-from datetime import datetime
 from dotenv import load_dotenv
-
+import getpass
 warnings.filterwarnings("ignore")
 
-try:
-    load_dotenv(".env" if os.path.exists(".env") else ".env.config")
-except ImportError as e:
-    pass
 
 from ethernity_cloud_runner_py.runner import EthernityCloudRunner
+from ethernity_cloud_sdk_py.commands.private_key import PrivateKeyManager 
 
 code = "hello('World!')"
 
-def execute_task(code) -> None:
-    runner = EthernityCloudRunner()
-    runner.set_log_level("DEBUG")
+def print_logs(runner):
+    previous_logs_count = 0
+    while runner.is_running():
+        state = runner.get_state()
+        current_logs = state['log']  # Assuming this is a list of logs in chronological order
+        
+        # Determine which logs are new based on how many logs we've seen before
+        new_logs = current_logs[previous_logs_count:]
+        
+        # Print the new logs in the order they appear
+        for log in new_logs:
+            print(log)
+        
+        # Update the count of previously seen logs
+        previous_logs_count = len(current_logs)
 
-    runner.set_private_key(os.getenv("PRIVATE_KEY"))
+        # Optional status prints
+        # print(f"{datetime.now()} Task status: {state['progress']}")
+        # print(f"Processed Events: {state['processed_events']}, Remaining Events: {state['remaining_events']}")
+
+def execute_task(code) -> None:
+
+    load_dotenv(override=True)
+
+    while True:
+        try:
+            PASSWORD = getpass.getpass("Enter your private key password:")
+            ENC_PRIVATE_KEY = os.getenv("ENC_PRIVATE_KEY")
+            pkm = PrivateKeyManager(PASSWORD)
+            PRIVATE_KEY = pkm.decrypt_private_key(ENC_PRIVATE_KEY)
+            break
+        except Exception as e:
+            print("Incorrect password. Please try again.")
+            continue
+
+    runner = EthernityCloudRunner()
+    runner.set_log_level("INFO")
+    runner.set_private_key(PRIVATE_KEY)
     runner.set_network("Bloxberg", "Testnet")
     runner.set_storage_ipfs("https://ipfs.ethernity.cloud/api/v0")
-
     runner.connect()
 
-  
     resources = {
         "taskPrice": 3,
         "cpu": 4,
@@ -39,38 +65,21 @@ def execute_task(code) -> None:
 
     trustedzone_enclave = os.getenv("TRUSTED_ZONE_IMAGE")
     securelock_enclave = os.getenv("PROJECT_NAME")
+    securelock_version = os.getenv("VERSION")
     
     runner.run(
         resources,
         securelock_enclave,
+        securelock_version,
         code,
         "",
         trustedzone_enclave
     )
 
-    # Store previously printed logs
-    previous_logs = set()
-
     while runner.is_running():
-        state = runner.get_state()
-        current_logs = set(state['log'])  # Current set of logs
+        print_logs(runner)
+        time.sleep(0.1)
 
-        # Find new logs by subtracting previous_logs from current_logs
-        new_logs = current_logs - previous_logs
-
-        # If there are new logs, print them
-        if new_logs:
-            for log in new_logs:
-                print(log)
-        
-        # Update previous_logs to include the current logs
-        previous_logs = current_logs
-
-        # Optional status prints
-        # print(f"{datetime.now()} Task status: {state['progress']}")
-        # print(f"Processed Events: {state['processed_events']}, Remaining Events: {state['remaining_events']}")    
-
-    time.sleep(0.5)
     state = runner.get_state()
 
     if state['status'] == "ERROR":
