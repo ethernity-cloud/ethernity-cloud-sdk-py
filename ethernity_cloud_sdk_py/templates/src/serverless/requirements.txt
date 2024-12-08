@@ -1,0 +1,5 @@
+# Add requirements.txt file content to be included in the build process
+# Example:
+#
+# scipy
+# numpy
