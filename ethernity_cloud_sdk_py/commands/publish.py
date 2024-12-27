@@ -12,6 +12,8 @@ from ethernity_cloud_sdk_py.commands.spinner import Spinner
 config = Config(Path(".config.json").resolve())
 config.load()
 
+image_registry = ImageRegistry()
+
 envfile = Path("src/.env").resolve()
 
 # For accessing package resources
@@ -109,7 +111,7 @@ def main():
         while True:
             PRIVATE_KEY = prompt("Enter your private key:")
             try:
-                result = image_registry(str(PRIVATE_KEY))
+                image_registry.set_private_key(str(PRIVATE_KEY))
                 break
             except Exception as e:
                 print(f"Unable to load private key: {e}")
@@ -135,7 +137,7 @@ def main():
                 print("Incorrect password. Please try again.")
                 continue
 
-    image_registry = ImageRegistry(PRIVATE_KEY)
+    image_registry.set_private_key(PRIVATE_KEY)
 
 
     
@@ -223,14 +225,14 @@ def main():
     
 
 
-    DEVELOPER_FEE = config.read("DEVELOPER_FEE")
+    #DEVELOPER_FEE = config.read("DEVELOPER_FEE")
 
-    if not DEVELOPER_FEE:
-        task_percentage = prompt(
-            "Each time this enclave runs, you will be rewarded with a percentage of the execution price.\n\nPlease specify the percentage.",
-            default_value="10",
-        )
-        config.write("DEVELOPER_FEE", task_percentage)
+    #if not DEVELOPER_FEE:
+    #    task_percentage = prompt(
+    #        "Each time this enclave runs, you will be rewarded with a percentage of the execution price.\n\nPlease specify the percentage.",
+    #        default_value="10",
+    #    )
+    #    config.write("DEVELOPER_FEE", task_percentage)
 
 
     if SERVICE_TYPE == "Nodenithy":

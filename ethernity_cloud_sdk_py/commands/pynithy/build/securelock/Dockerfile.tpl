@@ -36,7 +36,7 @@ COPY --from=build /libbinary-fs.so /lib/libbinary-fs.so
 RUN openssl genrsa -3 -out /enclave-key.pem 3072
 
 
-ENV SCONE_HEAP=3072M
+ENV SCONE_HEAP=__MEMORY_TO_ALLOCATE__
 ENV SCONE_LOG=FATAL
 ENV SCONE_STACK=4M
 ENV SCONE_ALLOW_DLOPEN=1

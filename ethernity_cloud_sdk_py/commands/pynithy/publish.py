@@ -32,6 +32,8 @@ from ethernity_cloud_sdk_py.commands.config import Config, config
 config = Config(Path(".config.json").resolve())
 config.load()
 
+image_registry = ImageRegistry()
+
 def prompt(question, default_value=None):
     """
     Prompt user for input with an optional default value.
@@ -89,7 +91,7 @@ def extract_scone_hash(service):
         raise Exception(f"Error while executing {command}: {e.output.decode().strip()}")
 
 
-def process_yaml_template(template_file, output_file, mrenclave_securelock):
+def process_yaml_template(template_file, output_file):
     
     config.write("IPFS_HASH", "")
     config.write("IPFS_DOCKER_COMPOSE_HASH","")
@@ -97,34 +99,19 @@ def process_yaml_template(template_file, output_file, mrenclave_securelock):
 
     MRENCLAVE_SECURELOCK = config.read("MRENCLAVE_SECURELOCK")
     SECURELOCK_SESSION = config.read("SECURELOCK_SESSION")
+    
     PREDECESSOR_HASH_SECURELOCK = ""
-    PREDECESSOR_PROJECT_NAME = ""
-    PREDECESSOR_VERSION = ""
 
-    CONFIG_PREDECESSOR = config.read("PREDECESSOR_HASH_SECURELOCK")
-
-    if CONFIG_PREDECESSOR != "":
-        PREDECESSOR_HASH_SECURELOCK = CONFIG_PREDECESSOR.split("$$$%$")[0]
-        PREDECESSOR_PROJECT_NAME = CONFIG_PREDECESSOR.split("$$$%$")[1]
-        PREDECESSOR_VERSION = CONFIG_PREDECESSOR.split("$$$%$")[2]
-
-    if (
-        PREDECESSOR_HASH_SECURELOCK != ""
-        and (   
-            PREDECESSOR_PROJECT_NAME != config.read("PROJECT_NAME")
-            or PREDECESSOR_VERSION != config.read("VERSION")
-        )
-    ):
-        PREDECESSOR_HASH_SECURELOCK = ""
+    PREDECESSOR_HASH_SECURELOCK = config.read("PREDECESSOR_HASH_SECURELOCK")
 
     replacements = {
-        "PREDECESSOR": (
+        "__PREDECESSOR__": (
             f""
             if PREDECESSOR_HASH_SECURELOCK == ""
             else f"predecessor: {PREDECESSOR_HASH_SECURELOCK}"
         ),
-        "MRENCLAVE": mrenclave_securelock,
-        "ENCLAVE_NAME": SECURELOCK_SESSION,
+        "__MRENCLAVE__": MRENCLAVE_SECURELOCK,
+        "__ENCLAVE_NAME__": SECURELOCK_SESSION,
     }
 
     if not os.path.exists(template_file):
@@ -133,7 +120,7 @@ def process_yaml_template(template_file, output_file, mrenclave_securelock):
     with open(template_file, "r") as f:
         content = f.read()
     for key, value in replacements.items():
-        content = content.replace(f"__{key}__", value)
+        content = content.replace(f"{key}", value)
     with open(output_file, "w") as f:
         f.write(content)
 
@@ -170,11 +157,16 @@ def update_docker_compose_files():
     
     SECURELOCK_SESSION = config.read("SECURELOCK_SESSION")
 
-    if "testnet" in config.read("BLOCKCHAIN_NETWORK").lower():
-        TRUSTEDZONE_SESSION = "etny-pynithy-trustedzone-v3-testnet-0.1.12"
-    else:
-        TRUSTEDZONE_SESSION = "ecld-pynithy-trustedzone-v3-3.0.0"
+    #if "testnet" in config.read("BLOCKCHAIN_NETWORK").lower():
+    #    TRUSTEDZONE_SESSION = "etny-pynithy-trustedzone-v3-testnet-0.1.12"
+    #else:
+    #    TRUSTEDZONE_SESSION = "ecld-pynithy-trustedzone-v3-3.0.0"
 
+    TRUSTEDZONE_IPFS_HASH = image_registry.get_trusted_zone_hash(config.read("TRUSTED_ZONE_IMAGE"), "v3")
+    TRUSTEDZONE_SESSION = image_registry.get_trustezone_image_session(TRUSTEDZONE_IPFS_HASH)
+
+    MEMORY_TO_ALLOCATE = config.read("MEMORY_TO_ALLOCATE")
+    MEMORY_TO_ALLOCATE_FORMATED = f"{MEMORY_TO_ALLOCATE * 1024}M"
     try:
         # Backup and restore docker-compose templates
         backup_files = ["docker-compose.yml.tmpl", "docker-compose-final.yml.tmpl"]
@@ -191,9 +183,14 @@ def update_docker_compose_files():
                 continue
             with open(file, "r") as f:
                 content = f.read()
-            content = content.replace(
-                "__SECURELOCK_SESSION__", SECURELOCK_SESSION
-            ).replace("__TRUSTEDZONE_SESSION__", TRUSTEDZONE_SESSION)
+
+            content = (
+                content
+                .replace("__SECURELOCK_SESSION__", SECURELOCK_SESSION)
+                .replace("__TRUSTEDZONE_SESSION__", TRUSTEDZONE_SESSION)
+                .replace("__MEMORY_TO_ALLOCATE__", MEMORY_TO_ALLOCATE_FORMATED)
+            )
+
             with open(file, "w") as f:
                 f.write(content)
     except Exception as e:
@@ -370,17 +367,11 @@ def update_cas_session():
             json.dump(response.json(), f, indent=2)
 
         response_data = response.json()
-        pred = response_data.get("hash", None)
-        project_name = config.read("PROJECT_NAME")
-        version = config.read("VERSION")
+        predecessor_hash_securelock = response_data.get("hash", None)
 
-        if pred != None:
-            predecessor_hash_securelock = (
-                f"{pred}$$$%${project_name}$$$%${version}" or ""
-            )
+        if predecessor_hash_securelock != None:
             config.write("PREDECESSOR_HASH_SECURELOCK", predecessor_hash_securelock)
         else:
-            predecessor_hash_securelock = None
             config.write("PREDECESSOR_HASH_SECURELOCK", "")
 
         if predecessor_hash_securelock == None:
@@ -399,7 +390,7 @@ def update_cas_session():
         exit(1)
 def main(private_key):
     spinner = Spinner()
-    image_registry = ImageRegistry(private_key)
+    image_registry.set_private_key(private_key)
     ipfs_client = IPFSClient(config.read("IPFS_ENDPOINT"))
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
 
@@ -433,15 +424,15 @@ def main(private_key):
         print(f"Error: {e}")
         exit(1)
         
-   
     if mrenclave_securelock != config.read("MRENCLAVE_SECURELOCK"):
+
+        config.write("MRENCLAVE_SECURELOCK", mrenclave_securelock)
         
         spinner.spin_till_done(
             "Deploying configuration template",
             process_yaml_template,
             "etny-securelock-test.yaml.tpl",
             "etny-securelock-test.yaml",
-            mrenclave_securelock
         )
         
         # Generate certificates if needed

@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import shutil
 import subprocess
@@ -71,6 +72,10 @@ def run_command(command, redirect_output=False):
     stderr = subprocess.DEVNULL if redirect_output else None
 
     result = subprocess.run(command, stdout=stdout, stderr=stderr, text=True, shell=True)
+
+    if result.returncode != 0:
+        # Handle non-zero exit code
+        raise RuntimeError(f"\n\nCommand '{command}' failed with exit code {result.returncode}")
 
     return result
 
@@ -221,9 +226,36 @@ def main():
     
     isMainnet = False if "testnet" in TRUSTED_ZONE_IMAGE.lower() else True
 
+
+
+    while config.read("MEMORY_TO_ALLOCATE") == None:
+        memory_input = input("\n\tEnter memory to allocate (e.g., '2GB', '4 G', etc.) [1GB]: ").strip()
+
+        if memory_input == "":
+            memory_input = "1GB"
+
+        # Regex pattern to extract the integer part before the unit
+        match = re.match(r'^(\d+)\s*(gb|g)?$', memory_input, re.IGNORECASE)
+
+        if match:
+            memory_to_allocate = int(match.group(1))
+
+            if 1 <= memory_to_allocate < 128:
+
+                config.write("MEMORY_TO_ALLOCATE", memory_to_allocate)
+                break
+            else:
+                print("Please enter a valid memory allocation between 1 and 128GB.")
+        else:
+            print("Invalid format. Please enter a number followed by 'GB', 'gb', 'G', or 'g' (e.g., '16GB').")
+
+    MEMORY_TO_ALLOCATE = config.read("MEMORY_TO_ALLOCATE")
+
+    spinner.spin_till_done(f"Binary will use {MEMORY_TO_ALLOCATE}GB memory", get_docker_server_info)
+
     dockerPS = spinner.spin_till_done("Checking docker service", get_docker_server_info)
 
-    if dockerPS == None:
+    if dockerPS == False:
         print("""
 \t\tDocker service is not running. Please start docker to continue.
 \t\tMore information about installing and running Docker can be founde here: https://docs.docker.com/engine/install/
@@ -274,6 +306,8 @@ def main():
     with open("Dockerfile.tpl", "r") as f:
         dockerfile_secure_template = f.read()
 
+    MEMORY_TO_ALLOCATE_FORMATED = f"{MEMORY_TO_ALLOCATE * 1024}M"
+
     dockerfile_secure_content = (
         dockerfile_secure_template.replace(
             "__SECURELOCK_SESSION__", SECURELOCK_SESSION
@@ -288,6 +322,7 @@ def main():
         .replace("__CHAIN_ID__", str(ECRunner[TRUSTED_ZONE_IMAGE][3]))
         .replace("__TRUSTED_ZONE_IMAGE__", TRUSTED_ZONE_IMAGE)
         .replace("__IMAGE_PATH__", TRUSTED_ZONE_IMAGE)
+        .replace("__MEMORY_TO_ALLOCATE__", MEMORY_TO_ALLOCATE_FORMATED)
     )
     imagesTag = BLOCKCHAIN_NETWORK.lower()
     if isMainnet:
@@ -327,10 +362,10 @@ def main():
     print()
 
     run_command(
-        f"docker pull registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ethernity/etny-trustedzone:py_{imagesTag}"
+        f"docker pull registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/{TRUSTED_ZONE_IMAGE}/trustedzone:{BLOCKCHAIN_NETWORK.lower()}"
     )
     run_command(
-        f"docker tag registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ethernity/etny-trustedzone:py_{imagesTag} localhost:5000/etny-trustedzone"
+        f"docker tag registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/{TRUSTED_ZONE_IMAGE}/trustedzone:{BLOCKCHAIN_NETWORK.lower()} localhost:5000/etny-trustedzone"
     )
 
     print()
@@ -352,10 +387,10 @@ def main():
     print()
 
     run_command(
-        f"docker pull registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ethernity/etny-las:py_{imagesTag}"
+        f"docker pull registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/{TRUSTED_ZONE_IMAGE}/las:{BLOCKCHAIN_NETWORK.lower()}"
     )
     run_command(
-        f"docker tag registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ethernity/etny-las:py_{imagesTag} localhost:5000/etny-las"
+        f"docker tag registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/{TRUSTED_ZONE_IMAGE}/las:{BLOCKCHAIN_NETWORK.lower()} localhost:5000/etny-las"
     )
 
     print()

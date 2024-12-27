@@ -389,7 +389,7 @@ if __name__ == '__main__':
                                                    "swiftstreamadmin",
                                                    "swiftstreamadmin")
 
-        status, env_content = swiftStreamClient.get_file_content("etny-pynithy-testnet-v3", ".env")
+        status, env_content = swiftStreamClient.get_file_content("__BUCKET_NAME__", ".env")
         if not status:
             print("Failed to get .env file")
             raise Exception("Failed to get .env file")

@@ -25,7 +25,7 @@ services:
           - SCONE_CAS_ADDR=scone-cas.cf
           - SCONE_LAS_ADDR=las
           - SCONE_CONFIG_ID=__SECURELOCK_SESSION__/application
-          - SCONE_HEAP=3072M
+          - SCONE_HEAP=__MEMORY_TO_ALLOCATE__
           - SCONE_LOG=FATAL
           - SCONE_STACK=4M
           - SCONE_ALLOW_DLOPEN=1
