@@ -207,7 +207,7 @@ class ImageRegistry:
                         'maxPriorityFeePerGas': self.provider.to_wei(self.max_priority_fee_per_gas, 'gwei'),
                     }
                 )
-                
+
             else:
                 nonce = self.provider.eth.get_transaction_count(self.acct.address)
                 gas_price = (
@@ -279,7 +279,6 @@ class ImageRegistry:
         except Exception as e:
             print(f"Error retrieving image public key certificate: {str(e)}")
             return None
-
 
     def get_trustezone_image_session(self, ipfs_hash):
         try:

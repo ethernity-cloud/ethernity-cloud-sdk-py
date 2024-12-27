@@ -11,25 +11,29 @@ from ethernity_cloud_sdk_py.commands.private_key import PrivateKeyManager
 
 code = "hello('World!')"
 
+import time
 def print_logs(runner):
     previous_logs_count = 0
-    while runner.is_running():
+    while True:
         state = runner.get_state()
         current_logs = state['log']  # Assuming this is a list of logs in chronological order
-        
+
         # Determine which logs are new based on how many logs we've seen before
         new_logs = current_logs[previous_logs_count:]
-        
+
         # Print the new logs in the order they appear
         for log in new_logs:
             print(log)
-        
+
         # Update the count of previously seen logs
         previous_logs_count = len(current_logs)
 
-        # Optional status prints
-        # print(f"{datetime.now()} Task status: {state['progress']}")
-        # print(f"Processed Events: {state['processed_events']}, Remaining Events: {state['remaining_events']}")
+        # Check if the task has finished and all logs have been printed
+        if not runner.is_running() and previous_logs_count == len(current_logs):
+            break
+
+        # Add a small delay to prevent excessive CPU usage
+        time.sleep(0.1)
 
 def execute_task(code) -> None:
 
@@ -49,14 +53,14 @@ def execute_task(code) -> None:
     runner = EthernityCloudRunner()
     runner.set_log_level("INFO")
     runner.set_private_key(PRIVATE_KEY)
-    runner.set_network("Bloxberg", "Testnet")
+    runner.set_network("Polygon", "Mainnet")
     runner.set_storage_ipfs("https://ipfs.ethernity.cloud/api/v0")
     runner.connect()
 
     resources = {
         "taskPrice": 3,
-        "cpu": 4,
-        "memory": 3,
+        "cpu": 1,
+        "memory": 1,
         "storage": 10,
         "bandwidth": 1,
         "duration": 1,
@@ -76,10 +80,8 @@ def execute_task(code) -> None:
         trustedzone_enclave
     )
 
-    while runner.is_running():
-        print_logs(runner)
-        time.sleep(0.1)
-
+    print_logs(runner)
+    
     state = runner.get_state()
 
     if state['status'] == "ERROR":

@@ -233,24 +233,22 @@ def main():
 
         if memory_input == "":
             memory_input = "1GB"
-        
+
         # Regex pattern to extract the integer part before the unit
         match = re.match(r'^(\d+)\s*(gb|g)?$', memory_input, re.IGNORECASE)
-        
+
         if match:
             memory_to_allocate = int(match.group(1))
-            
+
             if 1 <= memory_to_allocate < 128:
-                
+
                 config.write("MEMORY_TO_ALLOCATE", memory_to_allocate)
                 break
             else:
                 print("Please enter a valid memory allocation between 1 and 128GB.")
         else:
             print("Invalid format. Please enter a number followed by 'GB', 'gb', 'G', or 'g' (e.g., '16GB').")
-            
 
-    
     MEMORY_TO_ALLOCATE = config.read("MEMORY_TO_ALLOCATE")
 
     spinner.spin_till_done(f"Binary will use {MEMORY_TO_ALLOCATE}GB memory", get_docker_server_info)
