@@ -58,7 +58,7 @@ def Exec(payload_data, input_data, globals=None, locals=None):
                 else:
                     # Handle statements if needed
                     exec(
-                        compile(ast.Module([node]), filename="<ast>", mode="exec"),
+                        compile(ast.Module([node], type_ignores=[]), filename="<ast>", mode="exec"),
                         globals,
                         locals,
                     )

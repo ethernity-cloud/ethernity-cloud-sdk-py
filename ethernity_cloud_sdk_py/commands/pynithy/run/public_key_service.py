@@ -36,7 +36,8 @@ def check_ipfs_hash_status(hash):
     if response.status_code == 200:
         return response.json()
     else:
-        print("Error:", response.json())
+        print("Could not connect to certificate extraction service:", response())
+        print("Please try again later")
         exit(1)
 
 

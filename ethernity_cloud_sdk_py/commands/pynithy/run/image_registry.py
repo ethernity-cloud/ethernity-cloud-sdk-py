@@ -18,9 +18,9 @@ config = Config(Path(".config.json").resolve())
 config.load()
 
 class ImageRegistry:
-    def __init__(self, private_key):
+    def __init__(self):
         try:
-            self.private_key = private_key
+
             self.blockchain_network = config.read("BLOCKCHAIN_NETWORK")
             self.project_name = config.read("PROJECT_NAME")
             self.enclave_name_securelock = self.project_name
@@ -40,14 +40,14 @@ class ImageRegistry:
                     self.network_rpc = "https://polygon-rpc.com"
                     self.image_registry_address = "0x689f3806874d3c8A973f419a4eB24e6fBA7E830F"
                     self.chain_id = 137
-                    self.gas = 20000000
-                    self.gas_price = Web3.to_wei(40500500010, "wei")
+                    self.max_fee_per_gas = 300
+                    self.max_priority_fee_per_gas = 35
                 else:
                     self.network_rpc = "https://rpc-amoy.polygon.technology"
                     self.image_registry_address = "0xF7F4eEb3d9a64387F4AcEb6d521b948E6E2fB049"
                     self.chain_id = 80001
-                    self.gas = 20000000
-                    self.gas_price = Web3.to_wei(1300000010, "wei")
+                    self.max_fee_per_gas = 300
+                    self.max_priority_fee_per_gas = 35
             else:
                 # Default to Bloxberg Testnet if no matching network
                 self.image_registry_address = "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31"
@@ -64,16 +64,18 @@ class ImageRegistry:
             # if "Bloxberg" in BLOCKCHAIN_NETWORK or "Polygon" in BLOCKCHAIN_NETWORK:
             #     self.provider.middleware_onion.inject(geth_poa_middleware, layer=0)
 
-
-            self.acct = Account().from_key(self.private_key)
-            self.provider.eth.default_account = self.acct.address
-
             self.image_registry_contract = self.provider.eth.contract(
                 address=to_checksum_address(self.image_registry_address),
                 abi=self.image_registry_abi,
             )
+
         except Exception as e:
             raise Exception("Error initializing image registry: " + str(e))
+
+    def set_private_key(self, private_key):
+        self.private_key = private_key
+        self.acct = Account().from_key(self.private_key)
+        self.provider.eth.default_account = self.acct.address
 
         
     def check_balance(self):
@@ -183,20 +185,12 @@ class ImageRegistry:
     ):
         #print("Adding secure lock image cert to image registry")
         try:
-            if "Polygon" in self.blockchain_network:
-                print("Polygon network")
+            if "polygon" in self.blockchain_network.lower():
                 nonce = self.provider.eth.get_transaction_count(
                     self.acct.address, "pending"
                 )
-                gas_price = self.provider.eth.gas_price
-                gas_price = int(gas_price * 1.1)  # Increase gas price by 10%
-            else:
-                nonce = self.provider.eth.get_transaction_count(self.acct.address)
-                gas_price = (
-                    self.gas_price if self.gas_price != 1 else self.provider.to_wei(1, "mwei")
-                )
 
-            txn = self.image_registry_contract.functions.addImage(
+                txn = self.image_registry_contract.functions.addImage(
                 ipfs_hash,
                 cert_content,
                 version,
@@ -204,22 +198,48 @@ class ImageRegistry:
                 docker_compose_hash,
                 enclave_name_securelock,
                 int(fee),
-            ).build_transaction(
-                {
-                    "nonce": nonce,
-                    "gas": self.gas,
-                    "gasPrice": gas_price,
-                    "chainId": self.chain_id,
-                    "from": self.acct.address,
-                }
-            )
+                ).build_transaction(
+                    {
+                        "nonce": nonce,
+                        "chainId": self.chain_id,
+                        "from": self.acct.address,
+                        'maxFeePerGas': self.provider.to_wei(self.max_fee_per_gas, 'gwei'),
+                        'maxPriorityFeePerGas': self.provider.to_wei(self.max_priority_fee_per_gas, 'gwei'),
+                    }
+                )
+                
+            else:
+                nonce = self.provider.eth.get_transaction_count(self.acct.address)
+                gas_price = (
+                    self.gas_price if self.gas_price != 1 else self.provider.to_wei(1, "mwei")
+                )
+
+                txn = self.image_registry_contract.functions.addImage(
+                ipfs_hash,
+                cert_content,
+                version,
+                image_name,
+                docker_compose_hash,
+                enclave_name_securelock,
+                int(fee),
+                ).build_transaction(
+                    {
+                        "nonce": nonce,
+                        "gas": self.gas,
+                        "gasPrice": gas_price,
+                        "chainId": self.chain_id,
+                        "from": self.acct.address,
+                    }
+                )
+
+
 
             signed_txn = self.provider.eth.account.sign_transaction(
                 txn, private_key=self.private_key
             )
             return signed_txn
         except Exception as e:
-            print (f"Failed to prepare and sign transaction: {e}")
+            print (f"\tFailed to prepare and sign transaction: {e}")
             return False
         
     def process_transaction(self, txn):
@@ -227,7 +247,7 @@ class ImageRegistry:
             try:
                 tx_hash = self.provider.eth.send_raw_transaction(txn.raw_transaction)
             except Exception as e:
-                pass
+                print(f"\n\t\tTransaction error: {e}\n")
 
             try:
                 receipt = self.provider.eth.wait_for_transaction_receipt(tx_hash)
@@ -242,6 +262,28 @@ class ImageRegistry:
         try:
             print("Getting image cert from image registry")
             public_key = self.image_registry_contract.functions.getImageCertPublicKey(
+                ipfs_hash
+            ).call()
+            return public_key
+        except Exception as e:
+            print(f"Error retrieving image public key certificate: {str(e)}")
+            return None
+        
+
+    def get_trusted_zone_hash(self, trusted_zone_image, version):
+        try:
+            public_key = self.image_registry_contract.functions.getLatestTrustedZoneImageCertPublicKey(
+                trusted_zone_image, version
+            ).call()
+            return public_key[0]
+        except Exception as e:
+            print(f"Error retrieving image public key certificate: {str(e)}")
+            return None
+
+
+    def get_trustezone_image_session(self, ipfs_hash):
+        try:
+            public_key = self.image_registry_contract.functions.getTrustedZoneImageSession(
                 ipfs_hash
             ).call()
             return public_key
@@ -291,32 +333,38 @@ class ImageRegistry:
     def register_securelock_image(self, public_key):
         spinner = Spinner()
         config.load()
-        try:
-            ipfs_hash = config.read("IPFS_HASH")
-            ipfs_docker_compose_hash = config.read("IPFS_DOCKER_COMPOSE_HASH")
-            self.securelock_session = config.read("SECURELOCK_SESSION")
-            fee = config.read("DEVELOPER_FEE")
+        while True:
+            try:
+                time.sleep(5)
+                ipfs_hash = config.read("IPFS_HASH")
+                ipfs_docker_compose_hash = config.read("IPFS_DOCKER_COMPOSE_HASH")
+                self.securelock_session = config.read("SECURELOCK_SESSION")
+                #fee = config.read("DEVELOPER_FEE")
+                fee = 10
 
-            txn = spinner.spin_till_done(
-                "Building transaction for securelock enclave registration",
-                self.build_transaction_add_image,
-                public_key,
-                ipfs_hash,
-                self.enclave_name_securelock,
-                str(self.securelock_version),
-                ipfs_docker_compose_hash,
-                self.securelock_session,
-                fee,
-            )
+                txn = spinner.spin_till_done(
+                    "Building transaction for securelock enclave registration",
+                    self.build_transaction_add_image,
+                    public_key,
+                    ipfs_hash,
+                    self.enclave_name_securelock,
+                    str(self.securelock_version),
+                    ipfs_docker_compose_hash,
+                    self.securelock_session,
+                    fee,
+                )
 
-            result = spinner.spin_till_done(
-                f"Processing transaction 0x{txn.hash.hex()}",
-                self.process_transaction,
-                txn
-            )
+                if txn == False:
+                    continue
 
-            return result
-        except Exception as e:
-            print(f"Unable to create secure lock image: {e}")
-            return False
+                result = spinner.spin_till_done(
+                    f"Processing transaction 0x{txn.hash.hex()}",
+                    self.process_transaction,
+                    txn
+                )
+
+                return result
+            except Exception as e:
+                print(f"\tUnable to register secure lock image: {e}")
+                print(f"\tTrying again...")
         

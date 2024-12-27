@@ -20,6 +20,7 @@ def main():
     #print("Incrementing version to", version)
 
     config.write("VERSION", version)
+    config.write("PREDECESSOR_HASH_SECURELOCK", "")
     config.write("IPFS_HASH", "")
     service_type = config.read("SERVICE_TYPE")
     print(f"""\u276f\u276f Initializing build process

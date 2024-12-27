@@ -5,6 +5,7 @@ import subprocess
 import re
 from pathlib import Path
 from ethernity_cloud_sdk_py.commands.config import Config, config
+from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
 
 config = Config(Path(".config.json").resolve())
 config.load()
@@ -91,6 +92,7 @@ def print_intro():
 
 
 def main():
+    initialize_config('.config.json')
     print_intro()
     project_name = get_project_name()
     print()
@@ -107,12 +109,16 @@ def main():
         docker_login = input("Enter Docker Login (username): ").strip()
         docker_password = input("Enter Password: ").strip()
         base_image_tag = input("Enter the image tag: ").strip()
+        config.write("BASE_IMAGE_TAG", base_image_tag)
+        config.write("DOCKER_REPO_URL", docker_repo_url)
+        config.write("DOCKER_LOGIN", docker_login)
+        config.write("DOCKER_PASSWORD", docker_password)
     print()
     blockchain_network_options = [
         "Bloxberg Mainnet",
         "Bloxberg Testnet",
         "Polygon Mainnet",
-        "Polygon Amoy Testnet",
+        #"Polygon Amoy Testnet",
     ]
     blockchain_network = prompt_options(
         "On which Blockchain network do you want to have the app set up, as a starting point? (default is Bloxberg Testnet): ",
@@ -124,16 +130,21 @@ def main():
     print(
         f"Checking if the project name (image name) is available on the {blockchain_network.replace(' ', '_')} network and ownership..."
     )
-    import ethernity_cloud_sdk_py.commands.pynithy.run.image_registry as image_registry
 
-    print(f"Running script image_registry...")
-    print(os.getcwd())
+    config.write("PROJECT_NAME", project_name)
+    config.write("SERVICE_TYPE", service_type)
+
+
+    #image_registry = ImageRegistry()
+
+    #print(f"Running script image_registry...")
+    #print(os.getcwd())
   
-    image_registry.main(
-        blockchain_network.replace(" ", "_"),
-        project_name.replace(" ", "-"),
-        "v3",
-    )
+    #image_registry.main(
+    #    blockchain_network.replace(" ", "_"),
+    #    project_name.replace(" ", "-"),
+    #    "v3",
+    #)
 
     print()
     ipfs_service_options = ["Ethernity (best effort)", "Custom IPFS"]
@@ -202,11 +213,12 @@ def main():
     config.write("BLOCKCHAIN_NETWORK", blockchain_network.replace(" ", "_"))
     config.write("IPFS_ENDPOINT", custom_url)
     config.write("IPFS_TOKEN", ipfs_token or "")
-    config.write("VERSION", "v1")
+    config.write("VERSION", 0)
+    config.write("PREDECESSOR_HASH_SECURELOCK", "")
 
     config.write(
         "TRUSTED_ZONE_IMAGE",
-        f"{'ecld' if 'polygon' in blockchain_network.lower() else 'etny'}-{service_type.lower()}-{'testnet' if 'testnet' in blockchain_network.lower() else ''}",
+        f"{'ecld' if 'polygon' in blockchain_network.lower() else 'etny'}-{service_type.lower()}{'-testnet' if 'testnet' in blockchain_network.lower() else ''}",
     )
 
     print()
