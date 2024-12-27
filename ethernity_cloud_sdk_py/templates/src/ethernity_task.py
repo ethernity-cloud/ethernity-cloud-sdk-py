@@ -11,7 +11,6 @@ from ethernity_cloud_sdk_py.commands.private_key import PrivateKeyManager
 
 code = "hello('World!')"
 
-import time
 def print_logs(runner):
     previous_logs_count = 0
     while True:
@@ -35,6 +34,7 @@ def print_logs(runner):
         # Add a small delay to prevent excessive CPU usage
         time.sleep(0.1)
 
+
 def execute_task(code) -> None:
 
     load_dotenv(override=True)
@@ -54,6 +54,7 @@ def execute_task(code) -> None:
     runner.set_log_level("INFO")
     runner.set_private_key(PRIVATE_KEY)
     runner.set_network("Polygon", "Mainnet")
+
     runner.set_storage_ipfs("https://ipfs.ethernity.cloud/api/v0")
     runner.connect()
 
@@ -80,8 +81,9 @@ def execute_task(code) -> None:
         trustedzone_enclave
     )
 
+
     print_logs(runner)
-    
+
     state = runner.get_state()
 
     if state['status'] == "ERROR":
