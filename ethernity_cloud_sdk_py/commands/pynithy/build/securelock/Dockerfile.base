@@ -1,4 +1,4 @@
-FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ecld-pynithy/python3.10.5-alpine3.15-scone5.8-pre-release AS release
+FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ecld-pynithy-amoy/python3.10.5-alpine3.15-scone5.8-pre-release AS release
 
 RUN apk update
 

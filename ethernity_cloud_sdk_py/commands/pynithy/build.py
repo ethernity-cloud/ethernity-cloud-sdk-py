@@ -61,6 +61,18 @@ ECRunner = {
         "https://polygon-rpc.com",
         137,
     ],
+    "ecld-pynithy-amoy": [
+        "0x1579b37C5a69ae02dDd23263A2b1318DE66a27C3",
+        "0xeFA33c3976f31961285Ae4f5D10188616C912728",
+        "https://rpc.ankr.com/polygon_amoy",
+        80002,
+    ],
+    "ecld-nodenithy-amoy": [
+        "0x1579b37C5a69ae02dDd23263A2b1318DE66a27C3",
+        "0xeFA33c3976f31961285Ae4f5D10188616C912728",
+        "https://rpc.ankr.com/polygon_amoy",
+        80002,
+    ],
 }
 
 def run_command(command, redirect_output=False):

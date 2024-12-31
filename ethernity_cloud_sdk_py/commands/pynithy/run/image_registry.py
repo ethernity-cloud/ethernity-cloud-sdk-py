@@ -43,10 +43,10 @@ class ImageRegistry:
                     self.max_fee_per_gas = 300
                     self.max_priority_fee_per_gas = 35
                 else:
-                    self.network_rpc = "https://rpc-amoy.polygon.technology"
-                    self.image_registry_address = "0xF7F4eEb3d9a64387F4AcEb6d521b948E6E2fB049"
-                    self.chain_id = 80001
-                    self.max_fee_per_gas = 300
+                    self.network_rpc = "https://rpc.ankr.com/polygon_amoy"
+                    self.image_registry_address = "0xeFA33c3976f31961285Ae4f5D10188616C912728"
+                    self.chain_id = 80002
+                    self.max_fee_per_gas = 100
                     self.max_priority_fee_per_gas = 35
             else:
                 # Default to Bloxberg Testnet if no matching network

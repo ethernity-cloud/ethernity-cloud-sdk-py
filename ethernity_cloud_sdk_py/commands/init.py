@@ -118,7 +118,7 @@ def main():
         "Bloxberg Mainnet",
         "Bloxberg Testnet",
         "Polygon Mainnet",
-        #"Polygon Amoy Testnet",
+        "Polygon Amoy",
     ]
     blockchain_network = prompt_options(
         "On which Blockchain network do you want to have the app set up, as a starting point? (default is Bloxberg Testnet): ",
@@ -216,11 +216,27 @@ def main():
     config.write("VERSION", 0)
     config.write("PREDECESSOR_HASH_SECURELOCK", "")
 
-    config.write(
-        "TRUSTED_ZONE_IMAGE",
-        f"{'ecld' if 'polygon' in blockchain_network.lower() else 'etny'}-{service_type.lower()}{'-testnet' if 'testnet' in blockchain_network.lower() else ''}",
-    )
 
+    # Determine the prefix based on the blockchain network
+    prefix = "ecld" if "polygon" in blockchain_network.lower() else "etny"
+
+    # Initialize suffix to empty
+    suffix = ""
+
+    # Check if it's an amoy network
+    if "amoy" in blockchain_network.lower():
+        suffix = "-amoy"
+    # Otherwise, check if it's a testnet
+    elif "testnet" in blockchain_network.lower():
+        suffix = "-testnet"
+
+    # Combine the pieces into a final image identifier
+    trusted_zone_image = f"{prefix}-{service_type.lower()}{suffix}"
+
+
+    # Write the result to the config
+    config.write("TRUSTED_ZONE_IMAGE", trusted_zone_image)
+    
     print()
     print(
         """=================================================================================================================
