@@ -216,6 +216,7 @@ def main():
     config.write("VERSION", 0)
     config.write("PREDECESSOR_HASH_SECURELOCK", "")
 
+
     # Determine the prefix based on the blockchain network
     prefix = "ecld" if "polygon" in blockchain_network.lower() else "etny"
 
@@ -231,6 +232,7 @@ def main():
 
     # Combine the pieces into a final image identifier
     trusted_zone_image = f"{prefix}-{service_type.lower()}{suffix}"
+
 
     # Write the result to the config
     config.write("TRUSTED_ZONE_IMAGE", trusted_zone_image)
