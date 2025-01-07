@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from requests.packages.urllib3 import disable_warnings
 
+from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 import ethernity_cloud_sdk_py.commands.pynithy.run.public_key_service as public_key_service
 from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
 from ethernity_cloud_sdk_py.commands.pynithy.ipfs_client import IPFSClient
@@ -392,8 +393,14 @@ def main(private_key):
     spinner = Spinner()
     image_registry.set_private_key(private_key)
     ipfs_client = IPFSClient(config.read("IPFS_ENDPOINT"))
-    BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
 
+    BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
+    DAPP_TYPE = config.read("DAPP_TYPE")
+
+    BLOCKCHAIN_CONFIG = BlockchainNetworks.get_details_by_enum_name(BLOCKCHAIN_NETWORK)
+
+    TEMPLATE_CONFIG = BLOCKCHAIN_CONFIG.template_image.get(DAPP_TYPE)
+    
     IPFS_HASH = ""
     IPFS_DOCKER_COMPOSE_HASH = ""
     IPFS_HASH_PUBLISH = ""
@@ -404,9 +411,6 @@ def main(private_key):
     os.chdir(run_dir)
     registry_path = os.path.join(current_dir, "registry")
     config.write("REGISTRY_PATH", registry_path)
-
-    templateName = config.read("TRUSTED_ZONE_IMAGE")
-    isMainnet = False if "testnet" in templateName.lower() else True
 
     result = spinner.spin_till_done("Checking docker service", get_docker_server_info)
 

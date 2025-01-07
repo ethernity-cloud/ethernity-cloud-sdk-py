@@ -87,9 +87,10 @@ def main():
 
     PROJECT_NAME = config.read("PROJECT_NAME")
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
+    [ NETWORK_NAME, NETWORK_TYPE ] = BLOCKCHAIN_NETWORK.split("_")
     ENC_PRIVATE_KEY = config.read("ENC_PRIVATE_KEY")
     DEVELOPER_FEE = config.read("DEVELOPER_FEE")
-    SERVICE_TYPE = config.read("SERVICE_TYPE")
+    DAPP_TYPE = config.read("DAPP_TYPE")
     VERSION = config.read("VERSION")
     WALLET_ADDRESS = config.read("WALLET_ADDRESS")
     IPFS_HASH = config.read("IPFS_HASH")
@@ -169,18 +170,13 @@ def main():
 """)
         exit(1) 
         
-    result = None
-    result = spinner.spin_till_done("Checking enclave ownership", image_registry.check_image_permissions)
-
-    if not result:
+    if not spinner.spin_till_done("Checking enclave ownership", image_registry.check_image_permissions):
         print("\t\u2714 Enclave ownership verification failed.")
         print()
         print(
             "\tPlease ensure the assigned wallet is the owner of the enclave image with the current version"
         )
         exit(1)
-
-    #print(result)
 
     if IPFS_HASH != "":
         #print(f"# Checking if IPFS hash '{IPFS_HASH}' exists...")
@@ -222,20 +218,8 @@ def main():
         except Exception as e:
             print(f"Error checking image: {e}")
             exit(1)
-    
 
-
-    #DEVELOPER_FEE = config.read("DEVELOPER_FEE")
-
-    #if not DEVELOPER_FEE:
-    #    task_percentage = prompt(
-    #        "Each time this enclave runs, you will be rewarded with a percentage of the execution price.\n\nPlease specify the percentage.",
-    #        default_value="10",
-    #    )
-    #    config.write("DEVELOPER_FEE", task_percentage)
-
-
-    if SERVICE_TYPE == "Nodenithy":
+    if DAPP_TYPE == "Nodenithy":
         print("Adding prerequisites for Nodenithy...")
         run_script_path = Path(__file__).resolve().parent / "nodenithy" / "run.py"
         try:
@@ -243,7 +227,8 @@ def main():
         except subprocess.CalledProcessError:
             print("Error running the Nodenithy run script.")
             exit(1)
-    elif SERVICE_TYPE == "Pynithy":
+
+    elif DAPP_TYPE == "Pynithy":
         import ethernity_cloud_sdk_py.commands.pynithy.publish as publishScript
 
         try:
@@ -273,6 +258,8 @@ def main():
 
         write_env("PROJECT_NAME", PROJECT_NAME)
         write_env("VERSION", VERSION)
+        write_env("NETWORK_NAME", NETWORK_NAME)
+        write_env("NETWORK_TYPE", NETWORK_TYPE)
         write_env("TRUSTED_ZONE_IMAGE", config.read("TRUSTED_ZONE_IMAGE"))
 
         if private_key == 'y':

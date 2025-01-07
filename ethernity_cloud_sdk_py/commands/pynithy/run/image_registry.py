@@ -12,6 +12,7 @@ from eth_account import Account
 
 from pathlib import Path
 from ethernity_cloud_sdk_py.commands.config import Config, config
+from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.spinner import Spinner
 
 config = Config(Path(".config.json").resolve())
@@ -28,33 +29,14 @@ class ImageRegistry:
             self.securelock_version = config.read("VERSION")
             self.enclave_name_trustedzone = config.read("TRUSTED_ZONE_IMAGE")
             self.trustedzone_version = "v3"
-
-            if "Bloxberg" in self.blockchain_network:
-                self.image_registry_address = "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31"
-                self.network_rpc = "https://core.bloxberg.org"
-                self.chain_id = 8995
-                self.gas = 9000000
-                self.gas_price = Web3.to_wei(1, "mwei")  # 1 Mwei
-            elif "Polygon" in self.blockchain_network:
-                if "Mainnet" in self.blockchain_network:
-                    self.network_rpc = "https://polygon-rpc.com"
-                    self.image_registry_address = "0x689f3806874d3c8A973f419a4eB24e6fBA7E830F"
-                    self.chain_id = 137
-                    self.max_fee_per_gas = 300
-                    self.max_priority_fee_per_gas = 35
-                else:
-                    self.network_rpc = "https://rpc.ankr.com/polygon_amoy"
-                    self.image_registry_address = "0xeFA33c3976f31961285Ae4f5D10188616C912728"
-                    self.chain_id = 80002
-                    self.max_fee_per_gas = 100
-                    self.max_priority_fee_per_gas = 35
-            else:
-                # Default to Bloxberg Testnet if no matching network
-                self.image_registry_address = "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31"
-                self.network_rpc = "https://core.bloxberg.org"
-                self.chain_id = 8995
-                self.gas = 9000000
-                self.gas_price = Web3.to_wei(1, "mwei")  # 1 Mwei
+            self.blockchain_config = BlockchainNetworks.get_details_by_enum_name(self.blockchain_network)
+            self.image_registry_address = self.blockchain_config.image_registry_contract_address
+            self.network_rpc = self.blockchain_config.rpc_url
+            self.chain_id = self.blockchain_config.chain_id
+            self.is_eip1559 = self.blockchain_config.is_eip1559
+            self.gas_price = self.blockchain_config.gas_price
+            self.max_fee_per_gas = self.blockchain_config.max_fee_per_gas
+            self.max_priority_fee_per_gas = self.blockchain_config.max_priority_fee_per_gas
 
             self.image_registry_abi = self.read_contract_abi("image_registry.abi")
             self.provider = self.new_provider(self.network_rpc)
@@ -90,27 +72,27 @@ class ImageRegistry:
         try:
             image_hash = self._get_latest_image_version_public_key(
                 self.project_name, self.securelock_version
-            )[0]
+            )
 
         except Exception as e:
             print(f"Error recovering public key for enclave {self.project_name} version {self.securelock_version}: {e}")
-            exit(1)
+            return False
 
-        if not image_hash:
-            return f"\t\u2714  Project is available on the {self.blockchain_network}"
-        
+        if not image_hash[0] or image_hash[0] == "":
+            #print(f"\t\u2714  Project is available on the {self.blockchain_network}")
+            return True
             
         try:
             image_owner = self.get_image_details(image_hash).owner
         except Exception as e:
             print(f"Error recovering image owner for image hash {image_hash}: {e}")
-            exit(1)
+            return False
     
         if image_owner.lower() != self.acct.address.lower():
             print(
                 f"\t\u2718  Enclave '{project_name}' is owned by '{image_owner}'.\nYou are not the account holder of the image.\nPlease change the project name and try again.\n"
             )
-            exit(1)
+            return False
             
         return f"\t\u2714  Project ownership verified on {self.blockchain_network}"
         
@@ -183,60 +165,54 @@ class ImageRegistry:
         enclave_name_securelock,
         fee,
     ):
-        #print("Adding secure lock image cert to image registry")
+        if self.blockchain_config.network == "bloxberg":
+            gasLimit = 4000000
+        else:
+            gasLimit = 1200000
+
         try:
-            if "polygon" in self.blockchain_network.lower():
-                nonce = self.provider.eth.get_transaction_count(
-                    self.acct.address, "pending"
-                )
+            nonce = self.provider.eth.get_transaction_count(
+                self.acct.address, "pending"
+            )
+            if self.blockchain_config.is_eip1559:
+                latest_block = self.provider.eth.get_block("latest")
 
-                txn = self.image_registry_contract.functions.addImage(
-                ipfs_hash,
-                cert_content,
-                version,
-                image_name,
-                docker_compose_hash,
-                enclave_name_securelock,
-                int(fee),
-                ).build_transaction(
-                    {
-                        "nonce": nonce,
-                        "chainId": self.chain_id,
-                        "from": self.acct.address,
-                        'maxFeePerGas': self.provider.to_wei(self.max_fee_per_gas, 'gwei'),
-                        'maxPriorityFeePerGas': self.provider.to_wei(self.max_priority_fee_per_gas, 'gwei'),
-                    }
-                )
+                max_fee_per_gas = int(latest_block.baseFeePerGas * 1.1) + self.provider.to_wei(self.blockchain_config.max_priority_fee_per_gas, 'gwei') # 10% increase in previous block gas price + priority fee
 
+                if max_fee_per_gas > self.provider.to_wei(self.blockchain_config.max_fee_per_gas, 'gwei'):
+                    raise Exception("Network fee per gas is too high!")
+                
+                transaction_options = {
+                    "type": 2,
+                    "nonce": nonce,
+                    "chainId": self.blockchain_config.chain_id,
+                    "from": self.acct.address,
+                    'maxFeePerGas': max_fee_per_gas,
+                    'maxPriorityFeePerGas': self.provider.to_wei(self.blockchain_config.max_priority_fee_per_gas, 'gwei'),
+                }
             else:
-                nonce = self.provider.eth.get_transaction_count(self.acct.address)
-                gas_price = (
-                    self.gas_price if self.gas_price != 1 else self.provider.to_wei(1, "mwei")
-                )
+                transaction_options = {
+                    "nonce": nonce,
+                    "chainId": self.blockchain_config.chain_id,
+                    "from": self.acct.address,
+                    "gasPrice": self.provider.to_wei(self.blockchain_config.gas_price, 'gwei'),
+                    "gas": gasLimit,
+                }
 
-                txn = self.image_registry_contract.functions.addImage(
-                ipfs_hash,
-                cert_content,
-                version,
-                image_name,
-                docker_compose_hash,
-                enclave_name_securelock,
-                int(fee),
-                ).build_transaction(
-                    {
-                        "nonce": nonce,
-                        "gas": self.gas,
-                        "gasPrice": gas_price,
-                        "chainId": self.chain_id,
-                        "from": self.acct.address,
-                    }
-                )
-
-
+            txn = self.image_registry_contract.functions.addImage(
+            ipfs_hash,
+            cert_content,
+            version,
+            image_name,
+            docker_compose_hash,
+            enclave_name_securelock,
+            int(fee),
+            ).build_transaction(transaction_options)
 
             signed_txn = self.provider.eth.account.sign_transaction(
                 txn, private_key=self.private_key
             )
+            
             return signed_txn
         except Exception as e:
             print (f"\tFailed to prepare and sign transaction: {e}")

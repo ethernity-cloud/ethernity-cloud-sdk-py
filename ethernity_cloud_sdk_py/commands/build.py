@@ -22,12 +22,12 @@ def main():
     config.write("VERSION", version)
     config.write("PREDECESSOR_HASH_SECURELOCK", "")
     config.write("IPFS_HASH", "")
-    service_type = config.read("SERVICE_TYPE")
+    dapp_type = config.read("DAPP_TYPE")
     print(f"""\u276f\u276f Initializing build process
    Project name: {project_name}
    Version: {version}""")
 
-    if service_type == "Nodenithy":
+    if dapp_type == "Nodenithy":
         #print("Adding prerequisites for Nodenithy...")
         script_path = Path(__file__).resolve().parent / "nodenithy" / "build.py"
         #print(f"Running script: {script_path}")
@@ -39,7 +39,7 @@ def main():
         except subprocess.CalledProcessError:
             print("Error running the build script.")
             exit(1)
-    elif service_type == "Pynithy":
+    elif dapp_type == "Pynithy":
         #print("Adding prerequisites for Pynithy...")
         import ethernity_cloud_sdk_py.commands.pynithy.build as buildScript
 

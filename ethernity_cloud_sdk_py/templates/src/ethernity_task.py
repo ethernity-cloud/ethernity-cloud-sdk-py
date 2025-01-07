@@ -50,10 +50,9 @@ def execute_task(code) -> None:
             print("Incorrect password. Please try again.")
             continue
 
-    runner = EthernityCloudRunner()
+    runner = EthernityCloudRunner(os.getenv("NETWORK_NAME"),os.getenv("NETWORK_TYPE"))
     runner.set_log_level("INFO")
     runner.set_private_key(PRIVATE_KEY)
-    runner.set_network("Polygon", "Mainnet")
     runner.set_storage_ipfs("https://ipfs.ethernity.cloud/api/v0")
     runner.connect()
 

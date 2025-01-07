@@ -4,6 +4,7 @@ import sys
 import shutil
 import subprocess
 from pathlib import Path
+from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.config import Config, config
 from ethernity_cloud_sdk_py.commands.spinner import Spinner
 
@@ -16,64 +17,6 @@ try:
 except ImportError:
     # For Python versions < 3.7
     from importlib_resources import path as resources_path  # type: ignore
-
-
-ECRunner = {
-    "etny-pynithy-testnet": [
-        "0x02882F03097fE8cD31afbdFbB5D72a498B41112c",
-        "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31",
-        "https://core.bloxberg.org",
-        8995,
-    ],
-    "etny-nodenithy-testnet": [
-        "0x02882F03097fE8cD31afbdFbB5D72a498B41112c",
-        "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31",
-        "https://core.bloxberg.org",
-        8995,
-    ],
-    "etny-pynithy": [
-        "0x549A6E06BB2084100148D50F51CF77a3436C3Ae7",
-        "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31",
-        "https://core.bloxberg.org",
-        8995,
-    ],
-    "etny-nodenithy": [
-        "0x549A6E06BB2084100148D50F51CF77a3436C3Ae7",
-        "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31",
-        "https://core.bloxberg.org",
-        8995,
-    ],
-    "ecld-nodenithy-testnet": [
-        "0x4274b1188ABCfa0d864aFdeD86bF9545B020dCDf",
-        "0xF7F4eEb3d9a64387F4AcEb6d521b948E6E2fB049",
-        "https://rpc-mumbai.matic.today",
-        80001,
-    ],
-    "ecld-pynithy": [
-        "0x439945BE73fD86fcC172179021991E96Beff3Cc4",
-        "0x689f3806874d3c8A973f419a4eB24e6fBA7E830F",
-        "https://polygon-rpc.com",
-        137,
-    ],
-    "ecld-nodenithy": [
-        "0x439945BE73fD86fcC172179021991E96Beff3Cc4",
-        "0x689f3806874d3c8A973f419a4eB24e6fBA7E830F",
-        "https://polygon-rpc.com",
-        137,
-    ],
-    "ecld-pynithy-amoy": [
-        "0x1579b37C5a69ae02dDd23263A2b1318DE66a27C3",
-        "0xeFA33c3976f31961285Ae4f5D10188616C912728",
-        "https://rpc.ankr.com/polygon_amoy",
-        80002,
-    ],
-    "ecld-nodenithy-amoy": [
-        "0x1579b37C5a69ae02dDd23263A2b1318DE66a27C3",
-        "0xeFA33c3976f31961285Ae4f5D10188616C912728",
-        "https://rpc.ankr.com/polygon_amoy",
-        80002,
-    ],
-}
 
 def run_command(command, redirect_output=False):
     """
@@ -188,6 +131,8 @@ def update_dockerfile():
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
     VERSION = config.read("VERSION")
     TRUSTED_ZONE_IMAGE = config.read("TRUSTED_ZONE_IMAGE")
+    DOCKER_REPO_URL = config.read("DOCKER_REPO_URL")
+    BASE_IMAGE_TAG = config.read("BASE_IMAGE_TAG")
 
     # Generate the enclave name for securelock
     SECURELOCK_SESSION = f"{PROJECT_NAME}-SECURELOCK-V3-{BLOCKCHAIN_NETWORK.split('_')[1].lower()}-{VERSION}".replace(
@@ -205,7 +150,8 @@ def update_dockerfile():
         dockerfile_secure_template = f.read()
 
     dockerfile_secure_content = (
-        dockerfile_secure_template.replace("__IMAGE_PATH__", TRUSTED_ZONE_IMAGE)
+        dockerfile_secure_template.replace("__DOCKER_REPO_URL__", DOCKER_REPO_URL)
+        .replace("__BASE_IMAGE_TAG__", BASE_IMAGE_TAG)
     )
 
     with open("Dockerfile.base", "w") as f:
@@ -230,13 +176,24 @@ def main():
     spinner = Spinner()
     
 
-    VERSION = config.read("VERSION")
-    PROJECT_NAME = config.read("PROJECT_NAME")
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
-    TRUSTED_ZONE_IMAGE = config.read("TRUSTED_ZONE_IMAGE")
+    DAPP_TYPE = config.read("DAPP_TYPE")
 
+    BLOCKCHAIN_CONFIG = BlockchainNetworks.get_details_by_enum_name(BLOCKCHAIN_NETWORK)
+
+    TEMPLATE_CONFIG = BLOCKCHAIN_CONFIG.template_image.get(DAPP_TYPE)
     
-    isMainnet = False if "testnet" in TRUSTED_ZONE_IMAGE.lower() else True
+    TRUSTED_ZONE_IMAGE = TEMPLATE_CONFIG.trusted_zone_image
+    DOCKER_REPO_URL = TEMPLATE_CONFIG.docker_repo_url
+    BASE_IMAGE_TAG = TEMPLATE_CONFIG.base_image_tag
+    DOCKER_LOGIN = TEMPLATE_CONFIG.docker_login
+    DOCKER_PASSWORD = TEMPLATE_CONFIG.docker_password
+
+    config.write("TRUSTED_ZONE_IMAGE", TRUSTED_ZONE_IMAGE)
+    config.write("BASE_IMAGE_TAG",BASE_IMAGE_TAG)
+    config.write("DOCKER_REPO_URL", DOCKER_REPO_URL)
+    config.write("DOCKER_LOGIN", DOCKER_LOGIN)
+    config.write("DOCKER_PASSWORD", DOCKER_PASSWORD)
 
 
 
@@ -299,7 +256,6 @@ def main():
     print()
 
     run_command("docker build -f Dockerfile.base -t etny-securelock-base:latest .")
-    #run_command("docker push localhost:5000/etny-securelock-base:latest")
 
 
     if os.path.exists("src/serverless/Dockerfile.serverless"):
@@ -327,18 +283,16 @@ def main():
         .replace("__BUCKET_NAME__", TRUSTED_ZONE_IMAGE + "-v3")
         .replace(
             "__SMART_CONTRACT_ADDRESS__",
-            ECRunner[TRUSTED_ZONE_IMAGE][0],
+            BLOCKCHAIN_CONFIG.protocol_contract_address,
         )
-        .replace("__IMAGE_REGISTRY_ADDRESS__", ECRunner[TRUSTED_ZONE_IMAGE][1])
-        .replace("__RPC_URL__", ECRunner[TRUSTED_ZONE_IMAGE][2])
-        .replace("__CHAIN_ID__", str(ECRunner[TRUSTED_ZONE_IMAGE][3]))
+        .replace("__IMAGE_REGISTRY_ADDRESS__", BLOCKCHAIN_CONFIG.image_registry_contract_address)
+        .replace("__RPC_URL__", BLOCKCHAIN_CONFIG.rpc_url)
+        .replace("__CHAIN_ID__", str(BLOCKCHAIN_CONFIG.chain_id))
         .replace("__TRUSTED_ZONE_IMAGE__", TRUSTED_ZONE_IMAGE)
-        .replace("__IMAGE_PATH__", TRUSTED_ZONE_IMAGE)
         .replace("__MEMORY_TO_ALLOCATE__", MEMORY_TO_ALLOCATE_FORMATED)
     )
-    imagesTag = BLOCKCHAIN_NETWORK.lower()
-    if isMainnet:
-        imagesTag = BLOCKCHAIN_NETWORK.lower().split("_")[0]
+
+    if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
         dockerfile_secure_content.replace(
             "# RUN scone-signer sign", "RUN scone-signer sign"
         )
@@ -364,9 +318,6 @@ def main():
 
     # Return to the build directory
     os.chdir("..")
-
-    print(f"TRUSTED_ZONE_IMAGE: {TRUSTED_ZONE_IMAGE}")
-    config.write("TRUSTED_ZONE_IMAGE", TRUSTED_ZONE_IMAGE)
 
     # Build etny-trustedzone
     print()
