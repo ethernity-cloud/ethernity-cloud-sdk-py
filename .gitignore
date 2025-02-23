@@ -179,3 +179,4 @@ ethernity_cloud_sdk_py/commands/pynithy/run/IPFS_HASH.ipfs
 ethernity_cloud_sdk_py/commands/pynithy/run/key.pem
 ethernity_cloud_sdk_py/commands/pynithy/run/predecessor.json
 ethernity_cloud_sdk_py/commands/pynithy/run/PUBLIC_KEY.txt
+ethernity_cloud_sdk_py/commands/pynithy/build/securelock/Dockerfile.base

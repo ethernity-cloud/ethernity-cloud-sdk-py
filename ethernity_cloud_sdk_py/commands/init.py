@@ -119,8 +119,9 @@ def main():
         default_display_option,
     )
 
-    BLOCKCHAIN_ID = BlockchainNetworks.get_enum_name(
-    )
+
+    BLOCKCHAIN_ID = BlockchainNetworks.get_enum_name(selected_display_option)
+
 
     BLOCKCHAIN_CONFIG = BlockchainNetworks.get_network_details(selected_display_option)
 

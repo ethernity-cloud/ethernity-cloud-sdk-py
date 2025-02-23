@@ -33,7 +33,7 @@ class TaskStatus:
     INPUT_CHECKSUM_ERROR = 7
 
 
-def execute_task(payload_data, input_data):
+def execute_task_v3(payload_data, input_data):
     return Exec(
         payload_data,
         input_data,
@@ -86,17 +86,3 @@ def Exec(payload_data, input_data, globals=None, locals=None):
         except Exception as e:
             return TaskStatus.BASE_EXCEPTION, e.args[0]
 
-
-# payload_data = """hello('Iosif')
-# hello('Luca')
-# hello('World')"""
-# print(execute_task(payload_data, None))
-# print(execute_task(payload_data, None)[1])
-
-
-# result = Exec('./v1/src/app/payload.py', './v1/src/app/input.txt',
-#              {'etny_print': etny_print})
-# print('task result:', result)
-
-# write the task result in a file
-# generate task hash

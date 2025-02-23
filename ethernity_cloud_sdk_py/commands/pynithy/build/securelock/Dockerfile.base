@@ -1,4 +1,4 @@
-FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ecld-pynithy-iotex-testnet/python3.10.5-alpine3.15-scone5.8-pre-release:latest AS release
+FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/etny-pynithy-testnet/python3.10.5-alpine3.15-scone5.8-pre-release:latest AS release
 
 RUN apk update
 
@@ -15,3 +15,6 @@ RUN pip3 install tinyec
 RUN pip3 install minio
 RUN pip3 install pynacl
 RUN pip3 install pyinstaller
+RUN pip3 install pyngrok
+RUN pip3 install flask
+RUN pip3 install flask_limiter

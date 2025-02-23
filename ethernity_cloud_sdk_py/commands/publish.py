@@ -219,7 +219,6 @@ def main():
             print(f"Error checking image: {e}")
             exit(1)
 
-
     if DAPP_TYPE == "Nodenithy":
         print("Adding prerequisites for Nodenithy...")
         run_script_path = Path(__file__).resolve().parent / "nodenithy" / "run.py"

@@ -42,14 +42,14 @@ class BlockchainNetworks(Enum):
         "Bloxberg Testnet", # Network display name
         "bloxberg", # Network short name
         "testnet", # Network type
-        "0x02882F03097fE8cD31afbdFbB5D72a498B41112c",
-        "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31",
+        "0x02882F03097fE8cD31afbdFbB5D72a498B41112c", # protocol contract address
+        "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31", # Image Registry Contract Address
         "https://core.bloxberg.org",
         8995,  # Example Chain ID
         False, # EIP 1559 SUPPORT
-        20,  # Example Gas Price in Gwei
-        10000000000,  # maxFeePerGas in Gwei
-        500000000,    # maxPriorityFeePerGas in Gwei
+        0.002,  # Example Gas Price in Gwei
+        0.002,  # maxFeePerGas in Gwei
+        0.0001,    # maxPriorityFeePerGas in Gwei
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
                 trusted_zone_image="etny-pynithy-testnet",
@@ -64,8 +64,8 @@ class BlockchainNetworks(Enum):
         "Polygon Mainnet", # Network display name
         "polygon", # Network short name
         "mainnet", # Network type
-        "0x439945BE73fD86fcC172179021991E96Beff3Cc4",
-        "0x689f3806874d3c8A973f419a4eB24e6fBA7E830F",
+        "0x439945BE73fD86fcC172179021991E96Beff3Cc4", # protocol contract address
+        "0x689f3806874d3c8A973f419a4eB24e6fBA7E830F", # Image Registry Contract Address
         "https://polygon-rpc.com",
         137,  # Chain ID for Polygon Mainnet
         True, # EIP 1559 SUPPORT
@@ -86,8 +86,8 @@ class BlockchainNetworks(Enum):
         "Polygon Amoy", # Network display name
         "polygon", # Network short name
         "testnet", # Network type
-        "0x1579b37C5a69ae02dDd23263A2b1318DE66a27C3",
-        "0xeFA33c3976f31961285Ae4f5D10188616C912728",
+        "0x1579b37C5a69ae02dDd23263A2b1318DE66a27C3", # protocol contract address
+        "0xeFA33c3976f31961285Ae4f5D10188616C912728", # Image Registry Contract Address
         "https://rpc.ankr.com/polygon_amoy",
         80002,  # Chain ID for Polygon Mumbai Testnet
         True, # EIP 1559 SUPPORT
@@ -108,8 +108,8 @@ class BlockchainNetworks(Enum):
         "IoTeX Testnet", # Network display name
         "iotex", # Network short name
         "testnet", # Network type
-        "0xD56385A97413Ed80E28B1b54A193b98F2C49c975",
-        "0xa7467A6391816be9367a1cC52E0ef0c15FfE3cCC",
+        "0xD56385A97413Ed80E28B1b54A193b98F2C49c975", # protocol contract address
+        "0xa7467A6391816be9367a1cC52E0ef0c15FfE3cCC", # Image Registry Contract Address
         "https://babel-api.testnet.iotex.io",
         4690,  # Chain ID for IoTeX Testnet
         True, # EIP 1559 SUPPORT
@@ -124,7 +124,30 @@ class BlockchainNetworks(Enum):
                 docker_password="",
                 base_image_tag="latest"
             ),
-        }  
+        }
+    )
+
+    ETHEREUM_SEPOLIA = (
+        "Ethereum Sepolia", # Network display name
+        "ethereum", # Network short name
+        "testnet", # Network type
+        "0x29D3eC870565B6A1510232bd950A8Bc8336f0EB2", # protocol contract address
+        "0x55e0ad455Be85162b71a790f00Fc305680E3CE53", # Image Registry Contract Address
+        "https://ethereum-sepolia-rpc.publicnode.com",
+        11155111,  # Chain ID for Ethreum Sepolia
+        True, # EIP 1559 SUPPORT
+        5,   # Gas Price in Gwei
+        15,  # maxFeePerGas in Gwei
+        1,    # maxPriorityFeePerGas in Gwei
+        {  # template_images
+            dAppTypes.PYNITHY.value: TemplateConfig(
+                trusted_zone_image="ecld-pynithy-ethereum-sepolia",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ecld-pynithy-ethereum-sepolia/python3.10.5-alpine3.15-scone5.8-pre-release",
+                docker_login="",
+                docker_password="",
+                base_image_tag="latest"
+            ),
+        }
     )
 
     def __init__(

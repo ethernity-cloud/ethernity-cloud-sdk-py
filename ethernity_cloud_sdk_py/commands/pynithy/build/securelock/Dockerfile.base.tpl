@@ -15,3 +15,6 @@ RUN pip3 install tinyec
 RUN pip3 install minio
 RUN pip3 install pynacl
 RUN pip3 install pyinstaller
+RUN pip3 install pyngrok
+RUN pip3 install flask
+RUN pip3 install flask_limiter
