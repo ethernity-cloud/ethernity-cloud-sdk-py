@@ -15,7 +15,8 @@ from web3 import Web3
 from eth_account import Account
 from web3.middleware import geth_poa_middleware
 from key_generation import get_wallet_address
-from etny_exec import execute_task, TaskStatus
+from etny_exec import execute_task_v3, TaskStatus
+from etny_exec_flask import execute_task_v4, execute_server_v4
 from models import *
 from swift_stream_service import SwiftStreamService
 from eth_account.messages import defunct_hash_message
@@ -333,8 +334,11 @@ class EtnySecureLock:
             print('Client payload and input are NOT valid')
             return
 
-        task_result = execute_task(payload_data, input_data)
-        #print('TASK RESULT (code, data):', task_result)
+        if self._metadata._payload_metadata_obj._version == 'v3':
+            task_result = execute_task_v3(payload_data, input_data)
+        else:
+            task_result = execute_server_v4(payload_data, input_data)
+
         self.task_code = str(task_result[0])
         self.task_result = task_result[1]
 

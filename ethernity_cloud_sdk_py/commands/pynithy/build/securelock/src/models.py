@@ -29,8 +29,8 @@ class PayloadFactory:
     @staticmethod
     def create_payload_metadata(metadata):
         if ':' in metadata:
-            if metadata.startswith('v3'):
-                return PayloadMetadatav3(metadata)
+            if metadata.startswith('v3') or metadata.startswith('v4'):
+                return PayloadMetadata(metadata)
             else:
                 raise ValueError("Invalid payload metadata type")
         else:
@@ -77,12 +77,13 @@ class PayloadMetadataV0(MetadataBase):
         return None
 
 
-class PayloadMetadatav3(MetadataBase):
+class PayloadMetadata(MetadataBase):
 
     def __init__(self, metadata):
-        super().__init__(metadata, 'v3')
+        super().__init__(metadata, metadata.split(':')[0])
         self._checksum = metadata.split(':')[2]
         self._ipfs_hash = metadata.split(':')[1]
+        
 
     @property
     def ipfs_hash(self):

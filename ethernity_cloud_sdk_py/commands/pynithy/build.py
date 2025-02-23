@@ -218,9 +218,7 @@ def main():
         else:
             print("Invalid format. Please enter a number followed by 'GB', 'gb', 'G', or 'g' (e.g., '16GB').")
 
-    MEMORY_TO_ALLOCATE = config.read("MEMORY_TO_ALLOCATE")
 
-    spinner.spin_till_done(f"Binary will use {MEMORY_TO_ALLOCATE}GB memory", get_docker_server_info)
 
     dockerPS = spinner.spin_till_done("Checking docker service", get_docker_server_info)
 
@@ -231,6 +229,9 @@ def main():
 """)
         exit(1)
   
+    MEMORY_TO_ALLOCATE = config.read("MEMORY_TO_ALLOCATE")
+
+    spinner.spin_till_done(f"Binary will use {MEMORY_TO_ALLOCATE}GB memory", get_docker_server_info)
 
     spinner.spin_till_done("Cleanup local registry", clean_up_registry)
 
