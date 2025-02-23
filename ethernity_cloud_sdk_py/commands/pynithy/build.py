@@ -218,8 +218,6 @@ def main():
         else:
             print("Invalid format. Please enter a number followed by 'GB', 'gb', 'G', or 'g' (e.g., '16GB').")
 
-
-
     dockerPS = spinner.spin_till_done("Checking docker service", get_docker_server_info)
 
     if dockerPS == False:

@@ -119,7 +119,9 @@ def main():
         default_display_option,
     )
 
+
     BLOCKCHAIN_ID = BlockchainNetworks.get_enum_name(selected_display_option)
+
 
     BLOCKCHAIN_CONFIG = BlockchainNetworks.get_network_details(selected_display_option)
 
@@ -138,6 +140,7 @@ def main():
         "Select the type of code to be run during the compute layer "
         f"(default is {default_dApp_type}): "
     )
+
     selected_dApp_type = prompt_options(
         dApp_prompt_message,
         dapp_types_options,
