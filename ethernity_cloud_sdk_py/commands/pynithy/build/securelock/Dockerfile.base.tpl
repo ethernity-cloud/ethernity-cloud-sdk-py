@@ -1,4 +1,4 @@
-FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/__IMAGE_PATH__/python3.10.5-alpine3.15-scone5.8-pre-release AS release
+FROM __DOCKER_REPO_URL__:__BASE_IMAGE_TAG__ AS release
 
 RUN apk update
 

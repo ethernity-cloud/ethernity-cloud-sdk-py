@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import re
 from pathlib import Path
+from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks, dAppTypes, TemplateConfig
 from ethernity_cloud_sdk_py.commands.config import Config, config
 from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
 
@@ -45,11 +46,6 @@ def get_project_name():
             return project_name
 
 
-def display_options(options):
-    for index, option in enumerate(options):
-        print(f"{index + 1}) {option}")
-
-
 def prompt_options(message, options, default_option):
     """
     Prompt the user to select an option.
@@ -63,7 +59,15 @@ def prompt_options(message, options, default_option):
         elif reply.isdigit() and 1 <= int(reply) <= len(options):
             return options[int(reply) - 1]
         else:
-            print(f"Invalid option {reply}. Please select a valid number.")
+            print(f"Invalid option '{reply}'. Please select a valid number.")
+
+def display_options(options):
+    """
+    Display the list of options to the user.
+    """
+    for idx, option in enumerate(options, start=1):
+        print(f"{idx}. {option}")
+
 
 
 def print_intro():
@@ -95,56 +99,98 @@ def main():
     initialize_config('.config.json')
     print_intro()
     project_name = get_project_name()
-    print()
-    service_type_options = ["Pynithy", "Custom"]  # "Nodenithy",
-    service_type = prompt_options(
-        "Select the type of code to be ran during the compute layer (default is Pynithy): ",
-        service_type_options,
-        "Pynithy",
+
+    config.write("PROJECT_NAME", project_name.replace(" ", "_"))
+
+    # Step 2: Extract Display Options from the Dictionary Keys
+    display_options_list = BlockchainNetworks.get_display_options()
+
+    # Define the default display option
+    default_display_option = "Bloxberg Testnet"
+
+    prompt_message = (
+        "On which Blockchain network do you want to have the dApp deployed up, as a starting point? "
+        f"(default is '{default_display_option}'): "
     )
 
+    selected_display_option = prompt_options(
+        prompt_message,
+        display_options_list,
+        default_display_option,
+    )
+
+    BLOCKCHAIN_ID = BlockchainNetworks.get_enum_name(
+    )
+
+    BLOCKCHAIN_CONFIG = BlockchainNetworks.get_network_details(selected_display_option)
+
+    config.write("BLOCKCHAIN_NETWORK", BLOCKCHAIN_ID)
+    print()
+
+    print(
+        f"Checking if the project named {project_name} is available on the {BLOCKCHAIN_CONFIG.display_name} network and ownership..."
+    )
+
+
+    dapp_types_options = [dAppType.value for dAppType in dAppTypes]
+    default_dApp_type = "Pynithy"
+
+    dApp_prompt_message = (
+        "Select the type of code to be run during the compute layer "
+        f"(default is {default_dApp_type}): "
+    )
+
+    selected_dApp_type = prompt_options(
+        dApp_prompt_message,
+        dapp_types_options,
+        default_dApp_type,
+    )
+
+    TEMPLATE_CONFIG = BLOCKCHAIN_CONFIG.template_image.get(selected_dApp_type)
+
+    # Step 7: Handle Docker Variables Based on dApp Type
     docker_repo_url = docker_login = docker_password = base_image_tag = None
-    if service_type == "Custom":
-        docker_repo_url = input("Enter Docker repository URL: ").strip()
-        docker_login = input("Enter Docker Login (username): ").strip()
-        docker_password = input("Enter Password: ").strip()
+    if selected_dApp_type == dAppTypes.CUSTOM.value:
+
+        # Prompt for Base Image Tag
+        trusted_zone_image = input("Enter the trusted zone image name: ").strip()
+        while not base_image_tag:
+            print("Trusted zone image name cannot be empty.")
+            trusted_zone_image = input("Enter the trusted zone inmage name: ").strip()
+
+        # Prompt for Docker Repository URL with validation
+        while True:
+            docker_repo_url = input("Enter Docker repository URL: ").strip()
+            if is_valid_url(docker_repo_url):
+                break
+            else:
+                print("Invalid URL format. Please enter a valid Docker repository URL (e.g., https://repo.url).")
+        
+        # Prompt for Base Image Tag
         base_image_tag = input("Enter the image tag: ").strip()
+        while not base_image_tag:
+            print("Base image tag cannot be empty.")
+            base_image_tag = input("Enter the image tag: ").strip()
+        
+        # Prompt for Docker Login (username)
+        docker_login = input("Enter Docker Login (username): ").strip()
+        while not docker_login:
+            print("Docker Login cannot be empty.")
+            docker_login = input("Enter Docker Login (username): ").strip()
+        
+        # Prompt for Docker Password securely
+        docker_password = getpass.getpass("Enter Docker Password: ").strip()
+        while not docker_password:
+            print("Docker Password cannot be empty.")
+            docker_password = getpass.getpass("Enter Docker Password: ").strip()
+
+        config.write("TRUSTED_ZONE_IMAGE", trusted_zone_image)
         config.write("BASE_IMAGE_TAG", base_image_tag)
         config.write("DOCKER_REPO_URL", docker_repo_url)
         config.write("DOCKER_LOGIN", docker_login)
         config.write("DOCKER_PASSWORD", docker_password)
-    print()
-    blockchain_network_options = [
-        "Bloxberg Mainnet",
-        "Bloxberg Testnet",
-        "Polygon Mainnet",
-        "Polygon Amoy",
-    ]
-    blockchain_network = prompt_options(
-        "On which Blockchain network do you want to have the app set up, as a starting point? (default is Bloxberg Testnet): ",
-        blockchain_network_options,
-        "Bloxberg Testnet",
-    )
-    print()
 
-    print(
-        f"Checking if the project name (image name) is available on the {blockchain_network.replace(' ', '_')} network and ownership..."
-    )
-
-    config.write("PROJECT_NAME", project_name)
-    config.write("SERVICE_TYPE", service_type)
-
-
-    #image_registry = ImageRegistry()
-
-    #print(f"Running script image_registry...")
-    #print(os.getcwd())
-  
-    #image_registry.main(
-    #    blockchain_network.replace(" ", "_"),
-    #    project_name.replace(" ", "-"),
-    #    "v3",
-    #)
+    config.write("DAPP_TYPE", selected_dApp_type)
 
     print()
     ipfs_service_options = ["Ethernity (best effort)", "Custom IPFS"]
@@ -193,49 +239,10 @@ def main():
             "Define backend functions in src/serverless to be available for cli interaction."
         )
 
-    config.write("PROJECT_NAME", project_name.replace(" ", "_"))
-    config.write("SERVICE_TYPE", service_type)
-    if service_type == "Custom":
-        config.write("BASE_IMAGE_TAG", base_image_tag or "")
-        config.write("DOCKER_REPO_URL", docker_repo_url)
-        config.write("DOCKER_LOGIN", docker_login)
-        config.write("DOCKER_PASSWORD", docker_password)
-    elif service_type == "Nodenithy":
-        config.write("BASE_IMAGE_TAG", "")
-        config.write("DOCKER_REPO_URL", "")
-        config.write("DOCKER_LOGIN", "")
-        config.write("DOCKER_PASSWORD", "")
-    elif service_type == "Pynithy":
-        config.write("BASE_IMAGE_TAG", "")
-        config.write("DOCKER_REPO_URL", "")
-        config.write("DOCKER_LOGIN", "")
-        config.write("DOCKER_PASSWORD", "")
-    config.write("BLOCKCHAIN_NETWORK", blockchain_network.replace(" ", "_"))
     config.write("IPFS_ENDPOINT", custom_url)
     config.write("IPFS_TOKEN", ipfs_token or "")
     config.write("VERSION", 0)
     config.write("PREDECESSOR_HASH_SECURELOCK", "")
-
-
-    # Determine the prefix based on the blockchain network
-    prefix = "ecld" if "polygon" in blockchain_network.lower() else "etny"
-
-    # Initialize suffix to empty
-    suffix = ""
-
-    # Check if it's an amoy network
-    if "amoy" in blockchain_network.lower():
-        suffix = "-amoy"
-    # Otherwise, check if it's a testnet
-    elif "testnet" in blockchain_network.lower():
-        suffix = "-testnet"
-
-    # Combine the pieces into a final image identifier
-    trusted_zone_image = f"{prefix}-{service_type.lower()}{suffix}"
-
-
-    # Write the result to the config
-    config.write("TRUSTED_ZONE_IMAGE", trusted_zone_image)
     
     print()
     print(

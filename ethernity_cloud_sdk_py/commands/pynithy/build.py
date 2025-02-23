@@ -4,6 +4,7 @@ import sys
 import shutil
 import subprocess
 from pathlib import Path
+from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.config import Config, config
 from ethernity_cloud_sdk_py.commands.spinner import Spinner
 
@@ -16,7 +17,6 @@ try:
 except ImportError:
     # For Python versions < 3.7
     from importlib_resources import path as resources_path  # type: ignore
-
 
 ECRunner = {
     "etny-pynithy-testnet": [
@@ -188,6 +188,8 @@ def update_dockerfile():
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
     VERSION = config.read("VERSION")
     TRUSTED_ZONE_IMAGE = config.read("TRUSTED_ZONE_IMAGE")
+    DOCKER_REPO_URL = config.read("DOCKER_REPO_URL")
+    BASE_IMAGE_TAG = config.read("BASE_IMAGE_TAG")
 
     # Generate the enclave name for securelock
     SECURELOCK_SESSION = f"{PROJECT_NAME}-SECURELOCK-V3-{BLOCKCHAIN_NETWORK.split('_')[1].lower()}-{VERSION}".replace(
@@ -205,7 +207,8 @@ def update_dockerfile():
         dockerfile_secure_template = f.read()
 
     dockerfile_secure_content = (
-        dockerfile_secure_template.replace("__IMAGE_PATH__", TRUSTED_ZONE_IMAGE)
+        dockerfile_secure_template.replace("__DOCKER_REPO_URL__", DOCKER_REPO_URL)
+        .replace("__BASE_IMAGE_TAG__", BASE_IMAGE_TAG)
     )
 
     with open("Dockerfile.base", "w") as f:
@@ -230,13 +233,51 @@ def main():
     spinner = Spinner()
     
 
-    VERSION = config.read("VERSION")
-    PROJECT_NAME = config.read("PROJECT_NAME")
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
-    TRUSTED_ZONE_IMAGE = config.read("TRUSTED_ZONE_IMAGE")
+    DAPP_TYPE = config.read("DAPP_TYPE")
 
+    BLOCKCHAIN_CONFIG = BlockchainNetworks.get_details_by_enum_name(BLOCKCHAIN_NETWORK)
+
+    TEMPLATE_CONFIG = BLOCKCHAIN_CONFIG.template_image.get(DAPP_TYPE)
     
-    isMainnet = False if "testnet" in TRUSTED_ZONE_IMAGE.lower() else True
+    TRUSTED_ZONE_IMAGE = TEMPLATE_CONFIG.trusted_zone_image
+    DOCKER_REPO_URL = TEMPLATE_CONFIG.docker_repo_url
+    BASE_IMAGE_TAG = TEMPLATE_CONFIG.base_image_tag
+    DOCKER_LOGIN = TEMPLATE_CONFIG.docker_login
+    DOCKER_PASSWORD = TEMPLATE_CONFIG.docker_password
+
+    config.write("TRUSTED_ZONE_IMAGE", TRUSTED_ZONE_IMAGE)
+    config.write("BASE_IMAGE_TAG",BASE_IMAGE_TAG)
+    config.write("DOCKER_REPO_URL", DOCKER_REPO_URL)
+    config.write("DOCKER_LOGIN", DOCKER_LOGIN)
+    config.write("DOCKER_PASSWORD", DOCKER_PASSWORD)
+
+
+
+    while config.read("MEMORY_TO_ALLOCATE") == None:
+        memory_input = input("\n\tEnter memory to allocate (e.g., '2GB', '4 G', etc.) [1GB]: ").strip()
+
+        if memory_input == "":
+            memory_input = "1GB"
+
+        # Regex pattern to extract the integer part before the unit
+        match = re.match(r'^(\d+)\s*(gb|g)?$', memory_input, re.IGNORECASE)
+
+        if match:
+            memory_to_allocate = int(match.group(1))
+
+            if 1 <= memory_to_allocate < 128:
+
+                config.write("MEMORY_TO_ALLOCATE", memory_to_allocate)
+                break
+            else:
+                print("Please enter a valid memory allocation between 1 and 128GB.")
+        else:
+            print("Invalid format. Please enter a number followed by 'GB', 'gb', 'G', or 'g' (e.g., '16GB').")
+
+    MEMORY_TO_ALLOCATE = config.read("MEMORY_TO_ALLOCATE")
+
+    spinner.spin_till_done(f"Binary will use {MEMORY_TO_ALLOCATE}GB memory", get_docker_server_info)
 
 
 
@@ -299,7 +340,6 @@ def main():
     print()
 
     run_command("docker build -f Dockerfile.base -t etny-securelock-base:latest .")
-    #run_command("docker push localhost:5000/etny-securelock-base:latest")
 
 
     if os.path.exists("src/serverless/Dockerfile.serverless"):
@@ -327,18 +367,16 @@ def main():
         .replace("__BUCKET_NAME__", TRUSTED_ZONE_IMAGE + "-v3")
         .replace(
             "__SMART_CONTRACT_ADDRESS__",
-            ECRunner[TRUSTED_ZONE_IMAGE][0],
+            BLOCKCHAIN_CONFIG.protocol_contract_address,
         )
-        .replace("__IMAGE_REGISTRY_ADDRESS__", ECRunner[TRUSTED_ZONE_IMAGE][1])
-        .replace("__RPC_URL__", ECRunner[TRUSTED_ZONE_IMAGE][2])
-        .replace("__CHAIN_ID__", str(ECRunner[TRUSTED_ZONE_IMAGE][3]))
+        .replace("__IMAGE_REGISTRY_ADDRESS__", BLOCKCHAIN_CONFIG.image_registry_contract_address)
+        .replace("__RPC_URL__", BLOCKCHAIN_CONFIG.rpc_url)
+        .replace("__CHAIN_ID__", str(BLOCKCHAIN_CONFIG.chain_id))
         .replace("__TRUSTED_ZONE_IMAGE__", TRUSTED_ZONE_IMAGE)
-        .replace("__IMAGE_PATH__", TRUSTED_ZONE_IMAGE)
         .replace("__MEMORY_TO_ALLOCATE__", MEMORY_TO_ALLOCATE_FORMATED)
     )
-    imagesTag = BLOCKCHAIN_NETWORK.lower()
-    if isMainnet:
-        imagesTag = BLOCKCHAIN_NETWORK.lower().split("_")[0]
+
+    if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
         dockerfile_secure_content.replace(
             "# RUN scone-signer sign", "RUN scone-signer sign"
         )
@@ -364,9 +402,6 @@ def main():
 
     # Return to the build directory
     os.chdir("..")
-
-    print(f"TRUSTED_ZONE_IMAGE: {TRUSTED_ZONE_IMAGE}")
-    config.write("TRUSTED_ZONE_IMAGE", TRUSTED_ZONE_IMAGE)
 
     # Build etny-trustedzone
     print()
