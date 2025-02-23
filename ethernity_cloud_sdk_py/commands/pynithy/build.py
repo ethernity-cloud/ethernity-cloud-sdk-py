@@ -18,6 +18,63 @@ except ImportError:
     # For Python versions < 3.7
     from importlib_resources import path as resources_path  # type: ignore
 
+ECRunner = {
+    "etny-pynithy-testnet": [
+        "0x02882F03097fE8cD31afbdFbB5D72a498B41112c",
+        "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31",
+        "https://core.bloxberg.org",
+        8995,
+    ],
+    "etny-nodenithy-testnet": [
+        "0x02882F03097fE8cD31afbdFbB5D72a498B41112c",
+        "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31",
+        "https://core.bloxberg.org",
+        8995,
+    ],
+    "etny-pynithy": [
+        "0x549A6E06BB2084100148D50F51CF77a3436C3Ae7",
+        "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31",
+        "https://core.bloxberg.org",
+        8995,
+    ],
+    "etny-nodenithy": [
+        "0x549A6E06BB2084100148D50F51CF77a3436C3Ae7",
+        "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31",
+        "https://core.bloxberg.org",
+        8995,
+    ],
+    "ecld-nodenithy-testnet": [
+        "0x4274b1188ABCfa0d864aFdeD86bF9545B020dCDf",
+        "0xF7F4eEb3d9a64387F4AcEb6d521b948E6E2fB049",
+        "https://rpc-mumbai.matic.today",
+        80001,
+    ],
+    "ecld-pynithy": [
+        "0x439945BE73fD86fcC172179021991E96Beff3Cc4",
+        "0x689f3806874d3c8A973f419a4eB24e6fBA7E830F",
+        "https://polygon-rpc.com",
+        137,
+    ],
+    "ecld-nodenithy": [
+        "0x439945BE73fD86fcC172179021991E96Beff3Cc4",
+        "0x689f3806874d3c8A973f419a4eB24e6fBA7E830F",
+        "https://polygon-rpc.com",
+        137,
+    ],
+    "ecld-pynithy-amoy": [
+        "0x1579b37C5a69ae02dDd23263A2b1318DE66a27C3",
+        "0xeFA33c3976f31961285Ae4f5D10188616C912728",
+        "https://rpc.ankr.com/polygon_amoy",
+        80002,
+    ],
+    "ecld-nodenithy-amoy": [
+        "0x1579b37C5a69ae02dDd23263A2b1318DE66a27C3",
+        "0xeFA33c3976f31961285Ae4f5D10188616C912728",
+        "https://rpc.ankr.com/polygon_amoy",
+        80002,
+    ],
+}
+
 def run_command(command, redirect_output=False):
     """
     Execute a shell command without producing output on the terminal.
@@ -194,6 +251,33 @@ def main():
     config.write("DOCKER_REPO_URL", DOCKER_REPO_URL)
     config.write("DOCKER_LOGIN", DOCKER_LOGIN)
     config.write("DOCKER_PASSWORD", DOCKER_PASSWORD)
+
+
+
+    while config.read("MEMORY_TO_ALLOCATE") == None:
+        memory_input = input("\n\tEnter memory to allocate (e.g., '2GB', '4 G', etc.) [1GB]: ").strip()
+
+        if memory_input == "":
+            memory_input = "1GB"
+
+        # Regex pattern to extract the integer part before the unit
+        match = re.match(r'^(\d+)\s*(gb|g)?$', memory_input, re.IGNORECASE)
+
+        if match:
+            memory_to_allocate = int(match.group(1))
+
+            if 1 <= memory_to_allocate < 128:
+
+                config.write("MEMORY_TO_ALLOCATE", memory_to_allocate)
+                break
+            else:
+                print("Please enter a valid memory allocation between 1 and 128GB.")
+        else:
+            print("Invalid format. Please enter a number followed by 'GB', 'gb', 'G', or 'g' (e.g., '16GB').")
+
+    MEMORY_TO_ALLOCATE = config.read("MEMORY_TO_ALLOCATE")
+
+    spinner.spin_till_done(f"Binary will use {MEMORY_TO_ALLOCATE}GB memory", get_docker_server_info)
 
 
 

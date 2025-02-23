@@ -12,6 +12,7 @@ from ethernity_cloud_sdk_py.commands.private_key import PrivateKeyManager
 code = "hello('World!')"
 
 import time
+
 def print_logs(runner):
     previous_logs_count = 0
     while True:
@@ -53,6 +54,7 @@ def execute_task(code) -> None:
     runner = EthernityCloudRunner(os.getenv("NETWORK_NAME"),os.getenv("NETWORK_TYPE"))
     runner.set_log_level("INFO")
     runner.set_private_key(PRIVATE_KEY)
+
     runner.set_storage_ipfs("https://ipfs.ethernity.cloud/api/v0")
     runner.connect()
 
