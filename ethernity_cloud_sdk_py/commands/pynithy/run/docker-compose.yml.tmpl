@@ -13,6 +13,11 @@ services:
             published: 18766
             protocol: tcp
             mode: host
+        healthcheck:
+          test: ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/18766"]
+          interval: 5s
+          timeout: 3s
+          retries: 5
 
     etny-securelock:
         container_name: etny-securelock
@@ -29,7 +34,7 @@ services:
           - SCONE_STACK=4M
           - SCONE_ALLOW_DLOPEN=1
           - SCONE_EXTENSIONS_PATH=/lib/libbinary-fs.so
-        restart: on-failure:5
+        restart: on-failure
         devices:
           - "/dev/sgx_enclave:/dev/sgx_enclave"
         depends_on:
@@ -49,7 +54,7 @@ services:
         - SCONE_LOG=DEBUG
         - SCONE_ALLOW_DLOPEN=1
         - SCONE_EXTENSIONS_PATH=/lib/libbinary-fs.so
-      restart: on-failure:5
+      restart: on-failure
       devices:
         - "/dev/sgx_enclave:/dev/sgx_enclave"
       depends_on:
