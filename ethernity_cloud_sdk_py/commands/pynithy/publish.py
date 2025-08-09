@@ -7,6 +7,7 @@ import re
 import json
 import shutil
 import requests
+import yaml
 from os.path import join, dirname
 from dotenv import load_dotenv
 import os
@@ -68,11 +69,11 @@ def prompt_options(message, options, default_option):
             )
 
 def extract_scone_hash(service):
-    command = f"docker-compose run -e SCONE_LOG=INFO -e SCONE_HASH=1 {service}"
+    command = f"docker-compose -f docker-compose.yml run -e SCONE_LOG=INFO -e SCONE_HASH=1 {service}"
     try:
         output = (
             subprocess.check_output(
-                command, shell=True, cwd=run_dir, stderr=subprocess.STDOUT
+                command, shell=True, cwd=build_dir, stderr=subprocess.STDOUT
             )
             .decode()
             .strip()
@@ -153,51 +154,81 @@ def get_docker_server_info():
         return False
     except FileNotFoundError:
         return False
-
-def update_docker_compose_files():
-    
-    SECURELOCK_SESSION = config.read("SECURELOCK_SESSION")
-
-    #if "testnet" in config.read("BLOCKCHAIN_NETWORK").lower():
-    #    TRUSTEDZONE_SESSION = "etny-pynithy-trustedzone-v3-testnet-0.1.12"
-    #else:
-    #    TRUSTEDZONE_SESSION = "ecld-pynithy-trustedzone-v3-3.0.0"
-
-    TRUSTEDZONE_IPFS_HASH = image_registry.get_trusted_zone_hash(config.read("TRUSTED_ZONE_IMAGE"), "v3")
-    TRUSTEDZONE_SESSION = image_registry.get_trustezone_image_session(TRUSTEDZONE_IPFS_HASH)
-
-    MEMORY_TO_ALLOCATE = config.read("MEMORY_TO_ALLOCATE")
-    MEMORY_TO_ALLOCATE_FORMATED = f"{MEMORY_TO_ALLOCATE * 1024}M"
+def update_docker_compose_files(dest_dir: Path) -> bool:
+    """
+    1) Restore .tmpl → .yml
+    2) Replace placeholders by blind text substitution (like sed)
+    3) Merge in any services under src/serverless/svc/*/docker-compose.yml
+    """
     try:
-        # Backup and restore docker-compose templates
-        backup_files = ["docker-compose.yml.tmpl", "docker-compose-final.yml.tmpl"]
-        for file in backup_files:
-            if not os.path.exists(file):
-                print(f"Error: {file} not found!")
+        # --- prepare workspace ---
+        project_root = Path.cwd()
+        run_src = Path(__file__).resolve().parent / "run"
+        if dest_dir.exists():
+            shutil.rmtree(dest_dir)
+        shutil.copytree(run_src, dest_dir)
+
+        # --- restore templates ---
+        for tmpl_name in ("docker-compose.yml.tmpl", "docker-compose-final.yml.tmpl"):
+            tmpl = dest_dir / tmpl_name
+            if tmpl.is_file():
+                (tmpl.with_suffix("")).write_bytes(tmpl.read_bytes())
+            else:
+                print(f"Warning: missing template {tmpl_name!r}, skipping")
+
+        # --- load placeholder values ---
+        securelock = config.read("SECURELOCK_SESSION")
+        trustedzone_hash = image_registry.get_trusted_zone_hash(
+            config.read("TRUSTED_ZONE_IMAGE"), "v3"
+        )
+        trustedzone = image_registry.get_trustezone_image_session(trustedzone_hash)
+        memory = config.read("MEMORY_TO_ALLOCATE")
+
+        # --- simple text replacement helper ---
+        def replace_placeholders_in_file(path: Path):
+            text = path.read_text(encoding="utf-8")
+            text = (text
+                    .replace("__SECURELOCK_SESSION__", securelock)
+                    .replace("__TRUSTEDZONE_SESSION__", trustedzone)
+                    .replace("__MEMORY_TO_ALLOCATE__", memory))
+            path.write_text(text, encoding="utf-8")
+
+        # --- 2) apply replacements ---
+        for fname in ("docker-compose.yml", "docker-compose-final.yml"):
+            fpath = dest_dir / fname
+            if fpath.is_file():
+                replace_placeholders_in_file(fpath)
+            else:
+                print(f"Warning: {fname!r} not found, skipping replacements")
+
+        # --- 3) merge in serverless services ---
+        svc_root = project_root / "src" / "serverless" / "svc"
+        if not svc_root.is_dir():
+            return True
+
+        final_file = dest_dir / "docker-compose-final.yml"
+        with final_file.open("r") as f:
+            main = yaml.safe_load(f) or {}
+        services = main.setdefault("services", {})
+
+        for svc_dir in svc_root.iterdir():
+            comp = svc_dir / "docker-compose.yml"
+            if not comp.is_file():
                 continue
-            shutil.copyfile(file, file.replace(".tmpl", ""))
+            with comp.open("r") as sf:
+                svc_data = yaml.safe_load(sf) or {}
+            for name, svc_def in svc_data.get("services", {}).items():
+                services[name] = svc_def
 
-        files = ["docker-compose.yml", "docker-compose-final.yml"]
-        for file in files:
-            if not os.path.exists(file):
-                print(f"Error: {file} not found!")
-                continue
-            with open(file, "r") as f:
-                content = f.read()
+        with final_file.open("w") as f:
+            yaml.safe_dump(main, f, default_flow_style=False)
 
-            content = (
-                content
-                .replace("__SECURELOCK_SESSION__", SECURELOCK_SESSION)
-                .replace("__TRUSTEDZONE_SESSION__", TRUSTEDZONE_SESSION)
-                .replace("__MEMORY_TO_ALLOCATE__", MEMORY_TO_ALLOCATE_FORMATED)
-            )
+        return True
 
-            with open(file, "w") as f:
-                f.write(content)
     except Exception as e:
+        print(f"[update_docker_compose_files] Error: {e}")
         return False
-    
-    return True
+
 
 def extract_public_key_local():
         try:
@@ -205,7 +236,7 @@ def extract_public_key_local():
                 subprocess.check_output(
                     "docker-compose run etny-securelock",
                     shell=True,
-                    cwd=run_dir,
+                    cwd=build_dir,
                     stderr=subprocess.STDOUT,
                 )
                 .decode()
@@ -333,11 +364,13 @@ def generate_certificates():
     )
 
     # Write private key and certificate to files
-    with open("key.pem", "wb") as f:
+    with open(certs_dir / "key.pem", "wb") as f:
         f.write(private_key_pem)
 
-    with open("cert.pem", "wb") as f:
+    with open(certs_dir / "cert.pem", "wb") as f:
         f.write(certificate_pem)
+
+    return True
 
 def update_cas_session():
     # Read certificates and data
@@ -357,7 +390,7 @@ def update_cas_session():
         # Create a session to manage certificates and SSL settings
         session = requests.Session()
         session.verify = False  # Equivalent to rejectUnauthorized: false
-        session.cert = ("cert.pem", "key.pem")  # Provide the client cert and key
+        session.cert = (certs_dir / "cert.pem", certs_dir / "key.pem")  # Provide the client cert and key
 
         # Perform the POST request
         response = session.post(
@@ -405,11 +438,16 @@ def main(private_key):
     IPFS_DOCKER_COMPOSE_HASH = ""
     IPFS_HASH_PUBLISH = ""
 
-    global current_dir, run_dir
+    global current_dir, build_dir, certs_dir, run_dir
     current_dir = os.getcwd()
+    build_dir = Path.cwd()  / "build" / "securelock" / "run"
+    certs_dir = Path.cwd()  / "build" / "certs"
+
+    # make sure it exists
+    os.makedirs(build_dir, exist_ok=True)
+    os.makedirs(certs_dir, exist_ok=True)
     run_dir = Path(__file__).resolve().parent / "run"
-    os.chdir(run_dir)
-    registry_path = os.path.join(current_dir, "registry")
+    registry_path = os.path.join(current_dir, "build", "registry")
     config.write("REGISTRY_PATH", registry_path)
 
     result = spinner.spin_till_done("Checking docker service", get_docker_server_info)
@@ -418,6 +456,9 @@ def main(private_key):
         print("Error: Docker version not found. Please install and run docker service.")
         exit(1)
 
+    spinner.spin_till_done("Updating docker composer files", update_docker_compose_files, build_dir)
+
+    os.chdir(build_dir)
 
     try:
         mrenclave_securelock = spinner.spin_till_done(
@@ -440,12 +481,12 @@ def main(private_key):
         )
         
         # Generate certificates if needed
-        key_pem_path = "key.pem"
-        cert_pem_path = "cert.pem"
+        key_pem_path = certs_dir / "key.pem"
+        cert_pem_path = certs_dir / "cert.pem"
 
         if (
             not os.path.exists(key_pem_path)
-            and not os.path.exists(cert_pem_path)
+            or not os.path.exists(cert_pem_path)
         ):
             spinner.spin_till_done("Generating certificate for session registration", generate_certificates)
 
@@ -456,8 +497,6 @@ def main(private_key):
     else:
         IPFS_HASH = config.read("IPFS_HASH")
         IPFS_DOCKER_COMPOSE_HASH = config.read("IPFS_DOCKER_COMPOSE_HASH")
-
-    spinner.spin_till_done("Updating docker composer files", update_docker_compose_files)
 
     print('\n\u276f\u276f Extracting public key from enclave')
 

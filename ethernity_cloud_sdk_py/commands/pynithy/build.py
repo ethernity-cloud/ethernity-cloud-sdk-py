@@ -76,7 +76,7 @@ def get_docker_server_info():
 
 def clean_up_registry():
     # Remove the 'registry' directory if it exists
-    shutil.rmtree("./registry", ignore_errors=True)
+    shutil.rmtree("./build/registry", ignore_errors=True)
 
     # Stop and remove any running Docker containers or images that might conflict
     dockerPS = get_command_output("docker ps --filter name=registry -a -q")
@@ -110,19 +110,51 @@ def clean_up_registry():
     return True
 
 def copy_backend_to_build_dir(build_dir):
-    # Copy serverless source code to the build directory
+    # Copy serverless source code (including subdirectories) to the build directory
 
-    src_dir = "./src/serverless"
-    dest_dir = os.path.join(build_dir, "securelock", "src", "serverless")
-    #print(f"Creating destination directory: {dest_dir}")
-    os.makedirs(dest_dir, exist_ok=True)
+    src_dir = Path.cwd() / "src" / "serverless"
+    dest_dir = Path(build_dir) / "securelock" / "src" / "serverless"
 
-    #print(f"Copying files from {src_dir} to {dest_dir}")
-    for file_name in os.listdir(src_dir):
-        src_file = os.path.join(src_dir, file_name)
-        dest_file = os.path.join(dest_dir, file_name)
-        if os.path.isfile(src_file):
-            shutil.copy(src_file, dest_file)
+    # Remove destination directory if it exists to avoid conflicts
+    if dest_dir.exists():
+        shutil.rmtree(dest_dir)
+    
+    # Copy entire directory tree
+    shutil.copytree(src_dir, dest_dir)
+
+    return True
+
+
+def copy_from_module_to_build_dir(build_dir):
+    # Copy module files from module dir to build dir
+    module_dir = Path(__file__).resolve().parent
+
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    scripts_dir = build_dir / "securelock" / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+
+
+    src_file = module_dir / "build" / "securelock" / "Dockerfile.base.tpl"
+    dest_file = build_dir / "securelock" / "Dockerfile.base.tpl"
+    shutil.copy(src_file, dest_file)
+
+
+    src_file = module_dir / "build" / "securelock" / "Dockerfile.tpl"
+    dest_file = build_dir / "securelock" / "Dockerfile.tpl"
+    shutil.copy(src_file, dest_file)
+
+    src_file = module_dir / "build" / "securelock" / "scripts" / "binary-fs-build.sh"
+    dest_file = build_dir / "securelock" / "scripts" / "binary-fs-build.sh"
+    shutil.copy(src_file, dest_file)
+
+    src_file = module_dir / "build" / "securelock" / "src"
+    dest_file = build_dir / "securelock" / "src"
+    # Remove dest if it exists (since copytree fails if dest exists)
+
+    if dest_file.exists():
+        shutil.rmtree(dest_file)
+    shutil.copytree(src_file, dest_file)
 
     return True
 
@@ -167,14 +199,48 @@ def start_local_registry():
 
     return True
 
+
+def build_and_push_services(build_dir: str):
+    """
+    Scan build_dir/svc, build each service via its Dockerfile,
+    and push to the local registry at localhost:5000.
+    """
+    svc_root = os.path.join(build_dir, 'securelock\src\serverless\svc')
+    if not os.path.isdir(svc_root):
+        print(f"No svc directory found at {svc_root!r}")
+        return True
+
+    for svc_name in os.listdir(svc_root):
+        svc_path = os.path.join(svc_root, svc_name)
+        if not os.path.isdir(svc_path):
+            continue
+
+        image_tag = f"localhost:5000/{svc_name}:latest"
+
+        # Build the Docker image
+        subprocess.run(
+            ["docker", "build", "-t", image_tag, svc_path],
+            check=True
+        )
+
+        # Push to local registry
+        subprocess.run(
+            ["docker", "push", image_tag],
+            check=True
+        )
+
+    return True
+
 def main():
     global current_dir
     # Set current directory
     current_dir = os.getcwd()
     # Set the build directory path
-    build_dir = Path(__file__).resolve().parent / "build"
+    build_dir = Path.cwd() / "build"
+
+    copy_from_module_to_build_dir(build_dir)
+
     spinner = Spinner()
-    
 
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
     DAPP_TYPE = config.read("DAPP_TYPE")
@@ -197,26 +263,46 @@ def main():
 
 
 
-    while config.read("MEMORY_TO_ALLOCATE") == None:
-        memory_input = input("\n\tEnter memory to allocate (e.g., '2GB', '4 G', etc.) [1GB]: ").strip()
+    while config.read("MEMORY_TO_ALLOCATE") is None:
+        memory_input = input("\n\tEnter memory to allocate (e.g., '2GB', '512M', '4 G', etc.) [1GB]: ").strip()
 
         if memory_input == "":
             memory_input = "1GB"
 
-        # Regex pattern to extract the integer part before the unit
-        match = re.match(r'^(\d+)\s*(gb|g)?$', memory_input, re.IGNORECASE)
+        # Regex pattern to extract the integer and unit (GB or MB)
+        match = re.match(r'^(\d+)\s*(gb|g|mb|m)?$', memory_input, re.IGNORECASE)
 
         if match:
-            memory_to_allocate = int(match.group(1))
+            value = int(match.group(1))
+            unit = match.group(2)
 
-            if 1 <= memory_to_allocate < 128:
-
-                config.write("MEMORY_TO_ALLOCATE", memory_to_allocate)
-                break
+            if unit is None:
+                # Default to GB if no unit provided
+                unit = 'GB'
             else:
-                print("Please enter a valid memory allocation between 1 and 128GB.")
+                unit = unit.upper()
+
+            if unit in ('GB', 'G'):
+                if 1 <= value < 128:
+                    final_value = f"{value}G"
+                    config.write("MEMORY_TO_ALLOCATE", final_value)
+                    break
+                else:
+                    print("Please enter a valid memory allocation between 1 and 128GB.")
+            elif unit in ('MB', 'M'):
+                if 128 <= value < 131072:  # Between 128 MB and 128 GB
+                    if value % 1024 == 0:
+                        final_value = f"{value // 1024}G"
+                    else:
+                        final_value = f"{value}M"
+                    config.write("MEMORY_TO_ALLOCATE", final_value)
+                    break
+                else:
+                    print("Please enter a valid memory allocation between 128MB and 131072MB (128GB).")
+            else:
+                print("Invalid unit. Please enter memory in GB or MB.")
         else:
-            print("Invalid format. Please enter a number followed by 'GB', 'gb', 'G', or 'g' (e.g., '16GB').")
+            print("Invalid format. Please enter a number followed by 'GB', 'MB', 'G', or 'M' (e.g., '16GB', '512M').")
 
     dockerPS = spinner.spin_till_done("Checking docker service", get_docker_server_info)
 
@@ -229,7 +315,7 @@ def main():
   
     MEMORY_TO_ALLOCATE = config.read("MEMORY_TO_ALLOCATE")
 
-    spinner.spin_till_done(f"Binary will use {MEMORY_TO_ALLOCATE}GB memory", get_docker_server_info)
+    spinner.spin_till_done(f"Binary will use {MEMORY_TO_ALLOCATE} memory", get_docker_server_info)
 
     spinner.spin_till_done("Cleanup local registry", clean_up_registry)
 
@@ -239,14 +325,11 @@ def main():
 
     
     # Change directory to the build directory
-    
     os.chdir(build_dir)
 
     spinner.spin_till_done("Update dockerfile ", update_dockerfile)
 
     SECURELOCK_SESSION = config.read("SECURELOCK_SESSION")
-    
-    # Adding dockerfile customizations
 
     # Build and push Docker image for etny-securelock-base
 
@@ -256,12 +339,12 @@ def main():
 
     run_command("docker build -f Dockerfile.base -t etny-securelock-base:latest .")
 
+    # Adding dockerfile customizations
 
     if os.path.exists("src/serverless/Dockerfile.serverless"):
         print()
         print(f"\u276f\u276f Adding customizations from Dockerfile.serverless")
         print()
-
         run_command("docker build -f src/serverless/Dockerfile.serverless -t etny-securelock-serverless:latest .")
     else:
         run_command("docker tag localhost:5000/etny-securelock-base:latest etny-securelock-serverless:latest")
@@ -273,7 +356,7 @@ def main():
     with open("Dockerfile.tpl", "r") as f:
         dockerfile_secure_template = f.read()
 
-    MEMORY_TO_ALLOCATE_FORMATED = f"{MEMORY_TO_ALLOCATE * 1024}M"
+    MEMORY_TO_ALLOCATE_FORMATED = MEMORY_TO_ALLOCATE
 
     dockerfile_secure_content = (
         dockerfile_secure_template.replace(
@@ -361,12 +444,19 @@ def main():
 
     run_command("docker push localhost:5000/etny-las")
 
+
+    print()
+    print(f"\u276f\u276f Building svc image(s)")
+    print()
+
+    build_and_push_services(build_dir)
+
     print()
     print(f"\u276f\u276f Cleaning up")
     print()
     # Return to the original directory
     os.chdir(current_dir)
-    run_command("docker cp registry:/var/lib/registry registry")
+    run_command("docker cp registry:/var/lib/registry ./build/registry")
 
     dest_dir = os.path.join(build_dir, "securelock", "src", "serverless")
     shutil.rmtree(dest_dir, ignore_errors=True)

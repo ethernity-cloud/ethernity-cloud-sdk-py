@@ -2,13 +2,41 @@ import requests  # type: ignore
 import argparse
 import os, sys, time
 import json
+import functools
+import random
 from tqdm import tqdm
+from requests.exceptions import RequestException, SSLError
 from requests_toolbelt.multipart.encoder import (
     MultipartEncoder,
     MultipartEncoderMonitor,
 )
 
-RETRY_COUNT = 10
+RETRY_COUNT = 10  # Or keep configurable elsewhere
+
+def retry_on_failure(max_attempts=RETRY_COUNT, initial_delay=10, backoff_factor=2, jitter=0.1):
+    def decorator_retry(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            delay = initial_delay
+            for attempt in range(max_attempts):
+                try:
+                    # Optional: reset progress tracking if present
+                    if args and hasattr(args[0], "_last_shown_mb"):
+                        args[0]._last_shown_mb = -1
+                        args[0].frame_index = 0
+
+                    return func(*args, **kwargs)
+
+                except (RequestException, SSLError, Exception) as e:
+                    print(f"[Retry {attempt + 1}/{max_attempts}] {func.__name__} failed due to: {type(e).__name__} - {e}")
+
+                    if attempt < max_attempts - 1:
+                        time.sleep(delay + random.uniform(0, jitter))
+                        delay *= backoff_factor  # Exponential backoff
+            print("Max retry attempts reached. Operation failed.")
+            return None
+        return wrapper
+    return decorator_retry
 
 
 class IPFSClient:
@@ -34,7 +62,7 @@ class IPFSClient:
 
         if token:
             self.headers = {"Authorization": token}
-
+    @retry_on_failure()
     def upload_file(self, file_path: str) -> None:
         add_url = f"{self.api_url}/api/v0/add"
 
@@ -75,7 +103,12 @@ class IPFSClient:
             )
             sys.stdout.flush()
 
+    @retry_on_failure()
     def upload_dir(self, dir_path):
+
+        self._last_shown_mb = -1
+        self.frame_index = 0
+
         # Ensure directory path is absolute and valid for Windows
         dir_path = os.path.abspath(dir_path)
 

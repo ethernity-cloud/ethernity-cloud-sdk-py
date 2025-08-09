@@ -31,18 +31,28 @@ class TaskStatus:
     PAYLOAD_NOT_DEFINED = 5
     PAYLOAD_CHECKSUM_ERROR = 6
     INPUT_CHECKSUM_ERROR = 7
+    EXECVE = 8
 
 
-def execute_task_v3(payload_data, input_data):
-    return Exec(
-        payload_data,
-        input_data,
-        {"___etny_result___": ___etny_result___, **sdkFunctions},
-    )
+def execute_task_v3(payload_data, input_data, extra_globals=None):
+    base_globals = {"___etny_result___": ___etny_result___, **sdkFunctions}
+    if extra_globals:
+        base_globals.update(extra_globals)
+    return Exec(payload_data, input_data, globals=base_globals)
 
 
 def Exec(payload_data, input_data, globals=None, locals=None):
     try:
+        if globals is None:
+            globals = {}
+        if locals is None:
+            locals = globals
+
+        print("Globals keys:", list(globals.keys()))
+        print("Locals keys:", list(locals.keys()))
+        print("execve in globals:", "execve" in globals)
+        print("execve in locals:", "execve" in locals)
+
         if payload_data is not None:
             if input_data is not None:
                 globals["___etny_data_set___"] = input_data
