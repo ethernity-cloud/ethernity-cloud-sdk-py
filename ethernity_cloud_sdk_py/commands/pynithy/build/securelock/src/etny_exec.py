@@ -33,13 +33,11 @@ class TaskStatus:
     INPUT_CHECKSUM_ERROR = 7
     EXECVE = 8
 
-
 def execute_task_v3(payload_data, input_data, extra_globals=None):
     base_globals = {"___etny_result___": ___etny_result___, **sdkFunctions}
     if extra_globals:
         base_globals.update(extra_globals)
     return Exec(payload_data, input_data, globals=base_globals)
-
 
 def Exec(payload_data, input_data, globals=None, locals=None):
     try:

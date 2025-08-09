@@ -311,10 +311,12 @@ class EtnySecureLock:
         else:
             print('Client payload and input are NOT valid')
             return
+
         if self._metadata._payload_metadata_obj._version == 'v3':
             task_result = execute_task_v3(payload_data, input_data)
         else:
             task_result = execute_server_v4(payload_data, input_data)
+
         self.task_code = str(task_result[0])
         self.task_result = task_result[1]
 

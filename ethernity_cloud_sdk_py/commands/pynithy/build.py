@@ -282,6 +282,7 @@ def main():
             else:
                 unit = unit.upper()
 
+
             if unit in ('GB', 'G'):
                 if 1 <= value < 128:
                     final_value = f"{value}G"
