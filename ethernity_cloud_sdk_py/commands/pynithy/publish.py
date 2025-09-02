@@ -160,6 +160,11 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
     2) Replace placeholders by blind text substitution (like sed)
     3) Merge in any services under src/serverless/svc/*/docker-compose.yml
     """
+
+    BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
+
+    BLOCKCHAIN_CONFIG = BlockchainNetworks.get_details_by_enum_name(BLOCKCHAIN_NETWORK)
+
     try:
         # --- prepare workspace ---
         project_root = Path.cwd()
@@ -168,13 +173,6 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
             shutil.rmtree(dest_dir)
         shutil.copytree(run_src, dest_dir)
 
-        # --- restore templates ---
-        for tmpl_name in ("docker-compose.yml.tmpl", "docker-compose-final.yml.tmpl"):
-            tmpl = dest_dir / tmpl_name
-            if tmpl.is_file():
-                (tmpl.with_suffix("")).write_bytes(tmpl.read_bytes())
-            else:
-                print(f"Warning: missing template {tmpl_name!r}, skipping")
 
         # --- load placeholder values ---
         securelock = config.read("SECURELOCK_SESSION")
@@ -184,22 +182,126 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
         trustedzone = image_registry.get_trustezone_image_session(trustedzone_hash)
         memory = config.read("MEMORY_TO_ALLOCATE")
 
-        # --- simple text replacement helper ---
-        def replace_placeholders_in_file(path: Path):
-            text = path.read_text(encoding="utf-8")
-            text = (text
-                    .replace("__SECURELOCK_SESSION__", securelock)
-                    .replace("__TRUSTEDZONE_SESSION__", trustedzone)
-                    .replace("__MEMORY_TO_ALLOCATE__", memory))
-            path.write_text(text, encoding="utf-8")
+        # Assuming variables like memory, securelock, trustedzone, BLOCKCHAIN_CONFIG, dest_dir are defined elsewhere
+        # memory = config.read("MEMORY_TO_ALLOCATE")
+        # securelock = ... (e.g., config.read("SECURELOCK_SESSION"))
+        # trustedzone = ... (e.g., config.read("TRUSTEDZONE_SESSION"))
+        # BLOCKCHAIN_CONFIG.network_type = 'testnet' or 'mainnet'
+        # dest_dir = Path(...)
 
-        # --- 2) apply replacements ---
-        for fname in ("docker-compose.yml", "docker-compose-final.yml"):
-            fpath = dest_dir / fname
-            if fpath.is_file():
-                replace_placeholders_in_file(fpath)
+        def generate_compose_data(is_final: bool):
+            data = {
+                'version': '3.2',
+                'services': {
+                    'las': {
+                        'container_name': 'las',
+                        'privileged': True,
+                        'image': 'localhost:5000/etny-las',
+                        'restart': 'unless-stopped',
+                        'ports': [
+                            {
+                                'target': 18766,
+                                'published': 18766,
+                                'protocol': 'tcp',
+                                'mode': 'host'
+                            }
+                        ],
+                        'healthcheck': {
+                            'test': ["CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/18766"],
+                            'interval': '5s',
+                            'timeout': '3s',
+                            'retries': 5
+                        },
+                    },
+                    'etny-securelock': {
+                        'container_name': 'etny-securelock',
+                        'privileged': True,
+                        'image': 'localhost:5000/etny-securelock',
+                        'entrypoint': "",
+                        'command': ["/usr/local/bin/python", "/etny-securelock/securelock.py"],
+                        'restart': 'on-failure',
+                        'depends_on': ['las'],
+                    },
+                    'etny-trustedzone': {
+                        'container_name': 'etny-trustedzone',
+                        'privileged': True,
+                        'image': 'localhost:5000/etny-trustedzone',
+                        'entrypoint': "",
+                        'command': ["/usr/local/bin/python", "/etny-trustedzone/trustedzone.py"],
+                        'restart': 'on-failure',
+                        'depends_on': ['las'],
+                    }
+                }
+            }
+
+
+            # las command and entrypoint differences
+            las_command = "bash -c '/las_entrypoint.sh && /usr/local/bin/las | tee /var/log/las.log'"
+            data['services']['las']['entrypoint'] = "/las_entrypoint.sh"
+            data['services']['las']['command'] = las_command
+
+            # Add networks for final compose
+            if is_final:
+                data['networks'] = {'ethernity': {'external': True}}
+                for service in data['services'].values():
+                    service['networks'] = ['ethernity']
+
+            # Determine environments based on network_type
+            network_type = BLOCKCHAIN_CONFIG.network_type
+            if network_type == 'mainnet':
+                securelock_env = {
+                    'SCONE_CAS_ADDR': 'scone-cas.cf',
+                    'SCONE_LAS_ADDR': 'las',
+                    'SCONE_CONFIG_ID': f"{securelock}/application",
+                    'SCONE_HEAP': memory,
+                    'SCONE_LOG': 'FATAL',
+                    'SCONE_STACK': '4M',
+                    'SCONE_ALLOW_DLOPEN': '1',
+                    'SCONE_EXTENSIONS_PATH': '/lib/libbinary-fs.so'
+                }
+                trustedzone_env = {
+                    'SCONE_CAS_ADDR': 'scone-cas.cf',
+                    'SCONE_LAS_ADDR': 'las',
+                    'SCONE_CONFIG_ID': f"{trustedzone}/application",
+                    'SCONE_HEAP': '256M',
+                    'SCONE_LOG': 'FATAL',
+                    'SCONE_ALLOW_DLOPEN': '1',
+                    'SCONE_EXTENSIONS_PATH': '/lib/libbinary-fs.so'
+                }
+            elif network_type == 'testnet':
+                securelock_env = {
+                    'SCONE_HEAP': memory,
+                    'SCONE_ALLOW_DLOPEN': '2',
+                    'SCONE_EXTENSIONS_PATH': '/lib/libbinary-fs.so',
+                    'SCONE_ALPINE': '1',
+                    'SCONE_DEBUG': '0',
+                    'SCONE_LOG': 'FATAL',
+                }
+                trustedzone_env = {
+                    'SCONE_HEAP': '128M',
+                    'SCONE_ALLOW_DLOPEN': '2',
+                    'SCONE_EXTENSIONS_PATH': '/lib/libbinary-fs.so',
+                    'SCONE_ALPINE': '1',
+                    'SCONE_DEBUG': '0',
+                    'SCONE_LOG': 'FATAL',
+                }
             else:
-                print(f"Warning: {fname!r} not found, skipping replacements")
+                raise ValueError(f"Unknown network_type: {network_type}")
+
+            # Set environments as list of "KEY=VALUE"
+            data['services']['etny-securelock']['environment'] = [f"{k}={v}" for k, v in securelock_env.items()]
+            data['services']['etny-trustedzone']['environment'] = [f"{k}={v}" for k, v in trustedzone_env.items()]
+
+            return data
+
+        # Generate and write both files
+
+
+        for fname, is_final in [("docker-compose.yml", False), ("docker-compose-final.yml", True)]:
+            fpath = dest_dir / fname
+            data = generate_compose_data(is_final)
+            with open(fpath, 'w', encoding="utf-8") as f:
+                yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
         # --- 3) merge in serverless services ---
         svc_root = project_root / "src" / "serverless" / "svc"

@@ -18,3 +18,4 @@ RUN pip3 install pyinstaller
 RUN pip3 install pyngrok
 RUN pip3 install flask
 RUN pip3 install flask_limiter
+RUN pip3 install ecdsa

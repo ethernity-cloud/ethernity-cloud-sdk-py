@@ -166,7 +166,7 @@ class ImageRegistry:
         fee,
     ):
         if self.blockchain_config.network == "bloxberg":
-            gasLimit = 4000000
+            gasLimit = 9000000
         else:
             gasLimit = 1200000
 
