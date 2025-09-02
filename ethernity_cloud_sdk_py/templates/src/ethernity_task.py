@@ -45,7 +45,7 @@ def execute_task(code) -> None:
             PASSWORD = getpass.getpass("Enter your private key password:")
             ENC_PRIVATE_KEY = os.getenv("ENC_PRIVATE_KEY")
             pkm = PrivateKeyManager(PASSWORD)
-            PRIVATE_KEY = '0x' + pkm.decrypt_private_key(ENC_PRIVATE_KEY)
+            PRIVATE_KEY = pkm.decrypt_private_key(ENC_PRIVATE_KEY)
             break
         except Exception as e:
             print("Incorrect password. Please try again.")

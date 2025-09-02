@@ -1,3 +1,20 @@
+"""
+Module: models.py
+
+This module defines data models and factories for handling orders and metadata in a blockchain-based task processing system. It includes classes for orders, base metadata, versioned payload and input metadata (V0 and V3), and factories to create metadata objects based on version strings. Additionally, it provides a class for DO (Data Owner?) request metadata, parsing and exposing properties like image hash, public key, and node address. The models support versioning, with V3 including checksums (potentially signed) for integrity verification.
+
+Key Features:
+- Order model: Represents blockchain orders with attributes like owner, processor, requests, and status.
+- Metadata base and subclasses: Abstract base for metadata with version, IPFS hash, and optional checksum; V0 is hash-only, V3 includes checksum.
+- Factories: Dynamically create versioned metadata objects from strings (e.g., "v3:hash:checksum").
+- DOReqMetadata: Parses request metadata into accessible properties, integrating with factories for payload/input objects.
+- No external dependencies beyond standard Python.
+
+Usage Context: Used in trustedzone.py to fetch and parse order/request metadata from smart contracts, enabling validation and processing in secure environments like Ethernity/Etny.
+
+Potential Security Notes: Checksums in V3 can be signed (0x-prefixed), but validation logic is external (e.g., in trustedzone.py). Assumes metadata strings are trusted from blockchain; malformed inputs could raise ValueError.
+"""
+
 class Order:
     def __init__(self, req, order_id):
         self.id = order_id
@@ -142,6 +159,10 @@ class DOReqMetadata:
         return self.image_metadata.split(':')[1]
 
     @property
+    def trustedzone_image_name(self):
+        return self.image_metadata.split(':')[2]
+
+    @property
     def payload_metadata(self):
         return self._metadata2
 
@@ -161,17 +182,3 @@ class DOReqMetadata:
     def node_address(self):
         return self._metadata4
 
-
-# add_do_req(..., 'v3:image_:....:...:', 'v3:payload_hash:checksum', 'v3::0', 'node_address')
-'''
-input + payload
-v0: 'ipfs_hash'
-v3: 'v3:file_ipfs_hash:file_checksum'
-
-image
-v0: 'ipfs_hash:image_name'
-v3: 'v3:image_ipfs_hash:image_name:docker_Compose_ipfs_hash:client_challenge_ipfs_hash:client_public_cert'
-'''
-if __name__ == '__main__':
-    obj = PayloadFactory.create_payload_metadata('v3:some_img_hash:fucker')
-    obj2 = PayloadFactory.create_payload_metadata('must not!')

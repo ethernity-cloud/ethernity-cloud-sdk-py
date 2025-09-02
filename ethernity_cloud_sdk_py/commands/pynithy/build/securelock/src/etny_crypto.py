@@ -13,6 +13,9 @@ from tinyec import ec
 from Crypto.PublicKey import ECC
 from nacl.public import Box, PrivateKey, PublicKey
 from base64 import a85encode
+from eth_account import  Account
+import ecdsa
+from ecdsa.util import sigencode_der, sigdecode_der
 
 
 class etny_crypto:
@@ -44,7 +47,7 @@ class etny_crypto:
         return (ciphertext, nonce, auth_tag, cipher_text_public_key)
 
     @staticmethod
-    def decrypt_ase_gcm(ciphertext, nonce, auth_tag, secret_key):
+    def decrypt_aes_gcm(ciphertext, nonce, auth_tag, secret_key):
         aes_cipher = AES.new(secret_key, AES.MODE_GCM, nonce)
         plaintext = aes_cipher.decrypt_and_verify(ciphertext, auth_tag)
         return plaintext
@@ -54,7 +57,7 @@ class etny_crypto:
         (ciphertext, nonce, authTag, ciphertextPubKey) = encrypted_msg
         shared_ecc_key = priv_key * ciphertextPubKey
         secret_key = etny_crypto.ecc_point_to_256_bit_key(shared_ecc_key)
-        plaintext = etny_crypto.decrypt_ase_gcm(ciphertext, nonce, authTag, secret_key)
+        plaintext = etny_crypto.decrypt_aes_gcm(ciphertext, nonce, authTag, secret_key)
         return plaintext
 
     @staticmethod
@@ -88,12 +91,8 @@ class etny_crypto:
         return private_key_data
 
     @staticmethod
-    def decrypt(private_key_file, encrypted_msg):
-        # Reading and calculating Private Key from PEM
-        with open(private_key_file) as f:
-            private_key_data = str.encode(f.read())
-
-        private_key_data = etny_crypto.clean_private_key(private_key_data)
+    def decrypt(private_key_pem, encrypted_msg):
+        private_key_data = etny_crypto.clean_private_key(private_key_pem)
         # decode der with asn1 library
         # - get the octet string (field-2) containing the raw key
         asn1_object, _ = decoder.decode(private_key_data)
@@ -159,9 +158,51 @@ class etny_crypto:
         result = bytes(emph_key.public_key) + ciphertext
         return result.hex()
 
+    @staticmethod
+    def get_private_key_int(private_key_pem: bytes) -> int:
+        """
+        Extracts the raw private key integer from a PEM-encoded private key via ASN.1 decoding.
+        Args:
+            private_key_pem (bytes): PEM-encoded private key.
+        Returns:
+            int: The private key scalar.
+        """
+        private_key = etny_crypto.clean_private_key(private_key_pem)
+        asn1_object, _ = decoder.decode(private_key)
+        raw_keys = asn1_object.getComponentByName('field-2').asOctets()
+        asn1_object, _ = decoder.decode(raw_keys)
+        private_key_bytes = asn1_object.getComponentByName('field-1').asOctets()
+        return int.from_bytes(private_key_bytes, byteorder="big")
 
-if __name__ == '__main__':
-    encrypted_msg_ = etny_crypto.encrypt('./app/cert1-ca1-clean.crt', b'test')
-    #print(encrypted_msg_)
-    # etny_crypto.decrypt('./certs/cert1-ca1-clean.key', encrypted_msg_)
-    #print(etny_crypto.encrypted_data_to_base64_json(encrypted_msg_))
+    @staticmethod
+    def sign_data(private_key_pem: bytes, data: bytes) -> bytes:
+        """
+        Signs data using the private key with ECDSA (secp384r1, SHA-256) and returns DER-encoded signature.
+        Args:
+            private_key_pem (bytes): PEM-encoded private key.
+            data (bytes): Data to sign.
+        Returns:
+            bytes: DER-encoded signature.
+        """
+        priv_int = etny_crypto.get_private_key_int(private_key_pem)
+        sk = ecdsa.SigningKey.from_secret_exponent(priv_int, curve=ecdsa.curves.NIST384p, hashfunc=hashlib.sha256)
+        sig_der = sk.sign_deterministic(data, hashfunc=hashlib.sha256, sigencode=sigencode_der)
+        return sig_der
+
+    @staticmethod
+    def verify_signature(public_key_hex: str, data: bytes, sig_der: bytes) -> bool:
+        if public_key_hex.startswith('0x'):
+            public_key_hex = public_key_hex[2:]
+        pub_bytes = bytes.fromhex(public_key_hex)
+        curve = ecdsa.curves.NIST384p
+        try:
+            vk = ecdsa.VerifyingKey.from_string(
+                pub_bytes,
+                curve=curve,
+                hashfunc=hashlib.sha256,
+                valid_encodings={"raw", "compressed", "uncompressed", "hybrid"}  # Add 'raw' here
+            )
+            assert vk.verify(sig_der, data, hashfunc=hashlib.sha256, sigdecode=sigdecode_der)
+            return True
+        except:
+            return False

@@ -371,16 +371,23 @@ def main():
         .replace("__RPC_URL__", BLOCKCHAIN_CONFIG.rpc_url)
         .replace("__CHAIN_ID__", str(BLOCKCHAIN_CONFIG.chain_id))
         .replace("__TRUSTED_ZONE_IMAGE__", TRUSTED_ZONE_IMAGE)
+        .replace("__NETWORK_TYPE__", BLOCKCHAIN_CONFIG.network_type)
         .replace("__MEMORY_TO_ALLOCATE__", MEMORY_TO_ALLOCATE_FORMATED)
     )
 
     if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
-        dockerfile_secure_content.replace(
-            "# RUN scone-signer sign", "RUN scone-signer sign"
+        dockerfile_secure_content_final_signed = dockerfile_secure_content.replace(
+            "__SCONE_SIGN__", "RUN scone-signer sign --key=/enclave-key.pem --env --production /usr/local/bin/python3"
         )
 
+    if BLOCKCHAIN_CONFIG.network_type == 'testnet':
+        dockerfile_secure_content_final_signed = dockerfile_secure_content.replace(
+            "__SCONE_SIGN__", "RUN scone-signer sign --key=/enclave-key.pem --env /usr/local/bin/python3"
+        )
+
+
     with open("Dockerfile", "w") as f:
-        f.write(dockerfile_secure_content)
+        f.write(dockerfile_secure_content_final_signed)
 
 
     # Adding dockerfile customizations

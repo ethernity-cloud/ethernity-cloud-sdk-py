@@ -1,3 +1,9 @@
+FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers AS build-sgx-module
+
+COPY src/get_sgx_report.c /etny-securelock/
+
+RUN cd /etny-securelock/ && scone-gcc -shared -fPIC -O3 -o get_sgx_report.so get_sgx_report.c
+
 FROM etny-securelock-serverless AS release
 
 COPY ./src/serverless/requirements.txt /requirements.txt
@@ -11,11 +17,14 @@ ENV IMAGE_REGISTRY_ADDRESS=__IMAGE_REGISTRY_ADDRESS__
 ENV RPC_URL=__RPC_URL__
 ENV CHAIN_ID=__CHAIN_ID__
 ENV TRUSTED_ZONE_IMAGE=__TRUSTED_ZONE_IMAGE__
+ENV NETWORK_TYPE=__NETWORK_TYPE__
 
 RUN mkdir binary-fs-dir
 
 COPY ./src /etny-securelock/
 COPY ./scripts/* /etny-securelock/
+
+COPY --from=build-sgx-module  /etny-securelock/get_sgx_report.so /etny-securelock/get_sgx_report.so
 
 RUN /etny-securelock/binary-fs-build.sh
 
@@ -38,12 +47,13 @@ RUN openssl genrsa -3 -out /enclave-key.pem 3072
 
 ENV SCONE_HEAP=__MEMORY_TO_ALLOCATE__
 ENV SCONE_LOG=FATAL
+ENV SCONE_DEBUG=0
 ENV SCONE_STACK=4M
-ENV SCONE_ALLOW_DLOPEN=1
+ENV SCONE_ALLOW_DLOPEN=2
 ENV SCONE_EXTENSIONS_PATH=/lib/libbinary-fs.so
 
 # Disabled production mode for testnet
-# RUN scone-signer sign --key=/enclave-key.pem --env --production /usr/local/bin/python3
+__SCONE_SIGN__
 
 RUN rm -rf /enclave-key.pem
 

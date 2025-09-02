@@ -1,468 +1,431 @@
 #!/usr/bin/python
-# update 29.12.2022
+
 import binascii
 import hashlib
 import os
-import re
-import string
 import io
 import time
-import requests
+import datetime
+from datetime import timedelta
+import logging
+import struct
+import ctypes
+import re
+import string
+import random
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.backends import default_backend
+from cryptography.x509.extensions import UnrecognizedExtension
 from etny_crypto import etny_crypto as crypto
 from web3 import Web3
 from eth_account import Account
 from web3.middleware import geth_poa_middleware
-from key_generation import get_wallet_address
 from etny_exec import execute_task_v3, TaskStatus
-from etny_exec_flask import execute_task_v4, execute_server_v4
 from models import *
 from swift_stream_service import SwiftStreamService
 from eth_account.messages import defunct_hash_message
-
-"""
-EtnySecureLock: Secure task execution handler for Ethernity Cloud.
-
-Ethernity Cloud is a decentralized cloud computing platform that leverages blockchain for secure, private computations.
-This class runs within a trusted enclave (a secure, isolated environment) to handle task execution:
-- Fetches and decrypts user-submitted code (payload) and input data.
-- Validates integrity via checksums and signatures.
-- Executes the task securely.
-- Encrypts and stores results for retrieval.
-It integrates with blockchain smart contracts for metadata and Web3 for interactions, and SwiftStream for encrypted storage.
-Debug mode allows local testing; otherwise, it runs in production enclave setup.
-"""
-
+# Suppress pkg_resources warning if using web3
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="web3")
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 class EtnySecureLock:
-    debug = False
-
-    def __init__(self, swiftStreamClient):
-        """
-        Initialize the EtnySecureLock instance.
-
-        Sets up file paths, environment variables, blockchain connections, and storage client.
-        Uploads the public certificate to storage for verification.
-
-        :param swiftStreamClient: Client instance for SwiftStream storage service.
-        """
+    def __init__(self, cert_pem: str, private_key_pem: str, swiftStreamClient: SwiftStreamService):
         self.swift_stream_service = swiftStreamClient
-        self.version = 'v3.1'
-        print(f'ETNY Pynithy [{self.version}]')
+        self.version = 'v3'
+        logging.info(f'ETNY Pynithy [{self.version}]')
         self.__set_initializers()
+        self.private_key_pem = private_key_pem
+        self.cert_pem = cert_pem
         self.save_pub_cert()
         self.__load_env()
         self.read_contract_abi()
         self.init_web3()
         self.print_env()
-
-    @staticmethod
-    def read_env_str(env_str):
-        """
-        Parse and set environment variables from a string (e.g., content of .env file).
-
-        Each line is expected in 'KEY=VALUE' format.
-
-        :param env_str: String containing environment variables.
-        """
-        with io.StringIO(env_str) as f:
-            for line in f:
-                key, value = line.split('=', 1)
-                os.environ[key] = re.sub(r'\n', '', value)
-
-    def __extract_signer(self, checksum, signature):
-        """
-        Recover the Ethereum address that signed a given checksum message.
-
-        Uses Web3's recovery function for signature verification.
-
-        :param checksum: The message (checksum) that was signed.
-        :param signature: The signature to recover from.
-        :return: The signer's Ethereum address.
-        """
-        signer = self.w3.eth.account.recoverHash(defunct_hash_message(text=checksum), signature=signature)
-        return signer
-
     def __set_initializers(self):
-        """
-        Set initial values for instance variables.
-
-        Configures file paths, contract addresses, and debug mode overrides.
-        In Ethernity Cloud, these paths point to secure enclave-mounted volumes.
-        """
-        self.is_valid_client_data = True
-        self.key_file = "/private/__SECURELOCK_SESSION__/key.pem"
-        self.cert_file = "/app/__SECURELOCK_SESSION__/cert.pem"
-        self.pub_cert_file = "/app/__SECURELOCK_SESSION__/enclave_pub_cert.pem"
-        self.payload = 'payload.etny.securelock'
-        self.input = 'input.txt.securelock'
+        self.is_valid_client_data = False
+        self.payload = 'payload.securelock'
+        self.input = 'input.securelock'
+        self.result = 'result.trustedzone'
+        self.result_code = 'result_code.trustedzone'
         self.result_file = '/app/result.txt'
         self.transaction_file = '/app/transaction.txt'
-        self.smart_contract_address = '__SMART_CONTRACT_ADDRESS__'
-        self.image_registry_address = '__IMAGE_REGISTRY_ADDRESS__'
-        self.chain_id = __CHAIN_ID__
-        self.web3_provider = '__RPC_URL__'
+        self.smart_contract_address = '0x02882F03097fE8cD31afbdFbB5D72a498B41112c'
+        self.image_registry_address = '0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31'
+        self.chain_id = 8995
+        self.web3_provider = 'https://bloxberg.ethernity.cloud'
         self.etny_bucket = "__BUCKET_NAME__"
-        self.trusted_zone_public_key = ''
-        if EtnySecureLock.debug:
-            self.key_file = "./app/cert1-ca1-clean.key"
-            self.cert_file = "./app/cert1-ca1-clean.crt"
-            self.payload = 'payload.py'
-            self.input = 'input.txt'
-            self.result_file = './app/result.txt'
-            self.transaction_file = './app/transaction.txt'
-            self.pub_cert_file = "./app/enclave_pub_cert.pem"
+        self.trustedzone_public_key = ''
+        self.trustedzone_public_key_pem = ''
+        self.trustedzone_image_hash = ''
+        self.trustedzone_composer_hash = ''
+    @staticmethod
+    def generate_cert_from_mrenclave():
+        logging.info("Generating self-signed certificate based on MR_ENCLAVE (no CAS available)")
+        # Load the SGX library using ctypes
+        sgx_lib_path = '/etny-securelock/get_sgx_report.so'
+        if not os.path.exists(sgx_lib_path):
+            raise FileNotFoundError(f"SGX library not found at {sgx_lib_path}")
+        sgx_lib = ctypes.CDLL(sgx_lib_path)
+        sgx_lib.get_mr_enclave.restype = ctypes.c_char_p
+        sgx_lib.get_mr_signer.restype = ctypes.c_char_p
 
-    def validate_client_payload(self, payload_data, input_data):
-        """
-        Validate the integrity of client-submitted payload and input.
+        # Get MR_ENCLAVE and MR_SIGNER from SGX
+        mr_enclave_ptr = sgx_lib.get_mr_enclave()
+        mr_signer_ptr = sgx_lib.get_mr_signer()
 
-        Fetches task metadata from the blockchain, computes checksums, and verifies signatures.
-        Ensures the data matches what was submitted on-chain by the task owner.
+        if not mr_enclave_ptr or not mr_signer_ptr:
+            raise ValueError("Failed to retrieve MR_ENCLAVE or MR_SIGNER from SGX")
 
-        :param payload_data: Decrypted payload (code to execute).
-        :param input_data: Decrypted input data for the task.
-        """
-        self.get_do_request_metadata()
-        if self._metadata.payload_metadata_obj.checksum is not None:
-            payload_checksum = self.compute_sha256_checksum(payload_data)
-            if self._metadata.payload_metadata_obj.checksum.startswith('0x'):
-                checksum_signer = self.__extract_signer(payload_checksum, self._metadata.payload_metadata_obj.checksum)
-                transaction_checksum = payload_checksum
-            else:
-                checksum_signer = self.order_metadata.do_owner
-                transaction_checksum = self._metadata.payload_metadata_obj.checksum
-            if checksum_signer.lower() != self.order_metadata.do_owner.lower() and transaction_checksum != payload_checksum:
+        mr_enclave_hex = mr_enclave_ptr.decode('utf-8')
+        mr_signer_hex = mr_signer_ptr.decode('utf-8')
+
+        logging.info(f"MR_ENCLAVE: {mr_enclave_hex}")
+        # Concatenate mr_signer and mr_enclave twice to form the seed (each is 32 bytes, so 128 bytes total)
+        mr_enclave = bytes.fromhex(mr_enclave_hex)
+        mr_signer = bytes.fromhex(mr_signer_hex)
+        seed = mr_signer + mr_enclave + mr_signer + mr_enclave
+
+        def generate_scalar(seed: bytes, label: bytes, order: int, bit_size: int) -> int:
+            byte_size = (bit_size + 7) // 8
+            counter = 0
+            while True:
+                base_hash = hashlib.sha256(seed + label + struct.pack('>I', counter)).digest()
+                rand_bytes = b''
+                hash_counter = 0
+                while len(rand_bytes) < byte_size:
+                    h = hashlib.sha256(base_hash + struct.pack('>I', hash_counter)).digest()
+                    rand_bytes += h
+                    hash_counter += 1
+                rand_bytes = rand_bytes[:byte_size]
+                candidate = int.from_bytes(rand_bytes, 'big')
+                if 1 <= candidate < order:
+                    return candidate
+                counter += 1
+
+        # Define the order for secp384r1
+        order = 39402006196394479212279040100143613805079739270465446667946905279627659399113263569398956308152294913554433653942643
+
+        # Generate deterministic EC private key
+        curve = ec.SECP384R1()
+        bit_size = 384
+        private_value = generate_scalar(seed, b'd', order, bit_size)
+        private_key = ec.derive_private_key(private_value, curve, default_backend())
+        public_key = private_key.public_key()
+
+        # Custom extension for MR_ENCLAVE
+        custom_oid = x509.ObjectIdentifier("1.3.6.1.4.1.99999.1")  # Arbitrary custom OID
+        mr_enclave_value = mr_enclave_hex.encode('utf-8')
+
+        # Build certificate
+        one_day = timedelta(days=1)
+        builder = x509.CertificateBuilder()
+        builder = builder.subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, u"SecureLock Enclave")]))
+        builder = builder.issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, u"SecureLock Enclave")]))
+        builder = builder.not_valid_before(datetime.datetime.today() - one_day)
+        builder = builder.not_valid_after(datetime.datetime.today() + (one_day * 365))
+        builder = builder.serial_number(x509.random_serial_number())
+        builder = builder.public_key(public_key)
+        builder = builder.add_extension(
+            UnrecognizedExtension(custom_oid, mr_enclave_value),
+            critical=False
+        )
+        certificate = builder.sign(
+            private_key=private_key,
+            algorithm=hashes.SHA256(),
+            backend=default_backend()
+        )
+        # Store in memory instead of writing to disk
+        private_key_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        cert_pem = certificate.public_bytes(encoding=serialization.Encoding.PEM)
+        logging.info("Generated key and cert in memory based on MR_ENCLAVE")
+        return private_key_pem, cert_pem
+
+    @staticmethod
+    def read_env_str(env_str: str):
+        with io.StringIO(env_str) as f:
+            for line in f:
+                if '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                os.environ[key.strip()] = re.sub(r'\n', '', value.strip())
+    def _extract_signer(self, checksum: str, signature: str) -> str:
+        signer = self.w3.eth.account.recoverHash(defunct_hash_message(text=checksum), signature=signature)
+        return signer.lower()
+    def validate_client_payload(self):
+        payload_data = self.__get_file_content_and_decrypt(self.payload)
+        input_data = self.__get_file_content_and_decrypt(self.input)
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                self.get_do_request_metadata()
+                break
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    self.task_code = TaskStatus.METADATA_FETCH_ERROR
+                    self.task_result = f'Failed to fetch metadata after {max_retries} attempts: {str(e)}'
+                    self.is_valid_client_data = False
+                    return
+        # Assume is_valid_client_data is False by default; we'll set to True only if all checks pass
+        payload_valid = False
+        input_valid = False
+
+        if len(payload_data) > 0 or self._metadata.payload_metadata_obj.checksum is not None:
+            try:
+                payload_checksum = self.compute_sha256_checksum(payload_data)
+                payload_signer = self._extract_signer(payload_checksum, self._metadata.payload_metadata_obj.checksum)
+                if payload_signer == self.order_metadata.do_owner.lower():
+                    payload_valid = True
+                else:
+                    self.task_code = TaskStatus.PAYLOAD_CHECKSUM_ERROR
+                    self.task_result = 'PAYLOAD CHECKSUM DOESN\'T MATCH'
+            except Exception:
                 self.task_code = TaskStatus.PAYLOAD_CHECKSUM_ERROR
-                self.task_result = 'PAYLOAD CHECKSUM DOES NOT MATCH THE EXPECTED VALUE'
-                self.is_valid_client_data = False
-                return
-        if self._metadata.input_metadata_obj.checksum is not None:
-            input_checksum = self.compute_sha256_checksum(input_data)
-            if self._metadata.input_metadata_obj.checksum.startswith('0x'):
-                checksum_signer = self.__extract_signer(input_checksum, self._metadata.input_metadata_obj.checksum)
-                transaction_checksum = input_checksum
-            else:
-                checksum_signer = self.order_metadata.do_owner
-                transaction_checksum = self._metadata.input_metadata_obj.checksum
-            if checksum_signer.lower() != self.order_metadata.do_owner.lower() and transaction_checksum != input_checksum:
+                self.task_result = 'PAYLOAD CHECKSUM CHECK ERROR'
+        else:
+                self.task_code = TaskStatus.PAYLOAD_CHECKSUM_ERROR
+                self.task_result = 'PAYLOAD CHECKSUM DOESN\'T EXIST'
+
+        if len(input_data) > 0 or self._metadata.input_metadata_obj.checksum is not None:
+            try:
+                input_checksum = self.compute_sha256_checksum(input_data)
+                input_signer = self._extract_signer(input_checksum, self._metadata.input_metadata_obj.checksum)
+                if input_signer == self.order_metadata.do_owner.lower():
+                    input_valid = True
+                else:
+                    self.task_code = TaskStatus.INPUT_CHECKSUM_ERROR
+                    self.task_result = 'INPUT CHECKSUM DOESN\'T MATCH'
+            except Exception:
                 self.task_code = TaskStatus.INPUT_CHECKSUM_ERROR
-                self.task_result = 'INPUT CHECKSUM DOES NOT MATCH THE EXPECTED VALUE'
-                self.is_valid_client_data = False
-                return
+                self.task_result = 'INPUT CHECKSUM CHECK ERROR'
+        else:
+            input_valid = True
 
+        if payload_valid and input_valid:
+            self.is_valid_client_data = True
     def wait_for_payload_and_input(self):
-        """
-        Wait for payload and input files to become available in storage.
-
-        Polls the SwiftStream bucket until both files are present.
-        """
-        print('Waiting for payload and input')
+        logging.info('Waiting for payload and input')
         self.wait_for_trustedzone(self.etny_bucket, self.payload)
         self.wait_for_trustedzone(self.etny_bucket, self.input)
 
-    def wait_for_trustedzone(self, bucket_name, object_name, timeout=3600):
-        """
-        Poll for the existence of an object in a SwiftStream bucket.
-
-        Used to wait for client-uploaded files in the trusted zone.
-
-        :param bucket_name: Name of the storage bucket.
-        :param object_name: Name of the object to wait for.
-        :param timeout: Maximum wait time in seconds (default: 1 hour).
-        """
+    def wait_for_trustedzone(self, bucket_name: str, object_name: str, timeout: int = 3600):
         i = 0
-        print(f'Checking if object {object_name} exists in bucket {bucket_name}')
-        while True:
+        logging.info(f'Checking if object {object_name} exists in bucket {bucket_name}')
+        while i < timeout:
             time.sleep(1)
-            i = i + 1
-            if i > timeout:
-                break
-            (status, result) = self.__retry_swift_call(self.swift_stream_service.is_object_in_bucket, bucket_name, object_name)
+            i += 1
+            status, _ = self.swift_stream_service.is_object_in_bucket(bucket_name, object_name)
             if status:
                 break
-        print('secure lock finished the execution')
-
+        logging.info('trusted zone finished the upload')
     def get_do_request_metadata(self):
-        """
-        Fetch metadata for the current task (Distributed Operation Request) from the blockchain.
-
-        Retrieves order details and metadata using the Ethernity smart contract.
-        """
-        order_data = self.__retry_web3_call(self.etny.caller()._getOrder, self.order_id)
-        order = Order(order_data, self.order_id)
-        metadata_data = self.__retry_web3_call(self.etny.caller()._getDORequestMetadata, order.do_req)
-        self._metadata = DOReqMetadata(metadata_data, order.do_req)
+        order = Order(self.etny.caller()._getOrder(self.order_id), self.order_id)
+        self._metadata = DOReqMetadata(self.etny.caller()._getDORequestMetadata(order.do_req), order.do_req)
         self.order_metadata = order
-
-    def compute_sha256_checksum(self, file_data):
-        """
-        Compute the SHA-256 checksum of given data.
-
-        Used for integrity validation of payload and input.
-
-        :param file_data: Data to checksum (string or bytes).
-        :return: Hex digest of the checksum.
-        """
-        if type(file_data) is str:
+    def compute_sha256_checksum(self, file_data: str) -> str:
+        if isinstance(file_data, str):
             file_data = file_data.encode('utf-8')
         return hashlib.sha256(file_data).hexdigest()
 
     def print_env(self):
-        """
-        Print key environment and configuration values for logging/debugging.
-        """
-        print('ETNY_CHAIN_ID:', self.chain_id)
-        print('ETNY_PROTOCOL_CONTRACT_ADDRESS:', self.smart_contract_address)
-        print('ETNY_WEB3_PROVIDER:', self.web3_provider)
-        print('ETNY_CLIENT_CHALLENGE:', self.client_challenge)
-        print('ETNY_ORDER_ID:', self.order_id)
-
+        logging.info(f'chain id: {self.chain_id}')
+        logging.info(f'smart contract address: {self.smart_contract_address}')
+        logging.info(f'web3 provider: {self.web3_provider}')
+        logging.info(f'order id: {self.order_id}')
     def init_web3(self):
-        """
-        Initialize Web3 connection to the Ethernity blockchain.
-
-        Connects to the RPC provider, injects PoA middleware, and sets up contract instances.
-        """
         self.w3 = Web3(Web3.HTTPProvider(self.web3_provider))
         self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
-        self.etny = self.w3.eth.contract(address=self.w3.toChecksumAddress(self.smart_contract_address),
-                                        abi=self.contract_abi)
-        self.image_registry = self.w3.eth.contract(address=self.w3.toChecksumAddress(self.image_registry_address),
-                                                  abi=self.image_registry_abi)
-
+        self.etny = self.w3.eth.contract(address=self.smart_contract_address,
+                                         abi=self.contract_abi)
+        self.image_registry = self.w3.eth.contract(address=self.image_registry_address,
+                                                   abi=self.image_registry_abi)
     def read_contract_abi(self):
-        """
-        Load ABI (Application Binary Interface) for smart contracts.
-
-        Reads from local files for the main PoX contract and image registry.
-        """
-        self.contract_abi = self.__read_contract_abi('pox.abi')
-        self.image_registry_abi = self.__read_contract_abi('image_registry.abi')
-
-    def __read_contract_abi(self, contract_name):
-        """
-        Read ABI file content from the script's directory.
-
-        :param contract_name: Name of the ABI file.
-        :return: ABI string.
-        """
-        f = open(os.path.dirname(os.path.realpath(__file__)) + f'/{contract_name}')
-        contract_abi = f.read()
-        f.close()
-        return contract_abi
-
+        self.contract_abi = self.__read_contract_abi('abi/etnyImplementationV2.abi')
+        self.image_registry_abi = self.__read_contract_abi('abi/imageRegistry.abi')
+    def __read_contract_abi(self, contract_name: str) -> str:
+        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), contract_name)
+        with open(path, 'r') as f:
+            return f.read()
     def __load_env(self):
-        """
-        Load configuration from environment variables.
-
-        Sets chain ID, contract addresses, RPC URL, client challenge, and order ID.
-        These are typically set via the .env file fetched from storage.
-        Validates types and sets error states if invalid.
-        """
-        try:
-            if os.getenv('ETNY_CHAIN_ID') is not None:
-                self.chain_id = int(os.getenv('ETNY_CHAIN_ID'))
-            if os.getenv('ETNY_SMART_CONTRACT_ADDRESS') is not None:
-                self.smart_contract_address = os.getenv('ETNY_SMART_CONTRACT_ADDRESS').rstrip()
-            if os.getenv('ETNY_WEB3_PROVIDER') is not None:
-                self.web3_provider = os.getenv('ETNY_WEB3_PROVIDER').rstrip()
-            self.client_challenge = os.getenv('ETNY_CLIENT_CHALLENGE')
-            self.order_id = int(os.getenv('ETNY_ORDER_ID'))
-        except ValueError as e:
-            print(f'Invalid environment variable type: {e}')
-            self.task_code = TaskStatus.SYSTEM_ERROR
-            self.task_result = 'INVALID ENVIRONMENT VARIABLES DETECTED DURING LOADING'
-            self.is_valid_client_data = False
+        if os.getenv('ETNY_CHAIN_ID'):
+            self.chain_id = int(os.getenv('ETNY_CHAIN_ID'))
+        if os.getenv('ETNY_SMART_CONTRACT_ADDRESS'):
+            self.smart_contract_address = os.getenv('ETNY_SMART_CONTRACT_ADDRESS').rstrip()
+        if os.getenv('ETNY_WEB3_PROVIDER'):
+            self.web3_provider = os.getenv('ETNY_WEB3_PROVIDER').rstrip()
+        self.order_id = int(os.getenv('ETNY_ORDER_ID'))
 
     def save_result(self):
-        """
-        Save task execution results to storage.
-
-        Fetches the latest trusted zone public key with retries, encrypts results,
-        and uploads them to SwiftStream.
-        """
-        self.encrypt_file_and_push_to_swifstream(str(self.task_result), "result.txt")
-        self.encrypt_file_and_push_to_swifstream(str(self.task_code), "result_code.txt")
-
+        self.encrypt_file_and_push_to_swifstream(str(self.task_result), self.result)
+        self.encrypt_file_and_push_to_swifstream(str(self.task_code), self.result_code)
     def save_pub_cert(self):
-        """
-        Upload the enclave's public certificate to storage.
-
-        Creates the bucket if needed and stores the cert for client verification.
-        """
-        self.__ensure_bucket_exists()
-        self.__retry_swift_call(self.swift_stream_service.put_file_content, self.etny_bucket,
-                                "cert.pem",
-                                self.cert_file)
-
+        self.swift_stream_service.create_bucket(self.etny_bucket)
+        if self.cert_pem:
+            data = io.BytesIO(self.cert_pem)
+            self.swift_stream_service.put_file_content(self.etny_bucket,
+                                                       "cert.pem",
+                                                       "",
+                                                       data)
+    def save_transaction(self):
+        self.swift_stream_service.create_bucket(self.etny_bucket)
+        transaction = io.BytesIO(self.signed_tx_as_bytes)
+        self.swift_stream_service.put_file_content(self.etny_bucket,
+                                                   "transaction.txt",
+                                                   self.transaction_file,
+                                                   transaction)
     def execute(self):
-        """
-        Execute the client-submitted task.
+        self.payload_data = self.__get_file_content_and_decrypt(self.payload)
+        self.input_data = self.__get_file_content_and_decrypt(self.input)
+        self.payload_signature = self.__get_file_content_and_decrypt(self.payload + ".sig")
+        self.input_signature = self.__get_file_content_and_decrypt(self.input + ".sig")
 
-        Fetches and decrypts payload/input, validates them, and runs the task
-        using the appropriate executor based on metadata version.
-        Sets task_code and task_result accordingly.
-        """
-        payload_data = self.__get_file_content_and_decrypt(self.payload)
-        input_data = self.__get_file_content_and_decrypt(self.input)
-        print('Validate client payload and input')
-        self.validate_client_payload(payload_data, input_data)
-        if self.is_valid_client_data:
-            print('Client payload and input are valid')
-        else:
-            print('Client payload and input are NOT valid')
-            return
-        if self._metadata._payload_metadata_obj._version == 'v3':
-            task_result = execute_task_v3(payload_data, input_data)
-        else:
-            task_result = execute_server_v4(payload_data, input_data)
+        self.validate_trustedzone_data()
+        task_result = execute_task_v3(self.payload_data, self.input_data)
         self.task_code = str(task_result[0])
         self.task_result = task_result[1]
 
-    def __get_file_content_and_decrypt(self, object_name):
+    def validate_trustedzone_data(self):
         """
-        Fetch and decrypt a file from SwiftStream storage.
+        Validates signatures of payload and input from trustedzone using the trustedzone public key.
+        """
+        # Validate payload signature
 
-        :param object_name: Name of the object to fetch.
-        :return: Decrypted content as string.
-        """
-        status, encrypted_base64 = self.__retry_swift_call(self.swift_stream_service.get_file_content, self.etny_bucket, object_name)
-        if not status:
-            print(f'Failed to get {object_name} file')
-            raise Exception(f'Failed to get {object_name} file')
+        self.__get_trustedzone_public_key()
+
+        logging.debug(f"Trustedzone Public Key (hex): {self.trustedzone_public_key}")
+
+        sig_der_payload = bytes.fromhex(self.payload_signature)
+        logging.debug(f"Signature DER (hex): {sig_der_payload.hex()}")
+        if not crypto.verify_signature(self.trustedzone_public_key, self.payload_data.encode('utf-8'), sig_der_payload):
+            logging.error("Payload signature validation failed")
+            raise ValueError('INVALID PAYLOAD SIGNATURE')  # Or set error state as needed
+
+        # Validate input signature
+        sig_der_input = bytes.fromhex(self.input_signature)
+        if not crypto.verify_signature(self.trustedzone_public_key, self.input_data.encode('utf-8'), sig_der_input):
+            logging.error("Input signature validation failed")
+            raise ValueError('INVALID INPUT SIGNATURE')  # Or set error state as needed
+
+        logging.info("Trustedzone signatures validated successfully")
+
+    def __get_file_content_and_decrypt(self, object_name: str) -> str:
+        encrypted_base64 = self.__get_file_content(object_name)
+
         encrypted_tuple = crypto.encrypted_data_from_base64_json(encrypted_base64.encode('utf-8'))
-        decrypted_result = crypto.decrypt(self.key_file, encrypted_tuple)
+        decrypted_result = crypto.decrypt(self.private_key_pem, encrypted_tuple)
         return decrypted_result.decode('utf-8')
 
-    def encrypt_file_and_push_to_swifstream(self, file_data, file_name):
+    def __get_file_content(self, object_name: str) -> str:
+        status, content = self.swift_stream_service.get_file_content(self.etny_bucket, object_name)
+        if not status:
+            raise ValueError(f'Failed to get {object_name} file')
+        return content
+    def encrypt_file_and_push_to_swifstream(self, file_data: str, file_name: str):
         """
-        Encrypt data with trusted zone public key and upload to SwiftStream.
-
-        Appends '.securelock' to filename for identification.
-
-        :param file_data: Data to encrypt and upload.
-        :param file_name: Base name for the uploaded file.
+        Encrypts data with trustedzone pubkey, signs the original data with our private key,
+        encrypts the signature, and uploads both to storage in separate files.
         """
-        encrypted_input = crypto.encrypt_with_pub_key(self.trusted_zone_public_key, file_data.encode('utf-8'))
+        # Encrypt the data
+        encrypted_input = crypto.encrypt_with_pub_key(self.trustedzone_public_key_pem, file_data.encode('utf-8'))
         encrypted_input_base64 = crypto.encrypted_data_to_base64_json(encrypted_input)
-        file_name = file_name + '.securelock'
-        self.__ensure_bucket_exists()
-        data = io.BytesIO(encrypted_input_base64)
-        status, _ = self.__retry_swift_call(self.swift_stream_service.put_file_content, self.etny_bucket,
-                                            file_name,
-                                            "",
-                                            data)
+        data_file_name = file_name
+
+        # Sign the original data
+        sig_der = crypto.sign_data(self.private_key_pem, file_data.encode('utf-8'))
+        sig_hex = sig_der.hex()
+
+        # Encrypt the signature
+        encrypted_sig = crypto.encrypt_with_pub_key(self.trustedzone_public_key_pem, sig_hex.encode('utf-8'))
+        encrypted_sig_base64 = crypto.encrypted_data_to_base64_json(encrypted_sig)
+        sig_file_name = file_name + '.sig'
+
+        # Upload encrypted data
+        self.swift_stream_service.create_bucket(self.etny_bucket)
+        data_io = io.BytesIO(encrypted_input_base64)
+        status, _ = self.swift_stream_service.put_file_content(self.etny_bucket, data_file_name, "", data_io)
         if status:
-            print(f'File {file_name} encrypted and saved to swift stream successfully')
+            logging.info(f'File {data_file_name} encrypted and saved to swift stream successfully')
 
-    def get_latest_trusted_zone_public_key(self):
-        """
-        Fetch the latest public key for the trusted zone from the image registry contract.
+        # Upload encrypted signature
+        sig_io = io.BytesIO(encrypted_sig_base64)
+        status_sig, _ = self.swift_stream_service.put_file_content(self.etny_bucket, sig_file_name, "", sig_io)
+        if status_sig:
+            logging.info(f'Signature file {sig_file_name} encrypted and saved to swift stream successfully')
 
-        Uses retry logic with exponential backoff to handle connection issues or timeouts.
-        In Ethernity Cloud, the trusted zone refers to secure enclave images registered on-chain.
-        Caches the key after successful fetch.
-        """
-        if self.trusted_zone_public_key:
-            return  # Already cached
-        print('getting latest public key of the trusted zone enclave')
-        try:
-            result = self.__retry_web3_call(self.image_registry.caller().getLatestTrustedZoneImageCertPublicKey,
-                                            '__TRUSTED_ZONE_IMAGE__', 'v3')
-            self.trusted_zone_public_key = result[1]
-        except Exception as e:
-            print(f"Failed to get trusted zone public key: {e}")
-            self.task_code = TaskStatus.KEY_ERROR
-            self.task_result = 'FAILED TO FETCH TRUSTED ZONE PUBLIC KEY FROM IMAGE REGISTRY'
+    def __get_trustedzone_public_key(self):
+        logging.info('Getting the public key of the trusted zone enclave')
+        image_name = self._metadata.trustedzone_image_name
+        self.trustedzone_image_hash, self.trustedzone_public_key_pem, self.trustedzone_composer_hash = self.image_registry.caller().getLatestTrustedZoneImageCertPublicKey(image_name, 'v3')
 
-    def __retry_web3_call(self, fn, *args, **kwargs):
-        """
-        Retry wrapper for Web3 calls with exponential backoff.
+        # Parse PEM to extract raw public key hex (x + y coordinates, no '04' prefix)
+        from cryptography.x509 import load_pem_x509_certificate
+        cert = load_pem_x509_certificate(self.trustedzone_public_key_pem.encode('utf-8'), default_backend())
+        pub_key = cert.public_key()
+        pub_bytes = pub_key.public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint
+        )[1:]  # Slice off the '04' uncompressed prefix for raw format
+        self.trustedzone_public_key = pub_bytes.hex()
 
-        :param fn: The Web3 function to call.
-        :param args: Positional arguments for the function.
-        :param kwargs: Keyword arguments for the function.
-        :return: Result of the function call.
-        """
-        retries = 0
-        max_retries = 500
-        while retries < max_retries:
-            try:
-                return fn(*args, **kwargs)
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, Exception) as e:  # Catch broad for resilience
-                print(f"Web3 call failed: {e}. Retrying in 1 seconds...")
-                time.sleep(1)
-                retries += 1
-        raise Exception(f"Web3 call failed after {max_retries} retries")
-
-    def __retry_swift_call(self, fn, *args, **kwargs):
-        """
-        Retry wrapper for SwiftStream calls with exponential backoff.
-
-        :param fn: The SwiftStream function to call.
-        :param args: Positional arguments for the function.
-        :param kwargs: Keyword arguments for the function.
-        :return: Result of the function call.
-        """
-        retries = 0
-        max_retries = 500
-        while retries < max_retries:
-            try:
-                return fn(*args, **kwargs)
-            except Exception as e:  # Catch broad for resilience
-                print(f"SwiftStream call failed: {e}. Retrying in 1 seconds...")
-                time.sleep(1)
-                retries += 1
-        raise Exception(f"SwiftStream call failed after {max_retries} retries")
-
-    def __ensure_bucket_exists(self):
-        """
-        Ensure the bucket exists in SwiftStream, creating it if necessary.
-
-        Makes the operation idempotent by checking existence first.
-        Assumes swift_stream_service has bucket_exists; if not, wraps create in try-except.
-        """
-        try:
-            # Assuming SwiftStreamService has bucket_exists method; if not, implement via try-create
-            if not self.swift_stream_service.bucket_exists(self.etny_bucket):
-                self.__retry_swift_call(self.swift_stream_service.create_bucket, self.etny_bucket)
-        except AttributeError:
-            # Fallback if bucket_exists not available: try to create and ignore if exists
-            try:
-                self.__retry_swift_call(self.swift_stream_service.create_bucket, self.etny_bucket)
-            except Exception as e:
-                if 'already exists' not in str(e).lower():  # Check for existence error
-                    raise
-
+        logging.debug(f'Extracted trustedzone public key hex: {self.trustedzone_public_key[:20]}...')  # Log snippet for confirmation
+        
 if __name__ == '__main__':
-    print('[SecureLock] Loading env variables..')
+    network_type = '__NETWORK_TYPE__'
+    logging.info(f'[SecureLock] Initializing enclave for {network_type}')
+
+    # Determine paths based on debug mode
+    key_file = "/private/__SECURELOCK_SESSION__/key.pem"
+    cert_file = "/app/__SECURELOCK_SESSION__/cert.pem"
+    pub_cert_file = "/app/__SECURELOCK_SESSION__/enclave_pub_cert.pem"
+    # Load if files exist, otherwise generate
+    if network_type == 'mainnet' and os.path.exists(key_file) and os.path.exists(cert_file):
+        logging.info("Loading key and cert from session")
+        with open(key_file, 'r+b') as f:
+            private_key_pem = f.read()
+            f.truncate(0)
+        with open(cert_file, 'rb') as f:
+            cert_pem = f.read()
+    elif network_type == 'testnet':
+        logging.info("No existing key/cert files found")
+        private_key_pem, cert_pem = EtnySecureLock.generate_cert_from_mrenclave()
+    else:
+        logging.error(f"Invalid encalve session or network type")
+        exit(1)
+
     try:
-        if EtnySecureLock.debug:
-            swiftStreamClient = SwiftStreamService("localhost:9000",
-                                                   "swiftstreamadmin",
-                                                   "swiftstreamadmin")
-        else:
-            swiftStreamClient = SwiftStreamService("etny-swift-stream:9000",
-                                                   "swiftstreamadmin",
-                                                   "swiftstreamadmin")
+        swiftStreamClient = SwiftStreamService("etny-swift-stream:9000", "swiftstreamadmin", "swiftstreamadmin")
         status, env_content = swiftStreamClient.get_file_content("__BUCKET_NAME__", ".env")
         if not status:
-            print("Failed to get .env file")
+            logging.error("Failed to get .env file")
             raise Exception("Failed to get .env file")
         EtnySecureLock.read_env_str(env_content)
-    except:
-        cert_file = "/app/__SECURELOCK_SESSION__/cert.pem"
-        with open(cert_file, 'r') as f:
-            print("PUBLIC_CERT:", f.read())
-        exit(1)
-    print('Initializing..')
-    app = EtnySecureLock(swiftStreamClient)
-    print('Validate client payload and input')
-    app.get_latest_trusted_zone_public_key()
-    app.wait_for_payload_and_input()
-    if app.is_valid_client_data:
-        print('Executing client code..')
+
+        app = EtnySecureLock(cert_pem, private_key_pem, swiftStreamClient)
+
+        logging.info('Waiting for payload and input')
+        app.wait_for_payload_and_input()
+
+        logging.info('Validate client payload and input')
+        app.validate_client_payload()
+        if app.is_valid_client_data:
+            logging.info('Client payload and input are valid')
+        else:
+            logging.error('Client payload and input are NOT valid')
+            raise ValueError(app.task_result)
+
         app.execute()
-    else:
-        print('Failed client payload and input validation')
-    app.save_result()
-    print('Finished the execution')
+
+        app.save_result()
+
+        logging.info('Finished the execution')
+    except Exception as e:
+        logging.error(f"Error: {e}")
+        logging.info(f"PUBLIC_CERT: {cert_pem.decode('utf-8')}")
+        exit(1)
