@@ -57,6 +57,7 @@ def get_docker_server_info():
         # versions whose output layout differed.
         result = subprocess.check_output(
             "docker info --format {{.ServerVersion}}",
+            shell=True,
             text=True,
             stderr=subprocess.DEVNULL,
         )
