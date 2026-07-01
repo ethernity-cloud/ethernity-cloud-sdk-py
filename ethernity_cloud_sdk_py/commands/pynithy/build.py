@@ -49,27 +49,19 @@ def get_command_output(command):
 
 def get_docker_server_info():
     try:
-        # Run the 'docker info' command and capture the output
-        result = subprocess.check_output("docker info", text=True, stderr=subprocess.DEVNULL)
-
-        # Find the Server section in the output
-        server_info_started = False
-        server_info = []
-        
-        for line in result.splitlines():
-            if server_info_started:
-                if line.strip() == "":  # End of Server section
-                    break
-                server_info.append(line.strip())
-            elif line.startswith("Server:"):
-                server_info_started = True
-                server_info.append(line.strip())
-        if len(server_info) > 10:
-            #subprocess.check_output("docker stop las", text=True, stderr=subprocess.DEVNULL)
-            #subprocess.check_output("docker rm las", text=True, stderr=subprocess.DEVNULL)
-            return True
-        return False
-    except subprocess.CalledProcessError as e:
+        # Ask the daemon directly for its server version. This is the robust way
+        # to tell "Docker is running": it returns a non-empty version and exit 0
+        # only when the daemon is reachable. The previous approach parsed the
+        # human-readable `docker info` output and broke at the first empty line
+        # in the Server section, which produced false negatives on Docker
+        # versions whose output layout differed.
+        result = subprocess.check_output(
+            "docker info --format {{.ServerVersion}}",
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        return bool(result.strip())
+    except subprocess.CalledProcessError:
         return False
     except FileNotFoundError:
         return False

@@ -3,6 +3,21 @@ import time
 import sys
 BASE_URL = "https://publickey.ethernity.cloud"
 
+# When stdout is a TTY we redraw a single spinner line with a carriage return;
+# in a non-TTY (log file / CI) carriage returns just overwrite invisibly and
+# the progress is never flushed with a newline, so we emit plain newline lines
+# instead. This keeps build logs readable outside an interactive terminal.
+_IS_TTY = sys.stdout.isatty()
+
+
+def _progress(text, transient=True):
+    if _IS_TTY:
+        sys.stdout.write("\r" + " " * 128 + "\r")
+        sys.stdout.write(text if transient else text + "\n")
+    else:
+        sys.stdout.write(text.strip() + "\n")
+    sys.stdout.flush()
+
 
 def submit_ipfs_hash(
     hhash,
@@ -76,11 +91,10 @@ def main(
     frame_index = 0
     
     print()
-    message = f"Waiting for publc key extraction to complete..."
+    message = f"Waiting for public key extraction to complete..."
 
-    sys.stdout.write(f"\t{SPINNER_FRAMES[frame_index]}  {message}")
-    sys.stdout.flush()
-        
+    _progress(f"\t{SPINNER_FRAMES[frame_index]}  {message}")
+
     # Check IPFS Hash Status
     while True:
         check_response = check_ipfs_hash_status(ipfs_hash)
@@ -92,25 +106,23 @@ def main(
                 else:
                     message = f"Waiting for public key extraction to start. Queue position: {check_response.get('queuePosition', 'Unknown')}"
 
-                sys.stdout.write("\r" + f"\t{SPINNER_FRAMES[frame_index]}  {message}")
-                sys.stdout.flush()
+                _progress(f"\t{SPINNER_FRAMES[frame_index]}  {message}")
                 time.sleep(1)
             elif check_response["publicKey"] == "-1":
-                message = f"\t{FAIL}Public key extraction\n"
-                sys.stdout.write("\r" + " " * 128 + "\r")
-                sys.stdout.write("\r" + f"{message}")
-                sys.stdout.flush()
-                print("\t\tThe certificate extraction process failed. Make sure the enclave is built using the latest version of the SDK")
+                _progress(f"\t{FAIL}Public key extraction", transient=False)
+                print("\t\tThe certificate extraction process failed.")
+                print(f"\t\tIPFS hash:   {ipfs_hash}")
+                print(f"\t\tEnclave:     {enclave_name}  (network: {network}, protocol: {protocol_version}, template: {template_version})")
+                print( "\t\tMake sure the enclave is built using the latest version of the SDK.")
+                print(f"\t\tIf it is, the extraction service log for this hash holds the reason;")
+                print(f"\t\tre-run the build or contact support with the IPFS hash above.")
                 print()
-                exit()
+                exit(1)
             else:
-                message = f"\t{CHECK}Public key extraction\n"
-                sys.stdout.write("\r" + " " * 128 + "\r")
-                sys.stdout.write("\r" + f"{message}")
-                sys.stdout.flush()
+                _progress(f"\t{CHECK}Public key extraction", transient=False)
                 return check_response["publicKey"]
         else:
             print("\t\tThe Ethernity cloud certificate extraction service is unavailable at this time. Please try again later.", check_response)
-            exit()
+            exit(1)
 
 
