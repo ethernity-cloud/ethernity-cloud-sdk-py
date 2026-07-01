@@ -3,11 +3,14 @@ FROM __DOCKER_REPO_URL__:__BASE_IMAGE_TAG__ AS release
 RUN apk update
 
 RUN cd /
-RUN apk add bash openrc bind-tools sudo binutils curl 
+# binutils alone can't build the C extensions that web3/pycryptodome/pynacl/
+# cryptography pull in on Alpine (musl) for Python 3.7 - add the compiler and
+# the -dev headers so those pip installs don't fail with "No such file: gcc".
+RUN apk add bash openrc bind-tools sudo binutils curl gcc musl-dev python3-dev libffi-dev openssl-dev make
 RUN pip3 install --upgrade pip
 RUN pip3 install --upgrade setuptools
 RUN pip3 install python-dotenv
-RUN pip3 install web3==5.31.0
+RUN pip3 install web3==5.31.4
 RUN pip3 install cryptography==42.0.7
 RUN pip3 install ecdsa
 RUN pip3 install pyasn1
