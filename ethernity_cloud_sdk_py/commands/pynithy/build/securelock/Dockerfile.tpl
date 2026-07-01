@@ -1,4 +1,4 @@
-FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers AS build-sgx-module
+FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers:alpine-scone6.0.7 AS build-sgx-module
 
 COPY src/get_sgx_report.c /etny-securelock/
 
@@ -28,7 +28,7 @@ COPY --from=build-sgx-module  /etny-securelock/get_sgx_report.so /etny-secureloc
 
 RUN chmod +x /etny-securelock/binary-fs-build.sh && /etny-securelock/binary-fs-build.sh
 
-FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers AS build
+FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers:alpine-scone6.0.7 AS build
 
 COPY --from=release /binary-fs-dir /.
 

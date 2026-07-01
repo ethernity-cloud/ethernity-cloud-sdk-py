@@ -31,10 +31,10 @@ class BlockchainNetworks(Enum):
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
                 trusted_zone_image="etny-pynithy",
-                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/etny-pynithy/python3.10.5-alpine3.15-scone5.8-pre-release",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="latest"
+                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
             ),
         }        
     )
@@ -53,10 +53,10 @@ class BlockchainNetworks(Enum):
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
                 trusted_zone_image="etny-pynithy-testnet",
-                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/etny-pynithy-testnet/python3.10.5-alpine3.15-scone5.8-pre-release",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="latest"
+                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
             ),
         }    
     )
@@ -75,10 +75,10 @@ class BlockchainNetworks(Enum):
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
                 trusted_zone_image="ecld-pynithy",
-                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ecld-pynithy/python3.10.5-alpine3.15-scone5.8-pre-release",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="latest"
+                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
             ),
         }  
     )
@@ -97,10 +97,10 @@ class BlockchainNetworks(Enum):
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
                 trusted_zone_image="ecld-pynithy-amoy",
-                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ecld-pynithy-amoy/python3.10.5-alpine3.15-scone5.8-pre-release",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="latest"
+                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
             ),
         }  
     )
@@ -119,10 +119,10 @@ class BlockchainNetworks(Enum):
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
                 trusted_zone_image="ecld-pynithy-iotex-testnet",
-                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ecld-pynithy-iotex-testnet/python3.10.5-alpine3.15-scone5.8-pre-release",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="latest"
+                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
             ),
         }
     )
@@ -142,10 +142,10 @@ class BlockchainNetworks(Enum):
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
                 trusted_zone_image="ecld-pynithy-ethereum-sepolia",
-                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/ecld-pynithy-ethereum-sepolia/python3.10.5-alpine3.15-scone5.8-pre-release",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="latest"
+                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
             ),
         }
     )

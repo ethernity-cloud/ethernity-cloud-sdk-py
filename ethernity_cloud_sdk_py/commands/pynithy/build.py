@@ -449,10 +449,10 @@ def main():
     print()
 
     run_command(
-        f"docker pull registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/{TRUSTED_ZONE_IMAGE}/las:{BLOCKCHAIN_NETWORK.lower()}"
+        "docker pull registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/las:scone6.0.7"
     )
     run_command(
-        f"docker tag registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/{TRUSTED_ZONE_IMAGE}/las:{BLOCKCHAIN_NETWORK.lower()} localhost:5000/etny-las"
+        "docker tag registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/las:scone6.0.7 localhost:5000/etny-las"
     )
 
     print()
