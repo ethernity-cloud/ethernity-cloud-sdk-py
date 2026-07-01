@@ -45,6 +45,10 @@ COPY --from=build /libbinary-fs.so /lib/libbinary-fs.so
 RUN openssl genrsa -3 -out /enclave-key.pem 3072
 
 
+# SCONE enclaves run with no HOME; libraries calling os.path.expanduser('~')
+# abort with "$HOME is not defined" and kill the enclave before it emits its
+# public key. Set a writable HOME so startup (and cert emission) succeeds.
+ENV HOME=/tmp
 ENV SCONE_HEAP=__MEMORY_TO_ALLOCATE__
 ENV SCONE_LOG=FATAL
 ENV SCONE_DEBUG=0

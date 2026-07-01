@@ -13,6 +13,12 @@ services:
      mrenclaves: [ "__MRENCLAVE__" ]
      command: /usr/local/bin/python /etny-securelock/securelock.py
      pwd: /
+     environment:
+        # SCONE enclaves start with no HOME; several libs (and the Python
+        # runtime) call os.path.expanduser('~') at import/startup and abort
+        # with "$HOME is not defined", which kills the enclave before it can
+        # emit its public key. Provide a writable HOME so startup succeeds.
+        HOME: /tmp
 
 images:
    - name: application_image
