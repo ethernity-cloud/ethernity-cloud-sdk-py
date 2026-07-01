@@ -26,7 +26,7 @@ COPY ./scripts/* /etny-securelock/
 
 COPY --from=build-sgx-module  /etny-securelock/get_sgx_report.so /etny-securelock/get_sgx_report.so
 
-RUN /etny-securelock/binary-fs-build.sh
+RUN chmod +x /etny-securelock/binary-fs-build.sh && /etny-securelock/binary-fs-build.sh
 
 FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers AS build
 

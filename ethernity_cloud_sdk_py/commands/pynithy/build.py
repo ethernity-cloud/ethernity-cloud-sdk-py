@@ -86,12 +86,12 @@ def clean_up_registry():
 
     remainingContainers = get_command_output("docker ps --filter 'name=*etny*' -a -q")
     if remainingContainers:
-        run_command(f"docker stop {remainingContainers} -f", True)
+        run_command(f"docker stop {remainingContainers}", True)
         run_command(f"docker rm {remainingContainers} -f", True)
 
     remainingContainers = get_command_output("docker ps --filter 'name=las' -a -q")
     if remainingContainers:
-        run_command(f"docker stop {remainingContainers} -f", True)
+        run_command(f"docker stop {remainingContainers}", True)
         run_command(f"docker rm {remainingContainers} -f", True)
 
     dockerImgReg = get_command_output(
@@ -205,7 +205,7 @@ def build_and_push_services(build_dir: str):
     Scan build_dir/svc, build each service via its Dockerfile,
     and push to the local registry at localhost:5000.
     """
-    svc_root = os.path.join(build_dir, 'securelock\src\serverless\svc')
+    svc_root = os.path.join(build_dir, 'securelock', 'src', 'serverless', 'svc')
     if not os.path.isdir(svc_root):
         print(f"No svc directory found at {svc_root!r}")
         return True
