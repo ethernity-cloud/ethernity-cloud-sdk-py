@@ -25,6 +25,21 @@ except ImportError:
 
 
 
+def non_interactive():
+    """
+    True when the SDK should not block on interactive input(). Enabled by
+    ECLD_NON_INTERACTIVE / ECLD_ASSUME_YES, or when stdin is not a TTY (CI/CD).
+    """
+    if os.environ.get("ECLD_NON_INTERACTIVE", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    if os.environ.get("ECLD_ASSUME_YES", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    try:
+        return not sys.stdin.isatty()
+    except Exception:
+        return False
+
+
 def prompt(question, default_value=None):
     """
     Prompt user for input with an optional default value.
@@ -33,6 +48,9 @@ def prompt(question, default_value=None):
         question = f"{question} (default value: {default_value}) "
     else:
         question = f"{question} "
+    if non_interactive():
+        print(f"{question}[non-interactive -> {default_value!r}]")
+        return default_value if default_value is not None else ""
     user_input = input(question).strip()
     if not user_input and default_value is not None:
         return default_value
@@ -40,6 +58,9 @@ def prompt(question, default_value=None):
 
 
 def prompt_options(message, options, default_option):
+    if non_interactive():
+        print(f"{message} [non-interactive -> {default_option}]")
+        return default_option
     while True:
         # Print the prompt and wait for user input
         user_input = input(f"{message} ").strip().lower()

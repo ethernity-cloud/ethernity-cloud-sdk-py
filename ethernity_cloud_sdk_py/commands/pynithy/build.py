@@ -255,8 +255,25 @@ def main():
 
 
 
+    # In non-interactive mode (ECLD_NON_INTERACTIVE / ECLD_ASSUME_YES, or no TTY
+    # such as CI/CD) don't block on input(); use ECLD_MEMORY_TO_ALLOCATE if set,
+    # otherwise the 1GB default.
+    def _memory_non_interactive():
+        if os.environ.get("ECLD_NON_INTERACTIVE", "").strip().lower() in ("1", "true", "yes"):
+            return True
+        if os.environ.get("ECLD_ASSUME_YES", "").strip().lower() in ("1", "true", "yes"):
+            return True
+        try:
+            return not sys.stdin.isatty()
+        except Exception:
+            return False
+
     while config.read("MEMORY_TO_ALLOCATE") is None:
-        memory_input = input("\n\tEnter memory to allocate (e.g., '2GB', '512M', '4 G', etc.) [1GB]: ").strip()
+        if _memory_non_interactive():
+            memory_input = os.environ.get("ECLD_MEMORY_TO_ALLOCATE", "1GB").strip()
+            print(f"\n\tMemory to allocate [non-interactive -> {memory_input}]")
+        else:
+            memory_input = input("\n\tEnter memory to allocate (e.g., '2GB', '512M', '4 G', etc.) [1GB]: ").strip()
 
         if memory_input == "":
             memory_input = "1GB"
