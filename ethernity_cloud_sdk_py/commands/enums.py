@@ -34,7 +34,7 @@ class BlockchainNetworks(Enum):
                 docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
             ),
         }        
     )
@@ -56,7 +56,7 @@ class BlockchainNetworks(Enum):
                 docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
             ),
         }    
     )
@@ -78,7 +78,7 @@ class BlockchainNetworks(Enum):
                 docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
             ),
         }  
     )
@@ -100,7 +100,7 @@ class BlockchainNetworks(Enum):
                 docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
             ),
         }  
     )
@@ -122,7 +122,7 @@ class BlockchainNetworks(Enum):
                 docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
             ),
         }
     )
@@ -145,7 +145,7 @@ class BlockchainNetworks(Enum):
                 docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
-                base_image_tag="python-3.7.3-alpine3.10-scone6.0.7"
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
             ),
         }
     )

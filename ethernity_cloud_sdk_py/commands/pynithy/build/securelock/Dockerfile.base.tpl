@@ -1,24 +1,13 @@
 FROM __DOCKER_REPO_URL__:__BASE_IMAGE_TAG__ AS release
 
+# The python-3.14.6-alpine3.24-scone6.0.7 base ships a static CPython 3.14 with
+# pip and the complete securelock dependency set already installed (built
+# off-SCONE and baked in): pyinstaller, web3, cryptography, ecdsa, pyasn1,
+# tinyec, minio, pynacl, flask, flask_limiter, python-dotenv, eth_account,
+# pycryptodome and their transitive deps. Nothing is pip-installed here because
+# building/compiling under the SCONE-shielded interpreter does not work; the
+# deps are already present.
+#
+# Only the small set of system tools the build/runtime scripts call is added.
 RUN apk update
-
-RUN cd /
-# binutils alone can't build the C extensions that web3/pycryptodome/pynacl/
-# cryptography pull in on Alpine (musl) for Python 3.7 - add the compiler and
-# the -dev headers so those pip installs don't fail with "No such file: gcc".
-RUN apk add bash openrc bind-tools sudo binutils curl gcc musl-dev python3-dev libffi-dev openssl-dev make
-RUN pip3 install --upgrade pip
-RUN pip3 install --upgrade setuptools
-RUN pip3 install python-dotenv
-RUN pip3 install web3==5.31.4
-RUN pip3 install cryptography==42.0.7
-RUN pip3 install ecdsa
-RUN pip3 install pyasn1
-RUN pip3 install tinyec
-RUN pip3 install minio
-RUN pip3 install pynacl
-RUN pip3 install pyinstaller
-RUN pip3 install pyngrok
-RUN pip3 install flask
-RUN pip3 install flask_limiter
-RUN pip3 install ecdsa
+RUN apk add bash openrc bind-tools sudo binutils curl

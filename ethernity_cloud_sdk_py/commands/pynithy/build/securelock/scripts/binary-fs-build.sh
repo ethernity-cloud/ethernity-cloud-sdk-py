@@ -16,27 +16,19 @@ mv securelock.py.tmp securelock.py
 
 pyinstaller securelock.py
 
+# C-runtime libs present in the python-3.14-alpine3.23-scone6.0.7 base. Any
+# extra shared objects a client payload's deps pull in (e.g. numpy's openblas)
+# are picked up automatically by the COLLECT-00.toc loop below, so only the
+# always-present base libs are listed explicitly here.
 EXEC=(scone binary-fs / /binary-fs-dir -v \
-  --include '/usr/lib/libstdc++.so' \
   --include '/usr/lib/libstdc++.so.6' \
-  --include '/usr/lib/libstdc++.so.6.0.25' \
+  --include '/usr/lib/libstdc++.so.6.0.34' \
   --include '/usr/lib/libgcc_s.so' \
   --include '/usr/lib/libgcc_s.so.1' \
+  --include '/usr/lib/libgomp.so' \
   --include '/usr/lib/libgomp.so.1' \
   --include '/usr/lib/libgomp.so.1.0.0' \
-  --include '/usr/lib/libopenblas.so' \
-  --include '/usr/lib/libopenblas.so.3' \
-  --include '/usr/lib/libopenblasp-r0.3.6.so' \
-  --include '/usr/lib/libopenblas64_.so' \
-  --include '/usr/lib/libopenblas64_.so.3' \
-  --include '/usr/lib/libopenblas64_p-r0.3.6.so' \
-  --include '/usr/lib/libgfortran.so' \
-  --include '/usr/lib/libgfortran.so.5' \
-  --include '/usr/lib/libgfortran.so.5.0.0' \
-  --include '/usr/lib/libquadmath.so' \
-  --include '/usr/lib/libquadmath.so.0' \
-  --include '/usr/lib/libquadmath.so.0.0.0' \
-  --include '/usr/local/lib/python3.7/*' \
+  --include '/usr/local/lib/python3.14/*' \
   --include '/etny-securelock/*' \
   --host-path=/etc/resolv.conf \
   --host-path=/etc/hosts)
