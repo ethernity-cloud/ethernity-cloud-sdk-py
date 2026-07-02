@@ -141,6 +141,13 @@ def copy_from_module_to_build_dir(build_dir):
     dest_file = build_dir / "securelock" / "scripts" / "binary-fs-build.sh"
     shutil.copy(src_file, dest_file)
 
+    # pyfreeze.sh runs PyInstaller off-SCONE in the pyfreeze build stage; it must
+    # be copied into the build dir alongside binary-fs-build.sh or the build
+    # fails ("pyfreeze.sh: not found").
+    src_file = module_dir / "build" / "securelock" / "scripts" / "pyfreeze.sh"
+    dest_file = build_dir / "securelock" / "scripts" / "pyfreeze.sh"
+    shutil.copy(src_file, dest_file)
+
     src_file = module_dir / "build" / "securelock" / "src"
     dest_file = build_dir / "securelock" / "src"
     # Remove dest if it exists (since copytree fails if dest exists)
