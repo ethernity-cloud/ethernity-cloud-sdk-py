@@ -1,3 +1,10 @@
+# PEP 563: make annotations lazy strings so builtin-generic subscripts like
+# list[str] (PEP 585, Python 3.9+) don't get evaluated at class-definition time.
+# The enclave base image is Python 3.7, where `list[str]` raises
+# "TypeError: 'type' object is not subscriptable" and kills securelock at import
+# (the enclave then exits before emitting its public key).
+from __future__ import annotations
+
 import os
 
 from minio import Minio
