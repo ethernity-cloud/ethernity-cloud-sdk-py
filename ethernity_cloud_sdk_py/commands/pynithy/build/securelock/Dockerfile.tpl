@@ -59,12 +59,14 @@ RUN mkdir -p /binary-fs-dir /etny-securelock
 # SCONE-built static python + its stdlib, from the runtime base image
 COPY --from=etny-securelock-serverless /usr/local/bin/python3 /usr/local/bin/python3
 COPY --from=etny-securelock-serverless /usr/local/lib/python3.14 /usr/local/lib/python3.14
-# site-packages + rendered app + COLLECT toc, produced OFF-SCONE in stage 2
-COPY --from=pyfreeze /etny-securelock/securelock.py /etny-securelock/securelock.py
-COPY --from=pyfreeze /etny-securelock/get_sgx_report.so /etny-securelock/get_sgx_report.so
+# The ENTIRE /etny-securelock tree (rendered securelock.py + its sibling modules
+# etny_crypto.py, etny_exec.py, models.py, swift_stream_service.py, the abi/
+# dir, get_sgx_report.so, scripts) - all must be baked into binary-fs or the
+# enclave fails at import (ModuleNotFoundError: No module named 'etny_crypto').
+# site-packages + COLLECT toc also come from the OFF-SCONE pyfreeze stage.
+COPY --from=pyfreeze /etny-securelock /etny-securelock
 COPY --from=pyfreeze /etny-securelock/build/securelock/COLLECT-00.toc /etny-securelock/COLLECT-00.toc
 COPY --from=pyfreeze /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
-COPY --from=pyfreeze /etny-securelock/binary-fs-build.sh /etny-securelock/binary-fs-build.sh
 RUN chmod +x /etny-securelock/binary-fs-build.sh && /etny-securelock/binary-fs-build.sh
 RUN cd /binary-fs-dir && scone gcc ./binary_fs_blob.s ./libbinary_fs_template.a -shared -o /libbinary-fs.so
 
@@ -88,6 +90,12 @@ ENV SCONE_DEBUG=0
 ENV SCONE_STACK=4M
 __SCONE_ALLOW_DLOPEN__
 ENV SCONE_EXTENSIONS_PATH=/lib/libbinary-fs.so
+# securelock.py does relative imports of its sibling modules (etny_crypto,
+# models, ...) and reads abi/ by relative path; run from its own directory so
+# those resolve (the base image's build WORKDIR /b/Python-3.14.6 otherwise leaks
+# in as the enclave PWD).
+ENV SCONE_PWD=/etny-securelock
+WORKDIR /etny-securelock
 
 # Disabled production mode for testnet
 __SCONE_SIGN__
