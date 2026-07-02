@@ -1,49 +1,33 @@
 #!/bin/bash
-
+# Runs in the SCONE crosscompiler stage (SCONE build tools, NO SGX needed).
+# The PyInstaller freeze already happened OFF-SCONE in the pyfreeze stage; this
+# stage has received (copied in):
+#   /usr/local/bin/python3            - the static SCONE-built python 3.14
+#   /usr/local/lib/python3.14/*       - its stdlib + the installed site-packages
+#   /etny-securelock/securelock.py    - the rendered app (run at enclave runtime)
+#   /etny-securelock/COLLECT-00.toc   - PyInstaller's collected .so list
+#   /etny-securelock/get_sgx_report.so
+#
+# We bake the stdlib + site-packages + app + every collected .so into the
+# measured binary-fs; the SCONE python then loads them via SCONE_EXTENSIONS_PATH
+# at runtime (no dlopen from the untrusted host).
+set -e
 cd /etny-securelock
 
-echo "SECURELOCK_SESSION = ${SECURELOCK_SESSION}"
-
-cat securelock.py.tmpl | sed  s/"__SECURELOCK_SESSION__"/"${SECURELOCK_SESSION}"/g > securelock.py.tmp
-sed -i "s/__BUCKET_NAME__/${BUCKET_NAME}/g" securelock.py.tmp
-sed -i "s/__SMART_CONTRACT_ADDRESS__/${SMART_CONTRACT_ADDRESS}/g" securelock.py.tmp
-sed -i "s/__IMAGE_REGISTRY_ADDRESS__/${IMAGE_REGISTRY_ADDRESS}/g" securelock.py.tmp
-sed -i "s/__RPC_URL__/${RPC_URL}/g" securelock.py.tmp
-sed -i "s/__CHAIN_ID__/${CHAIN_ID}/g" securelock.py.tmp
-sed -i "s/__TRUSTED_ZONE_IMAGE__/${TRUSTED_ZONE_IMAGE}/g" securelock.py.tmp
-sed -i "s/__NETWORK_TYPE__/${NETWORK_TYPE}/g" securelock.py.tmp
-mv securelock.py.tmp securelock.py
-
-pyinstaller securelock.py
-
-# C-runtime libs present in the python-3.14-alpine3.23-scone6.0.7 base. Any
-# extra shared objects a client payload's deps pull in (e.g. numpy's openblas)
-# are picked up automatically by the COLLECT-00.toc loop below, so only the
-# always-present base libs are listed explicitly here.
 EXEC=(scone binary-fs / /binary-fs-dir -v \
-  --include '/usr/lib/libstdc++.so.6' \
-  --include '/usr/lib/libstdc++.so.6.0.34' \
-  --include '/usr/lib/libgcc_s.so' \
-  --include '/usr/lib/libgcc_s.so.1' \
-  --include '/usr/lib/libgomp.so' \
-  --include '/usr/lib/libgomp.so.1' \
-  --include '/usr/lib/libgomp.so.1.0.0' \
+  --include '/usr/local/bin/python3' \
   --include '/usr/local/lib/python3.14/*' \
   --include '/etny-securelock/*' \
   --host-path=/etc/resolv.conf \
   --host-path=/etc/hosts)
 
-
-for FILE in `cat ./build/securelock/COLLECT-00.toc | grep '.so' | grep BINARY | awk -F "'" '{print $4}'`
-do
-  EXEC+=(--include "${FILE}"'*')
-done
-
-rm -rf build dist securelock.spec
+# Add every shared object PyInstaller collected (crypto/web3/etc. native libs).
+if [ -f ./COLLECT-00.toc ]; then
+  for FILE in $(grep '.so' ./COLLECT-00.toc | grep BINARY | awk -F "'" '{print $4}'); do
+    EXEC+=(--include "${FILE}"'*')
+  done
+fi
 
 echo "${EXEC[@]}"
-
-SCONE_MODE=auto
-exec "${EXEC[@]}"
-
-exit
+mkdir -p /binary-fs-dir
+SCONE_MODE=auto exec "${EXEC[@]}"
