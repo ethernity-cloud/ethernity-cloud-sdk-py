@@ -394,7 +394,7 @@ def main():
     if BLOCKCHAIN_CONFIG.network_type == 'testnet':
         dockerfile_secure_content_final_signed = dockerfile_secure_content.replace(
             "__SCONE_SIGN__", "RUN scone-signer sign --key=/enclave-key.pem --env /usr/local/bin/python3"
-        ).replace( "__SCONE_ALLOW_DLOPEN__", "ENV SCONE_ALLOW_DLOPEN=2")
+        ).replace( "__SCONE_ALLOW_DLOPEN__", "ENV SCONE_ALLOW_DLOPEN=1")
 
 
     with open("Dockerfile", "w") as f:

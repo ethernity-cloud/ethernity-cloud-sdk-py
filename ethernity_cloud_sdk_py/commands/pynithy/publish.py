@@ -286,7 +286,7 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
             elif network_type == 'testnet':
                 securelock_env = {
                     'SCONE_HEAP': memory,
-                    'SCONE_ALLOW_DLOPEN': '2',
+                    'SCONE_ALLOW_DLOPEN': '1',
                     'SCONE_EXTENSIONS_PATH': '/lib/libbinary-fs.so',
                     'SCONE_ALPINE': '1',
                     'SCONE_DEBUG': '0',
@@ -294,7 +294,7 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
                 }
                 trustedzone_env = {
                     'SCONE_HEAP': '128M',
-                    'SCONE_ALLOW_DLOPEN': '2',
+                    'SCONE_ALLOW_DLOPEN': '1',
                     'SCONE_EXTENSIONS_PATH': '/lib/libbinary-fs.so',
                     'SCONE_ALPINE': '1',
                     'SCONE_DEBUG': '0',
