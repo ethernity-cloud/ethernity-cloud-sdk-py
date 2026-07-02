@@ -22,11 +22,11 @@ from cryptography.x509.extensions import UnrecognizedExtension
 from etny_crypto import etny_crypto as crypto
 from web3 import Web3
 from eth_account import Account
-from web3.middleware import geth_poa_middleware
+from web3.middleware import ExtraDataToPOAMiddleware
 from etny_exec import execute_task_v3, TaskStatus
 from models import *
 from swift_stream_service import SwiftStreamService
-from eth_account.messages import defunct_hash_message
+from eth_account.messages import encode_defunct
 # Suppress pkg_resources warning if using web3
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="web3")
@@ -157,7 +157,7 @@ class EtnySecureLock:
                 key, value = line.split('=', 1)
                 os.environ[key.strip()] = re.sub(r'\n', '', value.strip())
     def _extract_signer(self, checksum: str, signature: str) -> str:
-        signer = self.w3.eth.account.recoverHash(defunct_hash_message(text=checksum), signature=signature)
+        signer = Account.recover_message(encode_defunct(text=checksum), signature=signature)
         return signer.lower()
     def validate_client_payload(self):
         payload_data = self.__get_file_content_and_decrypt(self.payload)
@@ -241,7 +241,7 @@ class EtnySecureLock:
         logging.info(f'order id: {self.order_id}')
     def init_web3(self):
         self.w3 = Web3(Web3.HTTPProvider(self.web3_provider))
-        self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         self.etny = self.w3.eth.contract(address=self.smart_contract_address,
                                          abi=self.contract_abi)
         self.image_registry = self.w3.eth.contract(address=self.image_registry_address,
