@@ -597,17 +597,26 @@ def main(private_key):
             "etny-securelock-test.yaml",
         )
         
-        # Generate certificates if needed
-        key_pem_path = certs_dir / "key.pem"
-        cert_pem_path = certs_dir / "cert.pem"
+        # CAS session registration is mainnet-only. On testnet the enclaves run
+        # in non-CAS mode: they generate their certificate in-enclave from the
+        # MR_ENCLAVE (self-signed, "no CAS available"). Registering a CAS session
+        # for testnet would publish a CAS-issued SERVER_CERT identity that does
+        # NOT match the enclave's self-generated key, so the trustedzone can't
+        # decrypt its session data and fails with "MAC check failed". Skip it.
+        if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
+            # Generate certificates if needed
+            key_pem_path = certs_dir / "key.pem"
+            cert_pem_path = certs_dir / "cert.pem"
 
-        if (
-            not os.path.exists(key_pem_path)
-            or not os.path.exists(cert_pem_path)
-        ):
-            spinner.spin_till_done("Generating certificate for session registration", generate_certificates)
+            if (
+                not os.path.exists(key_pem_path)
+                or not os.path.exists(cert_pem_path)
+            ):
+                spinner.spin_till_done("Generating certificate for session registration", generate_certificates)
 
-        spinner.spin_till_done("Registering session into CAS", update_cas_session)
+            spinner.spin_till_done("Registering session into CAS", update_cas_session)
+        else:
+            print("\t✔  Testnet: skipping CAS session registration (enclave self-signs from MR_ENCLAVE)")
 
         config.write("MRENCLAVE_SECURELOCK", mrenclave_securelock)
 
