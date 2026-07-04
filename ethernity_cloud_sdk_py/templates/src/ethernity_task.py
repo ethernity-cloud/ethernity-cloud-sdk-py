@@ -70,12 +70,17 @@ def execute_task(code) -> None:
 
     trustedzone_enclave = os.getenv("TRUSTED_ZONE_IMAGE")
     securelock_enclave = os.getenv("PROJECT_NAME")
-    securelock_version = os.getenv("VERSION")
-    
+    # runner.run()'s version arg is the PROTOCOL version -- the runner queries the
+    # image registry with getLatestImageVersionPublicKey(name, <this>), and images
+    # register their "latest" pointer under the protocol version "v3". This is NOT
+    # the enclave/template VERSION (e.g. "21"); passing that made the runner look
+    # up the image under the wrong key and resolve a stale/missing enclave.
+    securelock_protocol_version = "v3"
+
     runner.run(
         resources,
         securelock_enclave,
-        securelock_version,
+        securelock_protocol_version,
         code,
         "",
         trustedzone_enclave
