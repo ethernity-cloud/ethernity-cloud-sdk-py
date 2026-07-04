@@ -224,18 +224,29 @@ class ImageRegistry:
             return False
         
     def process_transaction(self, txn):
+        attempts = 0
         while True:
+            attempts += 1
             try:
                 tx_hash = self.provider.eth.send_raw_transaction(txn.raw_transaction)
             except Exception as e:
-                print(f"\n\t\tTransaction error: {e}\n")
+                # A pre-send revert surfaces here on some nodes. Propagate so the
+                # caller decides, instead of continuing with an undefined tx_hash.
+                raise
 
             try:
                 receipt = self.provider.eth.wait_for_transaction_receipt(tx_hash)
                 if receipt.status == 1:
                     return True
+                # status == 0 => mined but reverted. Do NOT retry forever (the same
+                # signed tx would revert identically); raise so the caller handles
+                # it (e.g. an idempotent "already in registry" re-register).
+                raise Exception(f"transaction {tx_hash.hex()} reverted (status 0)")
             except Exception as e:
-                print(f"\n\t\tUnable to register secure lock enclave: {e}\nRetrying...\n")
+                print(f"\n\t\tUnable to register secure lock enclave: {e}\n")
+                # Bounded retry for transient RPC/receipt errors only.
+                if attempts >= 3:
+                    raise
                 time.sleep(1)
 
                 
@@ -313,44 +324,73 @@ class ImageRegistry:
     def register_securelock_image(self, public_key):
         spinner = Spinner()
         config.load()
-        while True:
-            try:
-                time.sleep(5)
-                ipfs_hash = config.read("IPFS_HASH")
-                ipfs_docker_compose_hash = config.read("IPFS_DOCKER_COMPOSE_HASH")
-                self.securelock_session = config.read("SECURELOCK_SESSION")
-                #fee = config.read("DEVELOPER_FEE")
-                fee = 10
+        ipfs_hash = config.read("IPFS_HASH")
+        ipfs_docker_compose_hash = config.read("IPFS_DOCKER_COMPOSE_HASH")
+        self.securelock_session = config.read("SECURELOCK_SESSION")
+        #fee = config.read("DEVELOPER_FEE")
+        fee = 10
 
-                txn = spinner.spin_till_done(
-                    "Building transaction for securelock enclave registration",
-                    self.build_transaction_add_image,
-                    public_key,
-                    ipfs_hash,
-                    self.enclave_name_securelock,
-                    # addImage()'s "version" is the PROTOCOL version, which is the
-                    # key the runner queries with getLatestImageVersionPublicKey(
-                    # name, "v3"). Passing the enclave/template version (VERSION,
-                    # e.g. "21") wrote the "latest" pointer under key "21", so the
-                    # runner querying "v3" never saw the new image and kept using
-                    # the stale one. Register under the protocol version "v3".
-                    "v3",
-                    ipfs_docker_compose_hash,
-                    self.securelock_session,
-                    fee,
-                )
+        # Register the SAME build under two registry version keys:
+        #   "v3"           -> the moving "latest" pointer. The runner resolves
+        #                     getLatestImageVersionPublicKey(name, "v3"), which
+        #                     returns the last hash pushed to this channel, so
+        #                     writing here makes this build the new default.
+        #   <VERSION>       -> an immutable per-version entry (e.g. "22"). It
+        #                     preserves this exact build forever so it can be
+        #                     pinned/rolled back to via
+        #                     getLatestImageVersionPublicKey(name, "22").
+        # The contract stores each (name, version) channel append-only and reverts
+        # if the SAME hash is re-added to the SAME channel. We pre-check each
+        # channel's current latest hash and skip the write if it already points at
+        # this build, so an idempotent re-publish is a no-op instead of a revert.
+        enclave_version = str(config.read("VERSION"))
+        version_keys = ["v3"]
+        if enclave_version and enclave_version != "v3":
+            version_keys.append(enclave_version)
 
-                if txn == False:
-                    continue
+        last_result = None
+        for version_key in version_keys:
+            # Skip if this exact hash is already the latest under this channel
+            # (_get_latest_image_version_public_key returns (ipfsHash, cert,
+            # dockerComposeHash), or ("","","") when the channel has no image yet).
+            current = self._get_latest_image_version_public_key(
+                self.enclave_name_securelock, version_key
+            )
+            if current and current[0] == ipfs_hash:
+                print(f"\t✔  securelock already registered under version '{version_key}' (skipping)")
+                continue
 
-                result = spinner.spin_till_done(
-                    f"Processing transaction 0x{txn.hash.hex()}",
-                    self.process_transaction,
-                    txn
-                )
+            max_retries = 3
+            for attempt in range(1, max_retries + 1):
+                try:
+                    time.sleep(5)
+                    txn = spinner.spin_till_done(
+                        f"Building transaction for securelock registration (version '{version_key}')",
+                        self.build_transaction_add_image,
+                        public_key,
+                        ipfs_hash,
+                        self.enclave_name_securelock,
+                        version_key,
+                        ipfs_docker_compose_hash,
+                        self.securelock_session,
+                        fee,
+                    )
+                    if txn == False:
+                        continue
 
-                return result
-            except Exception as e:
-                print(f"\tUnable to register secure lock image: {e}")
-                print(f"\tTrying again...")
+                    last_result = spinner.spin_till_done(
+                        f"Processing transaction 0x{txn.hash.hex()}",
+                        self.process_transaction,
+                        txn
+                    )
+                    break  # this channel registered successfully
+                except Exception as e:
+                    if "already in registry" in str(e).lower():
+                        print(f"\t✔  securelock already registered under version '{version_key}' (skipping)")
+                        break
+                    print(f"\tUnable to register securelock (version '{version_key}', attempt {attempt}/{max_retries}): {e}")
+                    if attempt >= max_retries:
+                        raise
+
+        return last_result
         
