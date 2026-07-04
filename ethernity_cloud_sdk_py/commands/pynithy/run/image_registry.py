@@ -26,7 +26,12 @@ class ImageRegistry:
             self.project_name = config.read("PROJECT_NAME")
             self.enclave_name_securelock = self.project_name
             self.securelock_session = config.read("SECURELOCK_SESSION")
-            self.securelock_version = config.read("VERSION")
+            # This is the PROTOCOL version used as the Image Registry key (what
+            # the runner queries with getLatestImageVersionPublicKey(name, "v3")),
+            # NOT the enclave/template VERSION. It must be "v3" to match the read
+            # side (check_image_permissions) and the runner; config VERSION (e.g.
+            # "21") wrote/read the "latest" pointer under the wrong key.
+            self.securelock_version = "v3"
             self.enclave_name_trustedzone = config.read("TRUSTED_ZONE_IMAGE")
             self.trustedzone_version = "v3"
             self.blockchain_config = BlockchainNetworks.get_details_by_enum_name(self.blockchain_network)
@@ -323,7 +328,13 @@ class ImageRegistry:
                     public_key,
                     ipfs_hash,
                     self.enclave_name_securelock,
-                    str(self.securelock_version),
+                    # addImage()'s "version" is the PROTOCOL version, which is the
+                    # key the runner queries with getLatestImageVersionPublicKey(
+                    # name, "v3"). Passing the enclave/template version (VERSION,
+                    # e.g. "21") wrote the "latest" pointer under key "21", so the
+                    # runner querying "v3" never saw the new image and kept using
+                    # the stale one. Register under the protocol version "v3".
+                    "v3",
                     ipfs_docker_compose_hash,
                     self.securelock_session,
                     fee,
