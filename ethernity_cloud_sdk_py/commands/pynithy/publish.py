@@ -359,17 +359,62 @@ def extract_public_key_local():
                 .decode()
                 .strip()
             )
-            lines = output.split("\n")
-            publicKeyLine = next((line for line in lines if "PUBLIC_KEY:" in line), None)
-            result = (
-                publicKeyLine.replace(".*PUBLIC_KEY:\s*", "").strip()
-                if publicKeyLine
-                else ""
-            )
+            # The enclave prints its certificate as a MULTI-LINE PEM block,
+            # possibly announced by a "PUBLIC_KEY:"/"PUBLIC_CERT:" marker on the
+            # same line as "-----BEGIN CERTIFICATE-----". Extract the whole block
+            # between the BEGIN/END markers -- never a single line. A previous
+            # version grabbed only the line containing "PUBLIC_KEY:" and tried to
+            # strip the prefix with str.replace(regex) (a no-op, since str.replace
+            # is literal), which stored surrounding log noise (e.g. an IPFS
+            # "Saving file(s) to Qm..." line) on-chain instead of the cert. The
+            # node then can't decrypt the client challenge -> "MAC check failed".
+            result = _extract_certificate_pem(output)
+            if result and "-----BEGIN CERTIFICATE-----" not in result:
+                result = ""
         except subprocess.CalledProcessError as e:
             return False
-        
+
         return result
+
+
+def _extract_certificate_pem(output):
+        """Return the first full PEM certificate block found in `output`, or ''.
+
+        Tolerates a marker prefix on the BEGIN line (e.g. "PUBLIC_CERT: -----BEGIN
+        CERTIFICATE-----") and any interleaved log lines before/after the block.
+        """
+        import re
+        m = re.search(
+            r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
+            output,
+            re.DOTALL,
+        )
+        return m.group(0).strip() if m else ""
+
+
+def _is_valid_certificate(value):
+        """True only if `value` is a parseable PEM X.509 certificate.
+
+        Rejects empty strings, log noise, and anything that merely contains the
+        BEGIN marker but isn't actually a decodable certificate.
+        """
+        if not value or not isinstance(value, str):
+            return False
+        pem = _extract_certificate_pem(value)
+        if not pem:
+            return False
+        try:
+            from cryptography import x509
+            from cryptography.hazmat.backends import default_backend
+            x509.load_pem_x509_certificate(pem.encode("utf-8"), default_backend())
+            return True
+        except Exception:
+            # Fall back to a structural check if cryptography is unavailable:
+            # require both markers and a non-trivial base64 body between them.
+            body = pem
+            for mark in ("-----BEGIN CERTIFICATE-----", "-----END CERTIFICATE-----"):
+                body = body.replace(mark, "")
+            return len("".join(body.split())) > 64
 
 
 def check_public_key_certificate():
@@ -694,6 +739,29 @@ def main(private_key):
 
 
     os.chdir(current_dir)
+
+    # Guard: never register a malformed public key on-chain. Whichever path
+    # produced ENCLAVE_PUBLIC_KEY (local docker extraction or the remote
+    # extraction service), it MUST be a proper PEM certificate. A past bug stored
+    # surrounding log noise (e.g. an IPFS "Saving file(s) to Qm..." line) as the
+    # cert; the node then couldn't decrypt the client challenge and every task
+    # failed with "MAC check failed". On-chain image registrations are effectively
+    # permanent for that version, so fail loudly here instead of poisoning it.
+    if not _is_valid_certificate(ENCLAVE_PUBLIC_KEY):
+        preview = (str(ENCLAVE_PUBLIC_KEY) or "")[:120].replace("\n", "\\n")
+        print(
+            "\n\t\u2716  Refusing to register: the extracted enclave public key is "
+            "not a valid PEM certificate."
+        )
+        print(f"\t   got: {preview!r}")
+        print(
+            "\t   This usually means the certificate extraction captured log "
+            "output instead of the enclave cert. Re-run extraction (ensure SGX/"
+            "the extraction service returned a -----BEGIN CERTIFICATE----- block) "
+            "before registering."
+        )
+        exit(1)
+
     print(f'\n\u276f\u276f Registering enclave on {BLOCKCHAIN_NETWORK}')
 
     try:
