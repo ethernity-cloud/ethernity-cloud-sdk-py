@@ -393,14 +393,30 @@ def main():
         .replace("__MEMORY_TO_ALLOCATE__", MEMORY_TO_ALLOCATE_FORMATED)
     )
 
+    # CRITICAL: sign /usr/local/bin/python -- the binary the enclave actually
+    # EXECUTES (ENTRYPOINT and the publish/run compose command both run
+    # /usr/local/bin/python). /usr/local/bin/python3 is a SEPARATE symlink ->
+    # python3.14; signing that leaves the executed binary as the base image's
+    # DEBUG-signed one (Debug: yes, heap 64MB), so at runtime SCONE recomputes
+    # MRENCLAVE and dynamically re-signs as debug -> CAS rejects the DCAP quote
+    # ("Debug mode is enabled -> enclave not trustworthy") on mainnet.
+    #
+    # The enclave-creation params (--heap/--stack/--dlopen/--extensions) MUST be
+    # passed explicitly and match the runtime env exactly (scone-signer embeds
+    # SCONE defaults for anything not passed as a flag) -- any drift triggers the
+    # same debug re-sign. Values mirror publish.py's securelock_env.
+    sign_flags = (
+        f"--key=/enclave-key.pem --env --heap={MEMORY_TO_ALLOCATE_FORMATED} "
+        f"--stack=4M --dlopen=1 --extensions=/lib/libbinary-fs.so"
+    )
     if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
         dockerfile_secure_content_final_signed = dockerfile_secure_content.replace(
-            "__SCONE_SIGN__", "RUN scone-signer sign --key=/enclave-key.pem --env --production /usr/local/bin/python3"
+            "__SCONE_SIGN__", f"RUN scone-signer sign {sign_flags} --production /usr/local/bin/python"
         ).replace( "__SCONE_ALLOW_DLOPEN__", "ENV SCONE_ALLOW_DLOPEN=1")
 
     if BLOCKCHAIN_CONFIG.network_type == 'testnet':
         dockerfile_secure_content_final_signed = dockerfile_secure_content.replace(
-            "__SCONE_SIGN__", "RUN scone-signer sign --key=/enclave-key.pem --env /usr/local/bin/python3"
+            "__SCONE_SIGN__", f"RUN scone-signer sign {sign_flags} /usr/local/bin/python"
         ).replace( "__SCONE_ALLOW_DLOPEN__", "ENV SCONE_ALLOW_DLOPEN=1")
 
 

@@ -116,6 +116,26 @@ def extract_scone_hash(service):
     except subprocess.CalledProcessError as e:
         raise Exception(f"Error while executing {command}: {e.output.decode().strip()}")
 
+def extract_signed_mrenclave(service):
+    """Read the MRENCLAVE that was signed at build time (baked into the image as
+    /signed_mrenclave.txt by the securelock Dockerfile). Used by the mainnet
+    match-gate: if the runtime SCONE_HASH measurement differs from this value,
+    SCONE recomputed the enclave at load (params drift) and dynamically re-signed
+    it as DEBUG -- CAS would reject it, so publishing must be refused."""
+    command = f"docker-compose -f docker-compose.yml run --no-deps --entrypoint cat {service} /signed_mrenclave.txt"
+    try:
+        output = (
+            subprocess.check_output(
+                command, shell=True, cwd=build_dir, stderr=subprocess.STDOUT
+            )
+            .decode()
+            .strip()
+        )
+        sha256_match = re.search(r'\b[a-fA-F0-9]{64}\b', output)
+        return sha256_match.group(0) if sha256_match else ""
+    except subprocess.CalledProcessError:
+        return ""
+
 
 def process_yaml_template(template_file, output_file):
     
@@ -630,7 +650,24 @@ def main(private_key):
     except Exception as e:
         print(f"Error: {e}")
         exit(1)
-        
+
+    # ----- MRENCLAVE match-gate (mainnet) -----
+    # The runtime enclave (measured just above via SCONE_HASH, with the same env
+    # the harvest uses) MUST match the MRENCLAVE signed --production at build
+    # time. A mismatch means SCONE recomputed the measurement at load because the
+    # runtime enclave-creation params drifted from the signed binary -- and a
+    # runtime recompute produces a DEBUG enclave that CAS rejects ("Debug mode is
+    # enabled"). Refuse to publish such an image instead of failing opaquely
+    # later (or registering an untrusted identity on-chain).
+    if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
+        signed_mrenclave = extract_signed_mrenclave("etny-securelock")
+        if not signed_mrenclave or signed_mrenclave != mrenclave_securelock:
+            print(f"Error: securelock runtime MRENCLAVE ({mrenclave_securelock}) != signed MRENCLAVE ({signed_mrenclave}).")
+            print("       The runtime enclave differs from the --production-signed binary (SCONE recomputed -> debug).")
+            print("       Refusing to publish. Rebuild with the current SDK (ecld-build) and retry.")
+            exit(1)
+        print("\t✔  MRENCLAVE match-gate passed: runtime enclave matches the --production-signed MRENCLAVE")
+
     if mrenclave_securelock != config.read("MRENCLAVE_SECURELOCK"):
 
         config.write("MRENCLAVE_SECURELOCK", mrenclave_securelock)

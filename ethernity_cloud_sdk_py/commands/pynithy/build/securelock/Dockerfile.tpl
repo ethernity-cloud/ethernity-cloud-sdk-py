@@ -97,8 +97,22 @@ ENV SCONE_EXTENSIONS_PATH=/lib/libbinary-fs.so
 ENV SCONE_PWD=/etny-securelock
 WORKDIR /etny-securelock
 
-# Disabled production mode for testnet
+# Rendered by build.py: signs the EXECUTED binary (/usr/local/bin/python) with
+# explicit enclave-creation params; mainnet adds --production, testnet omits it
+# (non-CAS self-sign mode).
 __SCONE_SIGN__
+
+# Record the SIGNED MRENCLAVE so publish.py can assert the runtime enclave
+# measurement matches what was signed BEFORE registering the CAS session /
+# publishing (mismatch => SCONE recomputed at load => debug => CAS rejects).
+# scone-signer info prints two tab-indented "MRENCLAVE:" lines (non-EDMM first;
+# runtime has EDMM disabled, so the first is what SCONE_HASH produces). Capture
+# to a file first: piping into `head` kills scone-signer with SIGPIPE (exit 141)
+# under buildkit's `ash -eo pipefail`.
+RUN scone-signer info /usr/local/bin/python > /tmp/siginfo.txt 2>&1; \
+    grep -iE "MRENCLAVE:" /tmp/siginfo.txt | sed -n '1p' \
+      | sed -E 's/.*MRENCLAVE:[[:space:]]*//I' | tr -d '[:space:]' > /signed_mrenclave.txt && \
+    echo "SIGNED_MRENCLAVE=$(cat /signed_mrenclave.txt)"
 
 RUN rm -rf /enclave-key.pem
 
