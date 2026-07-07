@@ -150,6 +150,34 @@ class BlockchainNetworks(Enum):
         }
     )
 
+    LITVM_LITEFORGE = (
+        "LitVM LiteForge", # Network display name
+        "litvm", # Network short name
+        "testnet", # Network type
+        # LitVM (LiteForge) testnet -- Litecoin EVM ZK-rollup (Arbitrum Orbit),
+        # gas token zkLTC. The PoX/registry addresses match Ethereum Sepolia
+        # because the same deployer deployed the same contracts in the same order
+        # (deterministic CREATE); they are distinct on-chain deployments keyed by
+        # chain_id/RPC.
+        "0x29D3eC870565B6A1510232bd950A8Bc8336f0EB2", # protocol contract address
+        "0x55e0ad455Be85162b71a790f00Fc305680E3CE53", # Image Registry Contract Address
+        "https://liteforge.rpc.caldera.xyz/infra-partner-http",
+        4441,  # Chain ID for LitVM LiteForge
+        True, # EIP 1559 SUPPORT
+        5,   # Gas Price in Gwei
+        15,  # maxFeePerGas in Gwei
+        1,    # maxPriorityFeePerGas in Gwei
+        {  # template_images
+            dAppTypes.PYNITHY.value: TemplateConfig(
+                trusted_zone_image="ecld-pynithy-litvm-testnet",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
+                docker_login="",
+                docker_password="",
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
+            ),
+        }
+    )
+
     def __init__(
         self,
         display_name,
