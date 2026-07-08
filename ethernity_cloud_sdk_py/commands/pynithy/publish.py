@@ -706,6 +706,35 @@ def main(private_key):
         IPFS_HASH = config.read("IPFS_HASH")
         IPFS_DOCKER_COMPOSE_HASH = config.read("IPFS_DOCKER_COMPOSE_HASH")
 
+    # Upload THIS build's image + compose to IPFS unconditionally, before cert
+    # extraction, so the hash registered on-chain always matches the enclave that
+    # was just built -- regardless of which extraction path (local SGX or the
+    # remote service) is taken below. Previously the upload lived only inside the
+    # remote path and was gated on an empty config IPFS_HASH, so:
+    #   (a) a stale IPFS_HASH from a prior build suppressed the upload, and
+    #   (b) the local-SGX path skipped the upload entirely,
+    # both causing the OLD image to be re-registered while a NEW enclave ran ->
+    # trustedzone/securelock key mismatch and "MAC check failed" for clients.
+    # IPFS add is content-addressed, so re-uploading an unchanged image is cheap
+    # and just returns the same CID.
+    try:
+        IPFS_DOCKER_COMPOSE_HASH = spinner.spin_till_done(
+            "Uploading and pinning docker compose file to IPFS",
+            ipfs_client.upload,
+            "docker-compose-final.yml"
+        )
+    except Exception as e:
+        print("\t\u2716  Could not upload docker-compose-final.yml to IPFS")
+        print(f"\t Error uploading: {e}")
+        exit(1)
+    config.write("IPFS_DOCKER_COMPOSE_HASH", IPFS_DOCKER_COMPOSE_HASH)
+
+    IPFS_HASH = ipfs_client.upload(registry_path)
+    if not IPFS_HASH:
+        print("\t\u2716  Error: Could not upload enclave to IPFS")
+        exit(1)
+    config.write("IPFS_HASH", IPFS_HASH)
+
     print('\n\u276f\u276f Extracting public key from enclave')
 
     if os.path.exists("certificate.securelock.crt"):
@@ -732,39 +761,9 @@ def main(private_key):
             exit(1)
 
         print()
-        if IPFS_HASH == "" or IPFS_DOCKER_COMPOSE_HASH == "":
-
-            try:
-                IPFS_DOCKER_COMPOSE_HASH = spinner.spin_till_done(
-                    "Uploading and pinning docker compose file to IPFS",
-                    ipfs_client.upload,
-                    "docker-compose-final.yml"
-                )
-            except Exception as e:
-                    print("\t\u2716  Could not upload docker-compose-final.yml to IPFS")
-                    print(f"\t Error uploading: {e}")
-                    exit(1)
-
-            config.write("IPFS_DOCKER_COMPOSE_HASH", IPFS_DOCKER_COMPOSE_HASH)
-
-            #IPFS_HASH = spinner.spin_till_done(
-            #    "Uploading and pinning enclave to IPFS... ",
-            #    ipfs_client.main,
-            #    host=config.read("IPFS_ENDPOINT"),
-            #    action="upload",
-            #    folderPath=registry_path
-            #)
-
-            IPFS_HASH = ipfs_client.upload(registry_path)
-
-            if not IPFS_HASH:
-                print("\t\u2716  Error: Could not upload enclave to IPFS")
-                exit(1)
-
-
-            config.write("IPFS_HASH", IPFS_HASH)
-        
-
+        # The image + compose were already uploaded fresh above (unconditionally,
+        # before extraction), so IPFS_HASH / IPFS_DOCKER_COMPOSE_HASH already
+        # point at THIS build. Hand them to the remote extraction service.
         ENCLAVE_PUBLIC_KEY = public_key_service.main(
             enclave_name=config.read("PROJECT_NAME"),
             protocol_version="v3",
