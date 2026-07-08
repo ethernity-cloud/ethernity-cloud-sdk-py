@@ -804,13 +804,26 @@ def main(private_key):
 
     if not ENCLAVE_PUBLIC_KEY:
         print("\n\t\tTo publish the eclave, the public key needs to be extracted and for this SGX technology is required.\n\t\tIt seems that your machine is not configured to use SGX.\n")
-        
-        options = [ "y", "n", "yes", "no"]
-        should_generate_certificates = prompt_options(
-            "\t\tDo you want to use Ethernity Cloud public key extraction service? [Y/n]:",
-            options,
-            "y",
-        ).lower()
+
+        # Answering "always" persists the choice to .config.json, so subsequent
+        # publishes upload to IPFS and use the remote extraction service without
+        # asking again. Delete REMOTE_CERT_EXTRACTION from .config.json (or set
+        # it to anything other than "always") to be prompted once more.
+        saved_choice = str(config.read("REMOTE_CERT_EXTRACTION") or "").lower()
+        if saved_choice == "always":
+            print("\t\t✔  Using Ethernity Cloud public key extraction service (saved choice: always)")
+            should_generate_certificates = "y"
+        else:
+            options = ["y", "n", "yes", "no", "always"]
+            should_generate_certificates = prompt_options(
+                "\t\tDo you want to use Ethernity Cloud public key extraction service? [Y/n/always]:",
+                options,
+                "y",
+            ).lower()
+            if should_generate_certificates == "always":
+                config.write("REMOTE_CERT_EXTRACTION", "always")
+                print("\t\t✔  Saved: IPFS upload + remote certificate extraction will run automatically from now on")
+                should_generate_certificates = "y"
 
         if should_generate_certificates != "y" and should_generate_certificates != "yes":
             print("\n\t\tPlease configure local SGX support and run the setup again")
