@@ -248,7 +248,7 @@ class EtnySecureLock:
                                                    abi=self.image_registry_abi)
     def read_contract_abi(self):
         self.contract_abi = self.__read_contract_abi('abi/etnyImplementationV2.abi')
-        self.image_registry_abi = self.__read_contract_abi('abi/imageRegistry.abi')
+        self.image_registry_abi = self.__read_contract_abi('abi/image_registry.abi')
     def __read_contract_abi(self, contract_name: str) -> str:
         path = os.path.join(os.path.dirname(os.path.realpath(__file__)), contract_name)
         with open(path, 'r') as f:
