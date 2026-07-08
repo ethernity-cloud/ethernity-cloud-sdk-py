@@ -37,6 +37,36 @@ config.load()
 image_registry = ImageRegistry()
 
 
+def _local_build_fingerprint(registry_path, compose_file):
+    """SHA-256 fingerprint of the on-disk build output (the local docker
+    registry tree + the final compose file). Used to cache the IPFS upload:
+    the ~1.2GB image is only re-uploaded when this fingerprint differs from
+    the one recorded at the last successful upload, so publish retries of an
+    unchanged build reuse the pinned CID (saving the full re-upload) while a
+    hash left over from a DIFFERENT build can never suppress the upload.
+    Hashes file contents (not mtimes), so it is stable across copies."""
+    import hashlib
+
+    h = hashlib.sha256()
+    try:
+        for root, dirs, files in os.walk(registry_path):
+            dirs.sort()
+            for fn in sorted(files):
+                p = os.path.join(root, fn)
+                rel = os.path.relpath(p, registry_path).replace("\\", "/")
+                h.update(rel.encode("utf-8"))
+                with open(p, "rb") as f:
+                    for chunk in iter(lambda: f.read(4 * 1024 * 1024), b""):
+                        h.update(chunk)
+        if os.path.exists(compose_file):
+            with open(compose_file, "rb") as f:
+                h.update(f.read())
+    except OSError:
+        # Unreadable build tree -> no fingerprint -> caller uploads fresh.
+        return ""
+    return h.hexdigest()
+
+
 def non_interactive():
     """
     True when the SDK should not block on interactive input(). Enabled by
@@ -706,34 +736,60 @@ def main(private_key):
         IPFS_HASH = config.read("IPFS_HASH")
         IPFS_DOCKER_COMPOSE_HASH = config.read("IPFS_DOCKER_COMPOSE_HASH")
 
-    # Upload THIS build's image + compose to IPFS unconditionally, before cert
-    # extraction, so the hash registered on-chain always matches the enclave that
-    # was just built -- regardless of which extraction path (local SGX or the
-    # remote service) is taken below. Previously the upload lived only inside the
-    # remote path and was gated on an empty config IPFS_HASH, so:
-    #   (a) a stale IPFS_HASH from a prior build suppressed the upload, and
-    #   (b) the local-SGX path skipped the upload entirely,
-    # both causing the OLD image to be re-registered while a NEW enclave ran ->
-    # trustedzone/securelock key mismatch and "MAC check failed" for clients.
-    # IPFS add is content-addressed, so re-uploading an unchanged image is cheap
-    # and just returns the same CID.
-    try:
-        IPFS_DOCKER_COMPOSE_HASH = spinner.spin_till_done(
-            "Uploading and pinning docker compose file to IPFS",
-            ipfs_client.upload,
-            "docker-compose-final.yml"
-        )
-    except Exception as e:
-        print("\t\u2716  Could not upload docker-compose-final.yml to IPFS")
-        print(f"\t Error uploading: {e}")
-        exit(1)
-    config.write("IPFS_DOCKER_COMPOSE_HASH", IPFS_DOCKER_COMPOSE_HASH)
+    # Ensure the IPFS hashes point at THIS build's image + compose, before cert
+    # extraction, regardless of which extraction path (local SGX or the remote
+    # service) is taken below. Previously the upload was gated on an empty
+    # config IPFS_HASH and lived only inside the remote path, so a stale hash
+    # from a PRIOR build suppressed the upload and the OLD image got registered
+    # while a NEW enclave ran -> "MAC check failed" for clients.
+    #
+    # To still save bandwidth on publish RETRIES (the image is ~1.2GB and the
+    # upload is a full HTTP POST to the remote gateway -- content-addressing
+    # only dedups server-side, the bytes are re-sent either way), the upload is
+    # cached KEYED ON THE BUILD CONTENT: we fingerprint the on-disk registry +
+    # compose locally and reuse the stored CID only when the fingerprint
+    # matches what was last uploaded. A hash left over from a DIFFERENT build
+    # can never match and always triggers a fresh upload.
+    build_fingerprint = spinner.spin_till_done(
+        "Fingerprinting built enclave image",
+        _local_build_fingerprint,
+        registry_path,
+        "docker-compose-final.yml",
+    )
+    stored_fingerprint = config.read("IPFS_UPLOAD_FINGERPRINT")
+    stored_ipfs_hash = config.read("IPFS_HASH")
+    stored_compose_hash = config.read("IPFS_DOCKER_COMPOSE_HASH")
 
-    IPFS_HASH = ipfs_client.upload(registry_path)
-    if not IPFS_HASH:
-        print("\t\u2716  Error: Could not upload enclave to IPFS")
-        exit(1)
-    config.write("IPFS_HASH", IPFS_HASH)
+    if (
+        build_fingerprint
+        and build_fingerprint == stored_fingerprint
+        and stored_ipfs_hash
+        and stored_compose_hash
+    ):
+        IPFS_HASH = stored_ipfs_hash
+        IPFS_DOCKER_COMPOSE_HASH = stored_compose_hash
+        print(f"\t\u2714  Build unchanged since last upload; reusing pinned CID {IPFS_HASH}")
+    else:
+        try:
+            IPFS_DOCKER_COMPOSE_HASH = spinner.spin_till_done(
+                "Uploading and pinning docker compose file to IPFS",
+                ipfs_client.upload,
+                "docker-compose-final.yml"
+            )
+        except Exception as e:
+            print("\t\u2716  Could not upload docker-compose-final.yml to IPFS")
+            print(f"\t Error uploading: {e}")
+            exit(1)
+        config.write("IPFS_DOCKER_COMPOSE_HASH", IPFS_DOCKER_COMPOSE_HASH)
+
+        IPFS_HASH = ipfs_client.upload(registry_path)
+        if not IPFS_HASH:
+            print("\t\u2716  Error: Could not upload enclave to IPFS")
+            exit(1)
+        config.write("IPFS_HASH", IPFS_HASH)
+        # Record what these CIDs were computed from, so future publishes only
+        # reuse them while the on-disk build is byte-identical.
+        config.write("IPFS_UPLOAD_FINGERPRINT", build_fingerprint)
 
     print('\n\u276f\u276f Extracting public key from enclave')
 
