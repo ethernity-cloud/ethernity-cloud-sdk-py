@@ -400,6 +400,18 @@ if __name__ == '__main__':
         logging.error(f"Invalid encalve session or network type")
         exit(1)
 
+    # Emit the enclave public certificate IMMEDIATELY, before touching
+    # SwiftStream. The public-key extraction service runs securelock in an
+    # environment with NO etny-swift-stream (MinIO) container; the first
+    # SwiftStream call below (get_file_content for .env) then blocks on a TCP
+    # connect to a non-existent host with no timeout, so the enclave hangs and
+    # the extractor's getPublicKey times out WITHOUT ever receiving the cert.
+    # The cert is already in hand (generated from MR_ENCLAVE above / loaded from
+    # the CAS session) and needs nothing from SwiftStream, so print it first.
+    # Real task runs also benefit: the cert is available up-front and the same
+    # PUBLIC_CERT line is still printed in the except handler for compatibility.
+    logging.info(f"PUBLIC_CERT: {cert_pem.decode('utf-8')}")
+
     try:
         swiftStreamClient = SwiftStreamService("etny-swift-stream:9000", "swiftstreamadmin", "swiftstreamadmin")
         status, env_content = swiftStreamClient.get_file_content("__BUCKET_NAME__", ".env")
