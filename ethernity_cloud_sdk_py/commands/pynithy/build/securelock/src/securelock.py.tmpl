@@ -412,12 +412,24 @@ if __name__ == '__main__':
     # PUBLIC_CERT line is still printed in the except handler for compatibility.
     logging.info(f"PUBLIC_CERT: {cert_pem.decode('utf-8')}")
 
+    # Cert-harvest (public-key extraction) mode: the extraction service runs
+    # securelock with NO SwiftStream and NO task, purely to read the PUBLIC_CERT
+    # printed above. In that environment the .env fetch below fails (no MinIO).
+    # The cert is already out, so EXIT(0) cleanly instead of proceeding to
+    # wait_for_payload_and_input() -- which would block forever waiting for a task
+    # that never comes, hanging the extractor until its 20-minute timeout. (The
+    # extractor captures the cert from stdout when this process exits.)
     try:
         swiftStreamClient = SwiftStreamService("etny-swift-stream:9000", "swiftstreamadmin", "swiftstreamadmin")
         status, env_content = swiftStreamClient.get_file_content("__BUCKET_NAME__", ".env")
-        if not status:
-            logging.error("Failed to get .env file")
-            raise Exception("Failed to get .env file")
+    except Exception as e:
+        logging.info(f"SwiftStream unavailable ({e}); public key emitted, exiting (cert-harvest mode)")
+        exit(0)
+    if not status:
+        logging.info("No .env in SwiftStream; public key emitted, exiting (cert-harvest mode)")
+        exit(0)
+
+    try:
         EtnySecureLock.read_env_str(env_content)
 
         app = EtnySecureLock(cert_pem, private_key_pem, swiftStreamClient)
