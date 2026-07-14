@@ -343,7 +343,16 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
                     'SCONE_LOG': 'FATAL',
                 }
                 trustedzone_env = {
-                    'SCONE_HEAP': '128M',
+                    # SCONE_HEAP is baked into the enclave measurement (MRENCLAVE),
+                    # so it MUST match the heap the trustedzone cert was harvested
+                    # and registered with by the etny-* build pipeline -- which uses
+                    # 256M (v3/run/docker-compose{,-final}.yml). Using a different
+                    # heap here (e.g. 128M) produces a DIFFERENT trustedzone enclave
+                    # with a different self-signed testnet key, so it cannot decrypt
+                    # the client challenge (encrypted for the REGISTERED key) and
+                    # dies with "MAC check failed" on every task. Keep this at 256M
+                    # to match the on-chain-registered trustedzone identity.
+                    'SCONE_HEAP': '256M',
                     'SCONE_ALLOW_DLOPEN': '1',
                     'SCONE_EXTENSIONS_PATH': '/lib/libbinary-fs.so',
                     'SCONE_ALPINE': '1',
