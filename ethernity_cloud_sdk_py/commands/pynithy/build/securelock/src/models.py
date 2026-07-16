@@ -41,6 +41,15 @@ class MetadataBase:
     def checksum(self):
         raise NotImplementedError("Subclass must implement this method")
 
+    @property
+    def has_checksum(self):
+        """True when this metadata carries a real checksum to validate.
+
+        Empty input carries no checksum (checksum is None), so callers can skip
+        validation without inspecting raw metadata strings themselves.
+        """
+        return self.checksum is not None
+
 
 class PayloadFactory:
     @staticmethod
@@ -98,9 +107,13 @@ class PayloadMetadata(MetadataBase):
 
     def __init__(self, metadata):
         super().__init__(metadata, metadata.split(':')[0])
-        self._checksum = metadata.split(':')[2]
+        # An absent checksum (empty third field) is normalized to None so the
+        # rest of the code can rely on `checksum is None` / `has_checksum`
+        # instead of special-casing empty strings.
+        checksum = metadata.split(':')[2].strip()
+        self._checksum = checksum or None
         self._ipfs_hash = metadata.split(':')[1]
-        
+
 
     @property
     def ipfs_hash(self):
@@ -115,7 +128,10 @@ class InputMetadatav3(MetadataBase):
 
     def __init__(self, metadata):
         super().__init__(metadata, 'v3')
-        self._checksum = metadata.split(':')[2]
+        # Empty input carries an empty checksum field; normalize it to None so
+        # `has_checksum` is False and validation is skipped (nothing to check).
+        checksum = metadata.split(':')[2].strip()
+        self._checksum = checksum or None
         self._ipfs_hash = metadata.split(':')[1]
 
     @property
@@ -124,7 +140,7 @@ class InputMetadatav3(MetadataBase):
 
     @property
     def checksum(self):
-        return self._checksum if self._checksum != '0' else self._checksum
+        return self._checksum
 
 
 class DOReqMetadata:

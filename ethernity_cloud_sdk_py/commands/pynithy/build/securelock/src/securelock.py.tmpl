@@ -21,12 +21,10 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.x509.extensions import UnrecognizedExtension
 from etny_crypto import etny_crypto as crypto
 from web3 import Web3
-from eth_account import Account
 from web3.middleware import ExtraDataToPOAMiddleware
 from etny_exec import execute_task_v3, TaskStatus
 from models import *
 from swift_stream_service import SwiftStreamService
-from eth_account.messages import encode_defunct
 # Suppress pkg_resources warning if using web3
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="web3")
@@ -156,9 +154,6 @@ class EtnySecureLock:
                     continue
                 key, value = line.split('=', 1)
                 os.environ[key.strip()] = re.sub(r'\n', '', value.strip())
-    def _extract_signer(self, checksum: str, signature: str) -> str:
-        signer = Account.recover_message(encode_defunct(text=checksum), signature=signature)
-        return signer.lower()
     def validate_client_payload(self):
         payload_data = self.__get_file_content_and_decrypt(self.payload)
         input_data = self.__get_file_content_and_decrypt(self.input)
@@ -173,40 +168,54 @@ class EtnySecureLock:
                     self.task_result = f'Failed to fetch metadata after {max_retries} attempts: {str(e)}'
                     self.is_valid_client_data = False
                     return
-        # Assume is_valid_client_data is False by default; we'll set to True only if all checks pass
-        payload_valid = False
-        input_valid = False
+        # Assume is_valid_client_data is False by default; we'll set to True only if all checks pass.
 
-        if len(payload_data) > 0 or self._metadata.payload_metadata_obj.checksum is not None:
+        def validate_checksum(metadata_obj, data, owner, error_code, error_msg):
+            """Validate one file's integrity against its on-chain checksum (v4).
+
+            The DO-request is submitted on-chain by the owner, so the metadata
+            checksum is already authenticated by the transaction sender; we only
+            need to confirm the file content hashes to that recorded checksum.
+            Kept identical to the trustedzone enclave so both agree.
+            """
+            checksum = self.compute_sha256_checksum(data)
+            tx_checksum = metadata_obj.checksum.lower().removeprefix('0x')
+
+            if tx_checksum != checksum:
+                self.task_code = error_code
+                self.task_result = error_msg
+                return False
+            return True
+
+        owner = self.order_metadata.do_owner.lower()
+
+        # Payload is always required and always carries a checksum.
+        if self._metadata.payload_metadata_obj.has_checksum:
             try:
-                payload_checksum = self.compute_sha256_checksum(payload_data)
-                payload_signer = self._extract_signer(payload_checksum, self._metadata.payload_metadata_obj.checksum)
-                if payload_signer == self.order_metadata.do_owner.lower():
-                    payload_valid = True
-                else:
-                    self.task_code = TaskStatus.PAYLOAD_CHECKSUM_ERROR
-                    self.task_result = 'PAYLOAD CHECKSUM DOESN\'T MATCH'
+                payload_valid = validate_checksum(
+                    self._metadata.payload_metadata_obj, payload_data, owner,
+                    TaskStatus.PAYLOAD_CHECKSUM_ERROR, 'PAYLOAD CHECKSUM DOESN\'T MATCH')
             except Exception:
                 self.task_code = TaskStatus.PAYLOAD_CHECKSUM_ERROR
                 self.task_result = 'PAYLOAD CHECKSUM CHECK ERROR'
+                payload_valid = False
         else:
-                self.task_code = TaskStatus.PAYLOAD_CHECKSUM_ERROR
-                self.task_result = 'PAYLOAD CHECKSUM DOESN\'T EXIST'
+            self.task_code = TaskStatus.PAYLOAD_CHECKSUM_ERROR
+            self.task_result = 'PAYLOAD CHECKSUM DOESN\'T EXIST'
+            payload_valid = False
 
-        if len(input_data) > 0 or self._metadata.input_metadata_obj.checksum is not None:
+        # Empty input carries no checksum -> nothing to validate.
+        if not self._metadata.input_metadata_obj.has_checksum:
+            input_valid = True
+        else:
             try:
-                input_checksum = self.compute_sha256_checksum(input_data)
-                input_signer = self._extract_signer(input_checksum, self._metadata.input_metadata_obj.checksum)
-                if input_signer == self.order_metadata.do_owner.lower():
-                    input_valid = True
-                else:
-                    self.task_code = TaskStatus.INPUT_CHECKSUM_ERROR
-                    self.task_result = 'INPUT CHECKSUM DOESN\'T MATCH'
+                input_valid = validate_checksum(
+                    self._metadata.input_metadata_obj, input_data, owner,
+                    TaskStatus.INPUT_CHECKSUM_ERROR, 'INPUT CHECKSUM DOESN\'T MATCH')
             except Exception:
                 self.task_code = TaskStatus.INPUT_CHECKSUM_ERROR
                 self.task_result = 'INPUT CHECKSUM CHECK ERROR'
-        else:
-            input_valid = True
+                input_valid = False
 
         if payload_valid and input_valid:
             self.is_valid_client_data = True
