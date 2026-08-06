@@ -1,0 +1,98 @@
+# Acceptance test for the unattended CLI (ESR RFC §9 / implementation plan
+# Phase 2): every step below runs with no TTY and must either succeed or fail
+# with an actionable error — never hang on a prompt.
+name: unattended-cli
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unattended:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install SDK
+        run: pip install -e .
+
+      - name: Unattended ecld-init (with ESR)
+        working-directory: ${{ runner.temp }}
+        env:
+          ECLD_NON_INTERACTIVE: "1"
+          ECLD_PROJECT_NAME: ci_acceptance
+          ECLD_BLOCKCHAIN_NETWORK: BLOXBERG_TESTNET
+          ECLD_DAPP_TYPE: Pynithy
+          ECLD_APP_TEMPLATE: "yes"
+          ECLD_ESR_ENABLE: "true"
+          ECLD_ESR_CONTRACT: "0x1111111111111111111111111111111111111111"
+        run: |
+          ecld-init < /dev/null
+          python -c "
+          import json
+          c = json.load(open('.config.json'))
+          assert c['PROJECT_NAME'] == 'ci_acceptance', c
+          assert c['BLOCKCHAIN_NETWORK'] == 'BLOXBERG_TESTNET', c
+          assert c['ESR']['enabled'] is True, c
+          assert c['ESR']['contract_address'].startswith('0x1111'), c
+          print('init config OK')
+          "
+          test -f src/serverless/backend.py
+
+      - name: ESR build gate fails fast on a bad address
+        working-directory: ${{ runner.temp }}
+        run: |
+          python - <<'PY'
+          import json, sys
+          c = json.load(open(".config.json")); c["ESR"]["contract_address"] = "oops"
+          json.dump(c, open(".config.json", "w"))
+          from ethernity_cloud_sdk_py.commands.pynithy import build
+          build.config.load()
+          try:
+              build.validate_esr_config()
+          except SystemExit as e:
+              assert e.code == 1
+              print("gate fired correctly"); sys.exit(0)
+          sys.exit("gate did not fire")
+          PY
+
+      - name: ecld-test — success, expect, env-driven, failure codes
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -e
+          # restore a valid ESR address after the gate test
+          python -c "
+          import json
+          c = json.load(open('.config.json'))
+          c['ESR']['contract_address'] = '0x1111111111111111111111111111111111111111'
+          json.dump(c, open('.config.json', 'w'))
+          "
+          ecld-test --expect 'Hello World' 'hello("World")'
+          ECLD_TEST_CODE='hello("Env")' ECLD_TEST_EXPECT='Hello Env' ecld-test
+          # mismatch must exit non-zero
+          if ECLD_TEST_EXPECT='wrong' ecld-test 'hello("World")'; then
+            echo "expected non-zero exit on mismatch"; exit 1
+          fi
+          # undefined function -> enclave-identical failure, non-zero exit
+          if ecld-test 'no_such_function()'; then
+            echo "expected non-zero exit on failure"; exit 1
+          fi
+          # empty required config -> CONFIG_ERROR (32)
+          out=$(ESR_CONTRACT_ADDRESS="" ecld-test 'hello("x")' || true)
+          echo "$out" | grep -q "task code: 32" || { echo "expected CONFIG_ERROR 32"; exit 1; }
+          echo "all ecld-test acceptance checks passed"
+
+      - name: Unattended publish errors actionably without a key
+        working-directory: ${{ runner.temp }}
+        env:
+          ECLD_NON_INTERACTIVE: "1"
+        run: |
+          out=$(ecld-publish < /dev/null 2>&1 || true)
+          echo "$out" | grep -q "ECLD_PRIVATE_KEY" || { echo "$out"; echo "expected actionable key error"; exit 1; }
+          echo "publish guard OK"
