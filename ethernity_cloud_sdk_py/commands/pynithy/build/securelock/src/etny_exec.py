@@ -1,11 +1,23 @@
 import os.path
 import ast
 
+# If the serverless backend fails to import, remember WHY. Previously any
+# import failure was silently swallowed (backend = None), so every task then
+# died later with a misleading "name 'X' is not defined" — a missing module in
+# requirements.txt or a top-level-style import inside backend.py (the enclave
+# loads it as the package `serverless.backend`) took many builds to diagnose.
+# Only a genuinely absent backend (no serverless module at all) stays silent:
+# that is the stock-enclave configuration, where payloads are self-contained.
+_backend_import_error = None
 try:
     import serverless.backend as backend
-except ImportError:
+except ModuleNotFoundError as e:
     backend = None
-    pass
+    if e.name not in ("serverless", "serverless.backend"):
+        _backend_import_error = f"{type(e).__name__}: {e}"
+except BaseException as e:  # SyntaxError, ValueError at import time, etc.
+    backend = None
+    _backend_import_error = f"{type(e).__name__}: {e}"
 
 sdkFunctions = {}
 if backend is not None:
@@ -32,8 +44,23 @@ class TaskStatus:
     PAYLOAD_CHECKSUM_ERROR = 6
     INPUT_CHECKSUM_ERROR = 7
     EXECVE = 8
+    # Extended diagnostic (matches the trustedzone's extended enum): the
+    # serverless backend failed to import inside the enclave, so none of its
+    # functions exist. Reported eagerly with the original import error instead
+    # of letting every call die as "name 'X' is not defined".
+    IMPORT_ERROR = 28
 
 def execute_task_v3(payload_data, input_data, extra_globals=None):
+    if _backend_import_error is not None:
+        return (
+            TaskStatus.IMPORT_ERROR,
+            "BACKEND IMPORT ERROR: " + _backend_import_error
+            + " | The serverless backend failed to import inside the enclave, so"
+            + " none of its functions are available. Common causes: a module"
+            + " missing from src/serverless/requirements.txt, or a top-level"
+            + " import inside backend.py (the enclave loads it as the package"
+            + " 'serverless.backend' - use relative imports for sibling modules).",
+        )
     base_globals = {"___etny_result___": ___etny_result___, **sdkFunctions}
     if extra_globals:
         base_globals.update(extra_globals)

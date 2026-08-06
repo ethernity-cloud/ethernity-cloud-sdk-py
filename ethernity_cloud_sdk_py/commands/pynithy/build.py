@@ -108,10 +108,30 @@ def copy_backend_to_build_dir(build_dir):
     src_dir = Path.cwd() / "src" / "serverless"
     dest_dir = Path(build_dir) / "securelock" / "src" / "serverless"
 
+    # Fail the build NOW if the backend is missing or unparseable. An enclave
+    # built without a valid backend runs every task into
+    # "name 'X' is not defined" / IMPORT_ERROR on-chain — expensive to
+    # discover after building, publishing and paying for a task.
+    backend_file = src_dir / "backend.py"
+    if not backend_file.is_file():
+        print(f"ERROR: {backend_file} not found.")
+        print("       The securelock enclave loads your functions from src/serverless/backend.py;")
+        print("       without it no backend function will exist inside the enclave.")
+        print("       Run ecld-init to scaffold it, or create the file before building.")
+        sys.exit(1)
+    try:
+        import ast as _ast
+
+        _ast.parse(backend_file.read_text(encoding="utf-8"))
+    except SyntaxError as e:
+        print(f"ERROR: src/serverless/backend.py has a syntax error and cannot be imported")
+        print(f"       inside the enclave: line {e.lineno}: {e.msg}")
+        sys.exit(1)
+
     # Remove destination directory if it exists to avoid conflicts
     if dest_dir.exists():
         shutil.rmtree(dest_dir)
-    
+
     # Copy entire directory tree
     shutil.copytree(src_dir, dest_dir)
 
