@@ -9,23 +9,18 @@
 # Stage 1 - SGX report helper (unchanged, crosscompiler build tool)
 ########################################################################
 FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers:alpine-scone6.0.7 AS build-sgx-module
-# The key-generation source ships ENCRYPTED in the SDK package
-# (get_sgx_report.c.enc) so it is not readable as plaintext by anyone
-# inspecting the wheel / build tree. It is decrypted to tmpfs ONLY for the
-# compile, then shredded, so the plaintext .c never lands in a persisted image
-# layer. An optional SGX_SRC_KEY build arg rotates the wrapping key (not an ENV,
-# so it is not baked into the image). NOTE: this hides the SOURCE, not the
-# algorithm — the compiled .so still contains the executable logic and the
-# enclave image is public; see esr_wallet.py for why key secrecy comes from
-# attestation, not from hiding this file.
-COPY src/get_sgx_report.c.enc /etny-securelock/
-COPY scripts/decrypt_keygen.py /etny-securelock/decrypt_keygen.py
-ARG SGX_SRC_KEY=""
-RUN cd /etny-securelock/ && \
-    python3 decrypt_keygen.py get_sgx_report.c.enc /dev/shm/get_sgx_report.c "$SGX_SRC_KEY" && \
-    scone-gcc -shared -fPIC -O3 -o get_sgx_report.so /dev/shm/get_sgx_report.c && \
-    (shred -u /dev/shm/get_sgx_report.c 2>/dev/null || rm -f /dev/shm/get_sgx_report.c) && \
-    rm -f decrypt_keygen.py get_sgx_report.c.enc
+# The SDK ships the SGX key-gen module ONLY as a PREBUILT .so
+# (get_sgx_report.so) -- never the .c source. The source of truth for
+# get_sgx_report.c lives in the etny-pynithy / etny-nodenithy repos; the .so is
+# produced once from it via scripts/build_keygen_so.sh (scone-gcc, hardened +
+# stripped) and committed here. No source is compiled during the developer's
+# build, so a developer inspecting the wheel or build tree never sees the
+# derivation algorithm.
+#
+# NOTE (see esr_wallet.py): the .so still contains the executable logic and the
+# enclave image is public, so this hides the SOURCE, not the algorithm; on
+# testnet the key remains reproducible because there is no attestation.
+COPY src/get_sgx_report.so /etny-securelock/get_sgx_report.so
 
 ########################################################################
 # Stage 2 - PyInstaller freeze on a NORMAL python 3.14 (no SCONE / no SGX)

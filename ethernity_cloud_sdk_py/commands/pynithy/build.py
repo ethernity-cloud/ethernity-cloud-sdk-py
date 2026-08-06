@@ -168,19 +168,23 @@ def copy_from_module_to_build_dir(build_dir):
     dest_file = build_dir / "securelock" / "scripts" / "pyfreeze.sh"
     shutil.copy(src_file, dest_file)
 
-    # Decrypts the encrypted SGX key-gen source in the crosscompiler stage
-    # (Dockerfile.tpl stage 1). Must be staged next to the Dockerfile like the
-    # other build scripts, or the build fails ("decrypt_keygen.py: not found").
-    src_file = module_dir / "build" / "securelock" / "scripts" / "decrypt_keygen.py"
-    dest_file = build_dir / "securelock" / "scripts" / "decrypt_keygen.py"
-    shutil.copy(src_file, dest_file)
-
     src_file = module_dir / "build" / "securelock" / "src"
     dest_file = build_dir / "securelock" / "src"
     # Remove dest if it exists (since copytree fails if dest exists)
 
     if dest_file.exists():
         shutil.rmtree(dest_file)
+    # The SGX key-gen module ships as a PREBUILT get_sgx_report.so (never the
+    # .c source). Guard the build with a clear error if the .so is missing --
+    # e.g. a checkout that never ran scripts/build_keygen_so.sh.
+    so_path = src_file / "get_sgx_report.so"
+    if not so_path.is_file():
+        print(f"ERROR: {so_path} not found.")
+        print("       The SDK ships the SGX key-gen module as a prebuilt .so, not source.")
+        print("       It is a build artifact of the etny-pynithy / etny-nodenithy")
+        print("       pipelines. Copy it in with scripts/get_keygen_so.sh and commit")
+        print("       src/get_sgx_report.so (see scripts/README-keygen.md).")
+        sys.exit(1)
     shutil.copytree(src_file, dest_file)
 
     return True
@@ -488,14 +492,8 @@ def main():
 
     # Build and push Docker image for etny-securelock
     
-    # ECLD_SGX_SRC_KEY (hex) optionally rotates the wrapping key used to decrypt
-    # the SGX key-gen source during the crosscompiler stage. Unset -> the
-    # Dockerfile's ARG default ("") -> the label-derived key baked into the
-    # package, which matches how get_sgx_report.c.enc was encrypted.
-    _sgx_key_arg = os.environ.get("ECLD_SGX_SRC_KEY", "").strip()
-    _sgx_build_arg = f" --build-arg SGX_SRC_KEY={_sgx_key_arg}" if _sgx_key_arg else ""
     run_command(
-        f"docker build --build-arg SECURELOCK_SESSION={SECURELOCK_SESSION}{_sgx_build_arg} -t etny-securelock:latest ."
+        f"docker build --build-arg SECURELOCK_SESSION={SECURELOCK_SESSION} -t etny-securelock:latest ."
     )
     run_command("docker tag etny-securelock localhost:5000/etny-securelock")
 
