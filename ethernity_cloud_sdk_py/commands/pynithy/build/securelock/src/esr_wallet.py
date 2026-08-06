@@ -86,27 +86,28 @@ def is_secret_identity(network_type: str) -> bool:
     network. It is the narrower question the ESR wallet depends on: could
     someone outside the enclave reproduce the private key?
 
-      * mainnet — the identity key comes from SGX attestation: CAS verifies the
-        DCAP quote and provisions the key over the attested channel, so it is
-        secret, enclave-only, and identical across nodes running this
-        MRENCLAVE. This is the intended posture and needs nothing from ESR.
-      * testnet — the enclave self-signs. Whether that key is secret depends on
-        how the ENCLAVE BUILD generates it, not on anything in this module.
-        Today's SDK-vendored securelock seeds it from MR_SIGNER/MR_ENCLAVE
-        (both public — see generate_cert_from_mrenclave in securelock.py.tmpl),
-        so it is reproducible by anyone who can rebuild the image. A separate
-        in-enclave key generator used by the runtime trustedzone is being
-        ported into securelock as a compiled module; a build carrying it should
-        declare ESR_IDENTITY_SECRET=1 and this function follows automatically,
-        with no change here.
+    The distinction is ATTESTATION, not SGX. Both networks run the identical
+    in-enclave generator (get_sgx_report.c) on real SGX hardware, so at runtime
+    a node operator cannot read the key out of enclave memory on either.
 
-    Note on compiled/obfuscated generators: shipping the generator as a
-    compiled artifact does not by itself make the key secret. The enclave image
-    is published (IPFS) and its MRENCLAVE is on-chain, so the code can be run
-    and observed by anyone; secrecy comes only from a secret INPUT that never
-    leaves the CPU (an EGETKEY/sealing key, or a secret injected at provision
-    time and kept out of the published image). Set ESR_IDENTITY_SECRET=1 only
-    when that holds.
+      * mainnet — CAS attests the enclave (DCAP quote verified) before the
+        identity is trusted, so a key is only accepted from a genuine, measured
+        enclave. The private key is effectively enclave-only: reproducing the
+        derivation outside a real attested enclave yields a key nothing accepts.
+        Intended posture; needs nothing from ESR.
+      * testnet — NO attestation. The enclave still runs on SGX and still
+        generates the keypair with the same algorithm, but nothing verifies the
+        MRENCLAVE, and the derivation input (MR_ENCLAVE) is public. So anyone
+        who rebuilds the image can reproduce the keypair. This is a deliberate
+        testnet tradeoff (real enclave execution for functional testing without
+        the CAS dependency) — not a bug. Treat testnet ESR wallets as
+        disposable; do not fund them with real value.
+
+    What would make the testnet key genuinely exclusive is a secret INPUT that
+    never leaves the CPU (EGETKEY / sealing key) OR requiring attestation on
+    testnet too. Encrypting or obfuscating the generator does NOT achieve this:
+    without attestation, an attacker doesn't reverse the code — they run the
+    published image (it is on IPFS, MRENCLAVE on-chain) and observe the key.
     """
     import os
 
@@ -115,15 +116,18 @@ def is_secret_identity(network_type: str) -> bool:
         return True
     if override in ("0", "false", "no"):
         return False
+    # Secrecy tracks attestation, not the network name: mainnet is attested,
+    # testnet is not. The override exists for a future attested-testnet build.
     return str(network_type).strip().lower() == "mainnet"
 
 
 INSECURE_IDENTITY_WARNING = (
-    "[TESTNET-INSECURE] This enclave build derives its identity key from public "
-    "measurements (MR_SIGNER/MR_ENCLAVE), so the ESR wallet's private key is "
-    "reproducible by anyone who can rebuild the image. The enclave itself is "
-    "still SGX-protected — this is only about key secrecy. Do not fund this "
-    "wallet with real value. (If this build generates its identity key from a "
-    "genuine in-enclave secret, set ESR_IDENTITY_SECRET=1 at build time to "
+    "[TESTNET-INSECURE] This network runs the enclave on SGX but WITHOUT "
+    "attestation, so the ESR wallet's keypair — though generated inside the "
+    "enclave — is reproducible by anyone who rebuilds the image (its derivation "
+    "input, MR_ENCLAVE, is public and nothing verifies the enclave). This is a "
+    "deliberate testnet tradeoff, not a defect. Treat the wallet as disposable "
+    "and do not fund it with real value. (An attested testnet build can set "
+    "ESR_IDENTITY_SECRET=1 to "
     "suppress this warning.)"
 )

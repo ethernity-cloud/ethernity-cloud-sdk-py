@@ -6,3 +6,5 @@ exclude __pycache__
 exclude .mypy_cache
 recursive-exclude * __pycache__
 recursive-exclude * .mypy_cache
+# never ship the decrypted key-gen source
+global-exclude get_sgx_report.c
