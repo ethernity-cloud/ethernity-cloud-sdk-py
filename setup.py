@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 setup(
     name="ethernity-cloud-sdk-py",
-    version="0.3.26",
+    version="0.3.27",
     url="https://github.com/ethernity-cloud/ethernity-cloud-sdk-py",
     author="Ethernity Cloud Team",
     author_email="contact@ethernity.cloud",
@@ -34,6 +34,7 @@ setup(
             "ecld-init=ethernity_cloud_sdk_py.cli:main_init",
             "ecld-build=ethernity_cloud_sdk_py.cli:main_build",
             "ecld-publish=ethernity_cloud_sdk_py.cli:main_publish",
+            "ecld-test=ethernity_cloud_sdk_py.cli:main_test",
         ],
     },
 )
