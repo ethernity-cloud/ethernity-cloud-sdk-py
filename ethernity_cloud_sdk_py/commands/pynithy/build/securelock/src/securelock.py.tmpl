@@ -2,6 +2,7 @@
 
 import binascii
 import hashlib
+import hmac
 import os
 import io
 import time
@@ -96,27 +97,49 @@ class EtnySecureLock:
         # given enclave build always yields the same key.
         mr_enclave = bytes.fromhex(mr_enclave_hex)
         mr_signer = bytes.fromhex(mr_signer_hex)
-        # SecureLock seed: a single keyed hash over (mr_enclave || mr_signer)
-        # with its own tag -- simpler than TrustedZone's repeated-concatenation
-        # seed and not interchangeable with it.
-        SECURELOCK_TAG = b"ethernity-cloud/securelock-identity/v1"
-        seed = hashlib.sha256(SECURELOCK_TAG + mr_enclave + mr_signer).digest()
 
-        def generate_scalar(seed: bytes, order: int, bit_size: int) -> int:
-            # Straightforward counter-mode expansion: hash(seed || counter),
-            # concatenated to the needed width, reduced by rejection into
-            # [1, order). Simpler than the nested double-counter version, same
-            # security properties for deterministic key derivation.
+        # SecureLock identity-key derivation (v2). HKDF-SHA512 with strict
+        # domain separation and a large stretched expansion, keyed by its OWN
+        # tag so it is not interchangeable with the TrustedZone derivation --
+        # seeing one enclave's algorithm reveals nothing about the other's.
+        #
+        # An optional per-build salt (ENCLAVE_KDF_SALT, baked at build time)
+        # mixes in so different builds yield unrelated keys; when it is a real
+        # secret (e.g. attestation-provisioned) the derivation becomes secret
+        # too, with no code change here. On testnet it is typically empty, and
+        # the key stays reproducible -- see esr_wallet.py.
+        SECURELOCK_TAG = b"ethernity-cloud/securelock-identity/v2"
+        KDF_ITERS = 4096  # stretch: makes off-enclave brute-forcing the layout costly
+
+        def _hkdf(ikm: bytes, salt: bytes, info: bytes, length: int) -> bytes:
+            # RFC 5869 HKDF over SHA-512.
+            prk = hmac.new(salt or b"\x00" * 64, ikm, hashlib.sha512).digest()
+            out, t, ctr = b"", b"", 1
+            while len(out) < length:
+                t = hmac.new(prk, t + info + bytes([ctr]), hashlib.sha512).digest()
+                out += t
+                ctr += 1
+            return out[:length]
+
+        build_salt = os.getenv("ENCLAVE_KDF_SALT", "").encode("utf-8")
+        # Extract: bind to the measurements with the SecureLock tag.
+        ikm = SECURELOCK_TAG + mr_enclave + mr_signer
+        prk = _hkdf(ikm, build_salt, SECURELOCK_TAG + b"|prk", 64)
+        # Stretch: iterate so reproducing the key requires the full construction,
+        # not a one-line hash anyone can guess from the measurements.
+        for i in range(KDF_ITERS):
+            prk = hmac.new(prk, SECURELOCK_TAG + struct.pack(">I", i), hashlib.sha512).digest()
+
+        def generate_scalar(prk: bytes, order: int, bit_size: int) -> int:
+            # Expand PRK into a scalar in [1, order) by HKDF-expand + rejection.
             byte_size = (bit_size + 7) // 8
-            counter = 0
+            ctr = 0
             while True:
-                block = b''
-                while len(block) < byte_size:
-                    block += hashlib.sha256(seed + struct.pack('>I', counter)).digest()
-                    counter += 1
-                candidate = int.from_bytes(block[:byte_size], 'big')
+                block = _hkdf(prk, b"", SECURELOCK_TAG + b"|scalar" + struct.pack(">I", ctr), byte_size)
+                candidate = int.from_bytes(block, 'big')
                 if 1 <= candidate < order:
                     return candidate
+                ctr += 1
 
         # Define the order for secp384r1
         order = 39402006196394479212279040100143613805079739270465446667946905279627659399113263569398956308152294913554433653942643
@@ -124,7 +147,7 @@ class EtnySecureLock:
         # Generate deterministic EC private key
         curve = ec.SECP384R1()
         bit_size = 384
-        private_value = generate_scalar(seed, order, bit_size)
+        private_value = generate_scalar(prk, order, bit_size)
         private_key = ec.derive_private_key(private_value, curve, default_backend())
         public_key = private_key.public_key()
 
