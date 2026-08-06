@@ -11,10 +11,17 @@ checksums, or encryption; those need a real (testnet) run.
 
 Usage, from the project root (where .config.json lives):
 
-    ecld-test 'hello("World")'
+    ecld-test 'hello("World")'                 # one-shot, in-process
     ecld-test --file payload.py
     ecld-test --input data.json 'process(___etny_data_set___)'
     ecld-test --input-text '{"x": 1}' 'process(___etny_data_set___)'
+
+    ecld-test serve [--port 8745]              # local API for runner LOCAL mode
+
+`serve` starts the local test API (local_api.py, part of the securelock
+source) so a dApp can exercise its real runner integration end to end:
+point the runner at LOCAL mode and every runner.run() executes against
+this API instead of the blockchain.
 
 Exit code 0 on TaskStatus SUCCESS, 1 otherwise.
 """
@@ -66,17 +73,44 @@ def _load_enclave_executor(project_src):
     return module
 
 
+def _serve(project_src, host, port):
+    """Start the local test API (vendored local_api.py) with the project backend."""
+    for mod in ("serverless", "serverless.backend", "etny_exec", "local_api"):
+        sys.modules.pop(mod, None)
+    vendored_dir = os.path.dirname(os.path.normpath(VENDORED_EXEC))
+    if project_src and os.path.isdir(project_src):
+        sys.path.insert(0, project_src)
+    sys.path.insert(0, vendored_dir)
+    import local_api  # noqa: E402  (resolved from the vendored securelock src)
+
+    backend_path = os.path.join(project_src, "serverless", "backend.py")
+    if os.path.isfile(backend_path):
+        print(f"backend : {backend_path}")
+    else:
+        print("backend : none found — serving with bare globals, like a stock enclave")
+    try:
+        local_api.serve(host=host, port=port)
+    except KeyboardInterrupt:
+        print("\n[local-api] stopped")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="ecld-test",
         description="Run a payload locally with the enclave's own executor (no SGX, no gas).",
     )
-    parser.add_argument("code", nargs="*", help="payload code string, e.g. 'hello(\"World\")'")
+    parser.add_argument("code", nargs="*", help="payload code string, e.g. 'hello(\"World\")' — or the subcommand 'serve'")
     parser.add_argument("--file", "-f", help="read the payload from a file instead")
     parser.add_argument("--input", "-i", dest="input_file", help="file whose content becomes ___etny_data_set___")
     parser.add_argument("--input-text", dest="input_text", help="literal string for ___etny_data_set___")
     parser.add_argument("--src", default="src", help="project source dir containing serverless/backend.py (default: src)")
+    parser.add_argument("--host", default="127.0.0.1", help="serve: bind address (default 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8745, help="serve: port (default 8745)")
     args = parser.parse_args(argv)
+
+    if args.code and args.code[0] == "serve":
+        return _serve(os.path.abspath(args.src), args.host, args.port)
 
     if args.file:
         with open(args.file, encoding="utf-8") as fh:
