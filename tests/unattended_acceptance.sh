@@ -27,16 +27,23 @@ cd "$WORK"
 export PYTHONPATH="$REPO_ROOT"
 export PYTHONIOENCODING=utf-8
 
-# Prefer python3 (slim/alpine images often ship only that name).
-PY="$(command -v python3 || command -v python || true)"
+# Interpreter selection. ECLD_TEST_PYTHON wins (Windows callers pass their
+# venv python, since `bash` there may be WSL whose Linux python is a different
+# environment entirely). Otherwise prefer python3 — slim/alpine images often
+# ship only that name.
+PY="${ECLD_TEST_PYTHON:-$(command -v python3 || command -v python || true)}"
 [ -n "$PY" ] || { echo "FAIL: no python3 on PATH"; exit 1; }
 
-# Preflight: the SDK's runtime deps must be importable. In a bare container
-# this is the one setup step, so say exactly what to run rather than dying on
-# a raw ModuleNotFoundError three steps later.
-if ! "$PY" -c "import ethernity_cloud_sdk_py.cli" > /dev/null 2>&1; then
-  echo "FAIL: the SDK and its dependencies are not importable."
-  echo "      Install them first, e.g.:  pip install -e $REPO_ROOT"
+# Preflight: the SDK AND its runtime dependencies must be importable. Import a
+# module that pulls the dependency chain (dotenv, web3, ...) rather than just
+# the package root, so a partially-provisioned interpreter is caught here with
+# an actionable message instead of failing mid-suite.
+if ! "$PY" -c "import ethernity_cloud_sdk_py.commands.init" > /dev/null 2>&1; then
+  echo "FAIL: the SDK or its dependencies are not importable by:"
+  echo "        $PY"
+  echo "      Install them there:  $PY -m pip install -e $REPO_ROOT"
+  echo "      (On Windows, bash may be WSL. Point the suite at your venv with"
+  echo "       ECLD_TEST_PYTHON=/c/path/to/venv/Scripts/python.exe)"
   exit 1
 fi
 
