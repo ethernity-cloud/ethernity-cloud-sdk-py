@@ -430,10 +430,47 @@ def extract_public_key_local():
             result = _extract_certificate_pem(output)
             if result and "-----BEGIN CERTIFICATE-----" not in result:
                 result = ""
+            # ESR (RFC §5.2): the enclave prints its wallet address on the same
+            # channel as the cert. Capture it here — on mainnet this is the only
+            # place it can come from, since the identity key never leaves.
+            _capture_esr_wallet_address(output)
         except subprocess.CalledProcessError as e:
             return False
 
         return result
+
+
+def _capture_esr_wallet_address(output):
+        """Persist an ESR_WALLET_ADDRESS emitted by the enclave, if present.
+
+        Only the ADDRESS is ever emitted (never the key), so storing it in
+        .config.json is safe and is what makes the wallet fundable/readable.
+        """
+        import re
+
+        esr = config.read_esr()
+        if not esr.get("enabled"):
+            return None
+        m = re.search(r"ESR_WALLET_ADDRESS:\s*(0x[0-9a-fA-F]{40})", output or "")
+        if not m:
+            err = re.search(r"ESR_WALLET_ERROR:\s*(.+)", output or "")
+            if err:
+                print(f"\t✘  Enclave could not derive its ESR wallet: {err.group(1).strip()}")
+            return None
+        address = m.group(1)
+        if esr.get("wallet_address") and esr["wallet_address"] != address:
+            # The address is a deterministic function of the enclave identity;
+            # a change means the identity changed (new MRENCLAVE on testnet, or
+            # a different CAS secret). Say so — funds sit at the OLD address.
+            print(f"\t⚠  ESR wallet address changed: {esr['wallet_address']} -> {address}")
+            print("\t   Any balance at the previous address belongs to the previous enclave identity.")
+        esr["wallet_address"] = address
+        config.write_esr(esr)
+        print(f"\t✔  ESR wallet address: {address}")
+        if "[TESTNET-INSECURE]" in (output or ""):
+            print("\t⚠  This network's enclave identity is NOT secret: the ESR wallet's private")
+            print("\t   key is reproducible by anyone. Do not fund it with real value.")
+        return address
 
 
 def _extract_certificate_pem(output):
@@ -859,7 +896,23 @@ def main(private_key):
             ipfs_hash=IPFS_HASH,
             docker_composer_hash=IPFS_DOCKER_COMPOSE_HASH
         )
+        # The service may return either the bare cert or a dict that also
+        # carries the enclave's ESR wallet address (RFC §5.2).
+        if isinstance(ENCLAVE_PUBLIC_KEY, dict):
+            _esr_remote = ENCLAVE_PUBLIC_KEY.get("esrWalletAddress")
+            ENCLAVE_PUBLIC_KEY = ENCLAVE_PUBLIC_KEY.get("publicKey")
+            if _esr_remote:
+                _capture_esr_wallet_address(f"ESR_WALLET_ADDRESS: {_esr_remote}")
 
+        _esr_cfg = config.read_esr()
+        if _esr_cfg.get("enabled") and not _esr_cfg.get("wallet_address"):
+            print()
+            print("\t⚠  ESR is enabled but the enclave's wallet address is unknown.")
+            print("\t   The address is derived from the enclave identity key, which on")
+            print("\t   mainnet exists only inside the enclave — the remote extraction")
+            print("\t   service cannot compute it. Run one publish on an SGX-capable host")
+            print("\t   (local extraction) to record ESR.wallet_address, then republish.")
+            print()
 
     os.chdir(current_dir)
 

@@ -119,5 +119,53 @@ out=$(ECLD_NON_INTERACTIVE=1 py_cli ecld-publish 2>&1 || true)
 echo "$out" | grep -q "ECLD_PRIVATE_KEY" || { echo "$out"; fail "expected actionable key error"; }
 echo "publish guard OK"
 
+step "5. ESR identity wallet (derivation + address capture)"
+PYTHONIOENCODING=utf-8 "$PY" - <<'PY'
+import os, sys
+src = os.path.join(os.environ["PYTHONPATH"],
+                   "ethernity_cloud_sdk_py", "commands", "pynithy",
+                   "build", "securelock", "src")
+sys.path.insert(0, src)
+import esr_wallet as w
+
+k1 = b"identity-key-one"
+k2 = b"identity-key-two"
+a1 = w.derive_wallet_address(k1)
+assert a1 == w.derive_wallet_address(k1), "derivation must be deterministic"
+assert a1 != w.derive_wallet_address(k2), "wallet must be bound to the identity key"
+assert a1.startswith("0x") and len(a1) == 42, a1
+assert a1 != a1.lower(), "address must be EIP-55 checksummed"
+
+import hashlib
+assert w.derive_wallet_private_key(k1) != hashlib.sha256(k1).digest(), \
+    "domain separation missing"
+N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+assert 0 < int.from_bytes(w.derive_wallet_private_key(k1), "big") < N
+
+from eth_account import Account
+assert Account.from_key(w.derive_wallet_private_key(k1)).address == a1, \
+    "address must match the derived key"
+
+assert w.is_secret_identity("mainnet") and not w.is_secret_identity("testnet")
+try:
+    w.derive_wallet_address(b""); sys.exit("empty identity key must raise")
+except ValueError:
+    pass
+
+# publish-side capture: only the ADDRESS is ever consumed, and only when ESR
+# is enabled.
+from ethernity_cloud_sdk_py.commands.pynithy import publish as P
+out = f"INFO - ESR_WALLET_ADDRESS: {a1}\n"
+assert P._capture_esr_wallet_address(out) == a1
+assert P.config.read_esr()["wallet_address"] == a1
+assert P._capture_esr_wallet_address("INFO - no address here") is None
+
+esr = P.config.read_esr(); esr["enabled"] = False; P.config.write_esr(esr)
+assert P._capture_esr_wallet_address(out) is None, "disabled ESR must ignore the address"
+esr["enabled"] = True; esr["wallet_address"] = ""; P.config.write_esr(esr)
+print("ESR wallet derivation + capture OK")
+PY
+echo "ESR identity wallet OK"
+
 echo
 echo "ALL UNATTENDED ACCEPTANCE CHECKS PASSED"

@@ -25,6 +25,10 @@ from web3.middleware import ExtraDataToPOAMiddleware
 from etny_exec import execute_task_v3, TaskStatus
 from models import *
 from swift_stream_service import SwiftStreamService
+# Static import so PyInstaller's dependency analysis bundles it into binary-fs
+# (a lazy import inside a function is invisible to the freeze and would fail
+# only at runtime, inside the enclave, where it cannot be diagnosed).
+import esr_wallet
 # Suppress pkg_resources warning if using web3
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="web3")
@@ -420,6 +424,23 @@ if __name__ == '__main__':
     # Real task runs also benefit: the cert is available up-front and the same
     # PUBLIC_CERT line is still printed in the except handler for compatibility.
     logging.info(f"PUBLIC_CERT: {cert_pem.decode('utf-8')}")
+
+    # ESR (RFC §5.2): emit the enclave's ESR wallet ADDRESS on the same channel
+    # as the cert, so publish can capture it locally or via the remote
+    # extraction service. It MUST be derived here rather than by the extraction
+    # service: on mainnet the identity key is CAS-provisioned and exists only
+    # inside this enclave, so nobody outside can compute the address. Only the
+    # address is emitted — the private key never leaves.
+    if os.getenv("ESR_CONTRACT_ADDRESS", "").strip():
+        try:
+            esr_address = esr_wallet.derive_wallet_address(private_key_pem)
+            logging.info(f"ESR_WALLET_ADDRESS: {esr_address}")
+            if not esr_wallet.is_secret_identity(network_type):
+                logging.warning(esr_wallet.INSECURE_IDENTITY_WARNING)
+        except Exception as e:
+            # Never let ESR derivation break a task: report it the way every
+            # other enclave-side config problem is reported.
+            logging.error(f"ESR_WALLET_ERROR: {e}")
 
     # Cert-harvest (public-key extraction) mode: the extraction service runs
     # securelock with NO SwiftStream and NO task, purely to read the PUBLIC_CERT
