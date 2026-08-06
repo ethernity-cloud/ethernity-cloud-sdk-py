@@ -86,27 +86,37 @@ class EtnySecureLock:
         mr_signer_hex = mr_signer_ptr.decode('utf-8')
 
         logging.info(f"MR_ENCLAVE: {mr_enclave_hex}")
-        # Concatenate mr_signer and mr_enclave twice to form the seed (each is 32 bytes, so 128 bytes total)
+        # SecureLock identity-key derivation. Deliberately DIFFERENT from the
+        # TrustedZone derivation so that reading one enclave's algorithm does
+        # not reveal the other's: distinct domain-separation tag and a simpler
+        # HKDF-style scalar generator. Correctness does not depend on the two
+        # matching -- each enclave self-signs its own cert, registered on-chain
+        # under its own image hash, and the handshake fetches the peer's PUBLIC
+        # key from the registry (never re-derives it). Kept deterministic so a
+        # given enclave build always yields the same key.
         mr_enclave = bytes.fromhex(mr_enclave_hex)
         mr_signer = bytes.fromhex(mr_signer_hex)
-        seed = mr_signer + mr_enclave + mr_signer + mr_enclave
+        # SecureLock seed: a single keyed hash over (mr_enclave || mr_signer)
+        # with its own tag -- simpler than TrustedZone's repeated-concatenation
+        # seed and not interchangeable with it.
+        SECURELOCK_TAG = b"ethernity-cloud/securelock-identity/v1"
+        seed = hashlib.sha256(SECURELOCK_TAG + mr_enclave + mr_signer).digest()
 
-        def generate_scalar(seed: bytes, label: bytes, order: int, bit_size: int) -> int:
+        def generate_scalar(seed: bytes, order: int, bit_size: int) -> int:
+            # Straightforward counter-mode expansion: hash(seed || counter),
+            # concatenated to the needed width, reduced by rejection into
+            # [1, order). Simpler than the nested double-counter version, same
+            # security properties for deterministic key derivation.
             byte_size = (bit_size + 7) // 8
             counter = 0
             while True:
-                base_hash = hashlib.sha256(seed + label + struct.pack('>I', counter)).digest()
-                rand_bytes = b''
-                hash_counter = 0
-                while len(rand_bytes) < byte_size:
-                    h = hashlib.sha256(base_hash + struct.pack('>I', hash_counter)).digest()
-                    rand_bytes += h
-                    hash_counter += 1
-                rand_bytes = rand_bytes[:byte_size]
-                candidate = int.from_bytes(rand_bytes, 'big')
+                block = b''
+                while len(block) < byte_size:
+                    block += hashlib.sha256(seed + struct.pack('>I', counter)).digest()
+                    counter += 1
+                candidate = int.from_bytes(block[:byte_size], 'big')
                 if 1 <= candidate < order:
                     return candidate
-                counter += 1
 
         # Define the order for secp384r1
         order = 39402006196394479212279040100143613805079739270465446667946905279627659399113263569398956308152294913554433653942643
@@ -114,7 +124,7 @@ class EtnySecureLock:
         # Generate deterministic EC private key
         curve = ec.SECP384R1()
         bit_size = 384
-        private_value = generate_scalar(seed, b'd', order, bit_size)
+        private_value = generate_scalar(seed, order, bit_size)
         private_key = ec.derive_private_key(private_value, curve, default_backend())
         public_key = private_key.public_key()
 
