@@ -95,6 +95,7 @@ ENV SCONE_EXTENSIONS_PATH=/lib/libbinary-fs.so
 # those resolve (the base image's build WORKDIR /b/Python-3.14.6 otherwise leaks
 # in as the enclave PWD).
 ENV SCONE_PWD=/etny-securelock
+__ESR_ENV__
 WORKDIR /etny-securelock
 
 # Rendered by build.py: signs the EXECUTED binary (/usr/local/bin/python) with

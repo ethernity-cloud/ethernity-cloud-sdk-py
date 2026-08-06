@@ -251,12 +251,32 @@ def build_and_push_services(build_dir: str):
 
     return True
 
+def validate_esr_config():
+    """ESR fail-fast gate (RFC §5.4): never build an ESR-enabled enclave with
+    an unresolved registry address — inside the sealed image it would read as
+    empty and every task would fail after gas is spent."""
+    esr = config.read_esr()
+    if not esr.get("enabled"):
+        return esr
+    addr = (esr.get("contract_address") or "").strip()
+    if not re.fullmatch(r"0x[0-9a-fA-F]{40}", addr):
+        print("ERROR: ESR is enabled but ESR contract_address is not a valid address"
+              f" (got {addr!r}).")
+        print("       The enclave is sealed: a missing value bakes in as EMPTY and every")
+        print("       task fails at runtime after gas is spent. Set it with:")
+        print("         ecld-init (ESR step), ECLD_ESR_CONTRACT, or .config.json ESR.contract_address")
+        sys.exit(1)
+    return esr
+
+
 def main():
     global current_dir
     # Set current directory
     current_dir = os.getcwd()
     # Set the build directory path
     build_dir = Path.cwd() / "build"
+
+    ESR = validate_esr_config()
 
     copy_from_module_to_build_dir(build_dir)
 
@@ -411,6 +431,19 @@ def main():
         .replace("__TRUSTED_ZONE_IMAGE__", TRUSTED_ZONE_IMAGE)
         .replace("__NETWORK_TYPE__", BLOCKCHAIN_CONFIG.network_type)
         .replace("__MEMORY_TO_ALLOCATE__", MEMORY_TO_ALLOCATE_FORMATED)
+    )
+
+    # ESR env injection (RFC §5.4). Disabled projects get the placeholder line
+    # removed entirely, so the rendered Dockerfile is byte-identical to a
+    # pre-ESR render and existing MRENCLAVEs are unaffected. Enabled projects
+    # get the address(es) baked as runtime env in the final (signed) stage.
+    esr_env_block = ""
+    if ESR.get("enabled"):
+        esr_env_block = f"ENV ESR_CONTRACT_ADDRESS={ESR['contract_address']}\n"
+        if (ESR.get("wallet_address") or "").strip():
+            esr_env_block += f"ENV ESR_WALLET_ADDRESS={ESR['wallet_address']}\n"
+    dockerfile_secure_content = dockerfile_secure_content.replace(
+        "__ESR_ENV__\n", esr_env_block
     )
 
     # CRITICAL: sign /usr/local/bin/python -- the binary the enclave actually

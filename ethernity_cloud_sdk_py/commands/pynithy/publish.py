@@ -646,7 +646,10 @@ def update_cas_session():
 def main(private_key):
     spinner = Spinner()
     image_registry.set_private_key(private_key)
-    ipfs_client = IPFSClient(config.read("IPFS_ENDPOINT"))
+    # ECLD_IPFS_ENDPOINT / ECLD_IPFS_TOKEN override the stored choice (RFC §9).
+    ipfs_endpoint = os.environ.get("ECLD_IPFS_ENDPOINT", "").strip() or config.read("IPFS_ENDPOINT")
+    ipfs_token = os.environ.get("ECLD_IPFS_TOKEN", "").strip() or (config.read("IPFS_TOKEN") or "")
+    ipfs_client = IPFSClient(ipfs_endpoint, ipfs_token or None)
 
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
     DAPP_TYPE = config.read("DAPP_TYPE")
@@ -818,7 +821,13 @@ def main(private_key):
         # publishes upload to IPFS and use the remote extraction service without
         # asking again. Delete REMOTE_CERT_EXTRACTION from .config.json (or set
         # it to anything other than "always") to be prompted once more.
-        saved_choice = str(config.read("REMOTE_CERT_EXTRACTION") or "").lower()
+        # ECLD_REMOTE_CERT_EXTRACTION overrides both (RFC §9): "always"/"never".
+        env_choice = os.environ.get("ECLD_REMOTE_CERT_EXTRACTION", "").strip().lower()
+        if env_choice == "never":
+            print("\t\t✘  Remote extraction disabled by ECLD_REMOTE_CERT_EXTRACTION=never")
+            print("\n\t\tPlease configure local SGX support and run the setup again")
+            exit(1)
+        saved_choice = env_choice or str(config.read("REMOTE_CERT_EXTRACTION") or "").lower()
         if saved_choice == "always":
             print("\t\t✔  Using Ethernity Cloud public key extraction service (saved choice: always)")
             should_generate_certificates = "y"

@@ -44,13 +44,40 @@ class TaskStatus:
     PAYLOAD_CHECKSUM_ERROR = 6
     INPUT_CHECKSUM_ERROR = 7
     EXECVE = 8
-    # Extended diagnostic (matches the trustedzone's extended enum): the
+    # Extended diagnostics (match the trustedzone's extended enum): the
     # serverless backend failed to import inside the enclave, so none of its
     # functions exist. Reported eagerly with the original import error instead
     # of letting every call die as "name 'X' is not defined".
     IMPORT_ERROR = 28
+    # A required enclave config value is present but EMPTY (e.g. an ESR
+    # address that was never baked into the sealed image). Reported eagerly
+    # with the variable named, instead of a confusing downstream crash.
+    CONFIG_ERROR = 32
+
+
+def _empty_required_config():
+    """Names of *_ADDRESS-style enclave config vars that are set but empty.
+
+    The enclave is sealed: env can only come from the image, so a present-but-
+    empty required value is always a build/render defect, never a runtime
+    choice. ESR_* vars only exist when the project enabled ESR at build time.
+    """
+    required = ("ESR_CONTRACT_ADDRESS",)
+    return [name for name in required
+            if name in os.environ and not os.environ[name].strip()]
+
 
 def execute_task_v3(payload_data, input_data, extra_globals=None):
+    missing = _empty_required_config()
+    if missing:
+        return (
+            TaskStatus.CONFIG_ERROR,
+            "ENCLAVE CONFIG ERROR: required value(s) empty inside the enclave: "
+            + ", ".join(missing)
+            + " | The enclave is sealed, so this value had to be baked at build"
+            + " time and was not. Re-run ecld-build (it validates ESR config)"
+            + " and republish.",
+        )
     if _backend_import_error is not None:
         return (
             TaskStatus.IMPORT_ERROR,
