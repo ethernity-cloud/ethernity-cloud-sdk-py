@@ -33,21 +33,67 @@ as `PUBLIC_CERT`, immediately after the cert and before any SwiftStream access
 
 ## Security posture by network — the load-bearing distinction
 
-**Mainnet: intended posture.** The identity key is provisioned by CAS over the
-attested channel, exists only inside genuine enclaves of this MRENCLAVE, and is
-identical across nodes. The derived wallet inherits exactly those properties:
-enclave-only, stable, unforgeable.
+The question ESR depends on is narrow, and it is **not** "is the enclave
+genuine". SGX protects enclave memory on every network. The only question that
+decides whether the wallet is safe to fund is: **can anyone outside the enclave
+reproduce the private key?**
 
-**Testnet: insecure by design.** With no CAS the identity key is derived from
-`MR_SIGNER`/`MR_ENCLAVE`, both **public**. Therefore the ESR wallet's private
-key is **reproducible by anyone** who can build the same enclave. State commits
-signed by it are forgeable and any balance is drainable.
+**Mainnet (decided): SGX attestation-derived key.** CAS verifies the DCAP quote
+and provisions the identity key over the attested channel. It exists only
+inside genuine enclaves of this MRENCLAVE and is identical across nodes, so the
+derived wallet is enclave-only, stable and unforgeable. Intended posture; no
+further work.
 
-This is surfaced in three places (RFC §7):
+**Testnet (in progress): port the trustedzone key generator into securelock.**
+Decided direction: securelock should use the same in-enclave key-generation
+library the runtime trustedzone uses, shipped as a **compiled module** (like the
+existing `get_sgx_report.so`), rather than the current
+`MR_SIGNER+MR_ENCLAVE` seed. That library is not in this repo yet — the
+SDK-vendored securelock still self-signs from public measurements
+(`generate_cert_from_mrenclave`), and so does `etny-pynithy`'s trustedzone on
+`feature/v3-multinetwork` (line 824 → line 160), which logs
+"TESTNET MODE: Using pre-released SGX - NOT SECURE FOR PRODUCTION".
+
+⚠️ **Compilation and obfuscation do not create key secrecy.** The enclave image
+is published on IPFS and its MRENCLAVE is on-chain, so anyone can run the code
+and observe what it derives. Secrecy requires a secret *input* that never
+leaves the CPU — an `EGETKEY`/sealing key (per-platform, so it would differ per
+node, which has its own consequences for a wallet expected to be stable), or a
+secret injected at provision time and kept out of the published image. Hiding
+the algorithm raises effort; it does not change reproducibility.
+
+**Therefore the warning stays until the ported generator is shown to mix a real
+secret**, and it is now switchable by configuration rather than hard-coded:
+
 1. the enclave logs `[TESTNET-INSECURE]` next to the address,
-2. `publish.py` prints a warning when it captures an address from such output,
+2. `publish.py` warns when it captures an address from such output,
 3. `esr_wallet.is_secret_identity(network_type)` is the programmatic check for
-   any future code path (e.g. auto-funding) that must refuse or restrict.
+   any path that must refuse or restrict (e.g. Phase 4 auto-funding),
+4. **`ESR_IDENTITY_SECRET=1`** baked at build time makes (1)–(3) treat the
+   identity as secret — the switch to flip when the ported generator lands and
+   its secret input has been reviewed. No code change required then.
+
+## Next work item — port the testnet key generator into securelock
+
+Decided, not yet implementable here: the generator library lives outside this
+repo (not on any `etny-pynithy` branch searched). To land it:
+
+1. Locate the library the runtime trustedzone uses for testnet identity keys.
+2. Determine its secret input (`EGETKEY`/sealing key, provisioned secret, or
+   none). This single fact decides everything below.
+3. Cross-compile it in the binary-fs stage next to `get_sgx_report.so` and load
+   it from `securelock.py.tmpl`'s testnet branch in place of
+   `generate_cert_from_mrenclave()`.
+4. Keep trustedzone and securelock on the **same** generator — divergent
+   identity schemes between the two enclaves is a bug class of its own.
+5. If (2) yields a real secret: bake `ESR_IDENTITY_SECRET=1` and the warnings
+   disappear on their own. If it does not: ship it anyway for parity, keep the
+   warning, and treat testnet ESR wallets as disposable.
+
+⚠️ If the secret turns out to be an `EGETKEY`-derived sealing key, note that it
+is **per-platform**: the same enclave on two different nodes would derive two
+different wallets. That is fine for node-local state but breaks the "one wallet
+per enclave identity" model ESR assumes — worth settling before the port.
 
 ## Reviewer questions to settle before Phase 4 (auto-funding)
 

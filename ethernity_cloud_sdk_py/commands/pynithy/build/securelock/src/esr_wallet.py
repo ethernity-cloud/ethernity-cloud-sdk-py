@@ -80,18 +80,50 @@ def derive_wallet_address(identity_priv_der: bytes) -> str:
 
 
 def is_secret_identity(network_type: str) -> bool:
-    """True only when the identity key is genuinely enclave-only.
+    """True only when the identity key is genuinely unpredictable to outsiders.
 
-    Mainnet provisions the key through CAS over the attested channel. Testnet
-    self-signs from public measurements, so the key — and therefore the wallet
-    — is reproducible by anyone (RFC §7).
+    This is NOT "is the enclave genuine" — SGX protects enclave memory on every
+    network. It is the narrower question the ESR wallet depends on: could
+    someone outside the enclave reproduce the private key?
+
+      * mainnet — the identity key comes from SGX attestation: CAS verifies the
+        DCAP quote and provisions the key over the attested channel, so it is
+        secret, enclave-only, and identical across nodes running this
+        MRENCLAVE. This is the intended posture and needs nothing from ESR.
+      * testnet — the enclave self-signs. Whether that key is secret depends on
+        how the ENCLAVE BUILD generates it, not on anything in this module.
+        Today's SDK-vendored securelock seeds it from MR_SIGNER/MR_ENCLAVE
+        (both public — see generate_cert_from_mrenclave in securelock.py.tmpl),
+        so it is reproducible by anyone who can rebuild the image. A separate
+        in-enclave key generator used by the runtime trustedzone is being
+        ported into securelock as a compiled module; a build carrying it should
+        declare ESR_IDENTITY_SECRET=1 and this function follows automatically,
+        with no change here.
+
+    Note on compiled/obfuscated generators: shipping the generator as a
+    compiled artifact does not by itself make the key secret. The enclave image
+    is published (IPFS) and its MRENCLAVE is on-chain, so the code can be run
+    and observed by anyone; secrecy comes only from a secret INPUT that never
+    leaves the CPU (an EGETKEY/sealing key, or a secret injected at provision
+    time and kept out of the published image). Set ESR_IDENTITY_SECRET=1 only
+    when that holds.
     """
+    import os
+
+    override = os.getenv("ESR_IDENTITY_SECRET", "").strip().lower()
+    if override in ("1", "true", "yes"):
+        return True
+    if override in ("0", "false", "no"):
+        return False
     return str(network_type).strip().lower() == "mainnet"
 
 
 INSECURE_IDENTITY_WARNING = (
-    "[TESTNET-INSECURE] The enclave identity key on this network is derived "
-    "from public measurements (MR_SIGNER/MR_ENCLAVE), so the ESR wallet's "
-    "private key is reproducible by anyone. Do not fund it with real value and "
-    "do not rely on it for production trust."
+    "[TESTNET-INSECURE] This enclave build derives its identity key from public "
+    "measurements (MR_SIGNER/MR_ENCLAVE), so the ESR wallet's private key is "
+    "reproducible by anyone who can rebuild the image. The enclave itself is "
+    "still SGX-protected — this is only about key secrecy. Do not fund this "
+    "wallet with real value. (If this build generates its identity key from a "
+    "genuine in-enclave secret, set ESR_IDENTITY_SECRET=1 at build time to "
+    "suppress this warning.)"
 )
