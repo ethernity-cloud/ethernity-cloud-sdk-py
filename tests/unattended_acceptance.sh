@@ -2,14 +2,20 @@
 # Acceptance test for the unattended CLI (ESR plan Phase 2).
 #
 # Every step runs with no TTY and must either succeed or fail with an
-# actionable error — never hang on a prompt. Run it from the repo root:
+# actionable error — never hang on a prompt.
 #
+# Requirements: bash + python3 + the SDK's dependencies. No docker daemon, no
+# network, no wallet, no SGX — nothing is built or published.
+#
+# From a checkout (deps already installed):
 #   bash tests/unattended_acceptance.sh
 #
-# It needs only Python + the repo itself (no docker, no network, no wallet).
-# The same checks exist as a GitHub Actions job in
-# docs/ci/unattended-cli.yml.example — move that file to .github/workflows/
-# (requires a workflow-scoped token) to enforce them on every PR.
+# Inside a container on any runner (installs deps itself):
+#   docker run --rm -v "$PWD":/sdk -w /sdk python:3.11-slim \
+#     bash -c "pip install -q -e . && bash tests/unattended_acceptance.sh"
+#
+# Exits 0 when every check passes, non-zero (with the failing step named) on
+# the first regression — suitable as a release gate or a CI step anywhere.
 
 set -euo pipefail
 
@@ -21,9 +27,22 @@ cd "$WORK"
 export PYTHONPATH="$REPO_ROOT"
 export PYTHONIOENCODING=utf-8
 
+# Prefer python3 (slim/alpine images often ship only that name).
+PY="$(command -v python3 || command -v python || true)"
+[ -n "$PY" ] || { echo "FAIL: no python3 on PATH"; exit 1; }
+
+# Preflight: the SDK's runtime deps must be importable. In a bare container
+# this is the one setup step, so say exactly what to run rather than dying on
+# a raw ModuleNotFoundError three steps later.
+if ! "$PY" -c "import ethernity_cloud_sdk_py.cli" > /dev/null 2>&1; then
+  echo "FAIL: the SDK and its dependencies are not importable."
+  echo "      Install them first, e.g.:  pip install -e $REPO_ROOT"
+  exit 1
+fi
+
 py_cli() { # py_cli <entrypoint> [args...] — runs a console entrypoint promptless
   local entry="$1"; shift
-  python -c "
+  "$PY" -c "
 import sys
 sys.argv = ['$entry'] + [a for a in sys.argv[1:]]
 from ethernity_cloud_sdk_py.cli import main_${entry#ecld-}
@@ -43,7 +62,7 @@ ECLD_APP_TEMPLATE=yes \
 ECLD_ESR_ENABLE=true \
 ECLD_ESR_CONTRACT=0x1111111111111111111111111111111111111111 \
 py_cli ecld-init > init.log 2>&1 || { cat init.log; fail "init exited non-zero"; }
-python -c "
+"$PY" -c "
 import json
 c = json.load(open('.config.json'))
 assert c['PROJECT_NAME'] == 'ci_acceptance', c
@@ -55,7 +74,7 @@ print('init config OK')
 test -f src/serverless/backend.py || fail "template not scaffolded"
 
 step "2. ESR build gate fails fast on a bad address"
-python - <<'PY'
+"$PY" - <<'PY'
 import json, sys
 c = json.load(open(".config.json")); c["ESR"]["contract_address"] = "oops"
 json.dump(c, open(".config.json", "w"))
@@ -68,7 +87,7 @@ except SystemExit as e:
     print("gate fired correctly"); sys.exit(0)
 sys.exit("gate did not fire")
 PY
-python -c "
+"$PY" -c "
 import json
 c = json.load(open('.config.json'))
 c['ESR']['contract_address'] = '0x1111111111111111111111111111111111111111'
