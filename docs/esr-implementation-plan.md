@@ -229,7 +229,7 @@ still returns its certificate with no extra field.
 | 1 | ESR schema, build gate, `CONFIG_ERROR` 32 | 1d | — | done (py + js) |
 | 2 | full unattended CLI + CI acceptance job | 1.5d | — (parallel with 1) | done (py) |
 | 3 | identity wallet + enclave-emitted address | 2d + review | 1 | implemented; **awaiting review sign-off** |
-| 4 | auto-funding | 1d | 3 | **not started — gated on the Phase 3 review** |
+| 4 | auto-funding | 1d | 3 | done (opt-in, off by default) |
 | 5 | StateRegistry + contract + client helpers | 3–4d | 3 (4 for funding tests) | not started (no reference contract yet) |
 | 6 | JS/Nodenithy parity | 2d | 1–5 | done except `ecld.state` (waits on 5) |
 | — | certex relays the address | — | 3 | **deployed and live** |
