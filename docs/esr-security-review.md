@@ -117,9 +117,16 @@ per enclave identity" model ESR assumes — worth settling before the port.
 2. **Address-change handling.** A new MRENCLAVE (any SDK upgrade or code change
    on testnet) yields a new identity and therefore a new address. `publish.py`
    warns; should it also refuse to proceed if the old address holds a balance?
-3. **Auto-funding on testnet.** Given the key is public, Phase 4 should
-   probably refuse to fund above a hard-coded dust ceiling when
-   `is_secret_identity()` is False, rather than relying on the configured
+3. **Auto-funding on testnet — narrowed by a scope decision.** Auto-funding is
+   now an OPT-IN convenience only: manual funding by the data owner is the
+   default and documented path (the payload uses the ESR address for its own
+   purposes, and only the data owner knows what it needs). Publish with
+   auto-funding off simply prints the address — it never moves value.
+
+   That removes the "publishing silently moved money" case. The original
+   question still stands for anyone who opts in on testnet, where the key is
+   public: Phase 4 should still refuse to fund above a hard-coded dust ceiling
+   when `is_secret_identity()` is False, rather than trusting the configured
    `autofund.max`.
 4. **Remote extraction gap — RESOLVED.** ~~On mainnet the address can only come
    from a local (SGX) extraction.~~ The extraction service

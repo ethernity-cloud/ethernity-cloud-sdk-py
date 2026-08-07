@@ -132,15 +132,26 @@ first, CI second, crypto third, money last.
 - Security review checklist: DOMAIN_SEP fixed and versioned; derivation only when ESR
   enabled; no code path serializes `eth_priv`; wallet address logged, key never.
 
-### Phase 4 — auto-funding at publish
+### Phase 4 — auto-funding at publish (OPT-IN CONVENIENCE ONLY)
 **Repo: sdk-py** · est. ~1 day
+
+**Scope decision:** manual funding by the data owner is the DEFAULT and documented
+path. The enclave emits its address; the data owner funds it as needed, because the
+payload uses that address for its own purposes and only the data owner knows what it
+needs. Auto-funding stays in the plan strictly as an opt-in convenience — never a
+default, never implicit.
+
+This narrows the risk the RFC worried about: money is moved because someone
+deliberately turned it on, not as a side effect of publishing.
 
 - `publish.py`, after address extraction: balance check → top-up transfer from the
   developer wallet (the key that already pays registration) with confirmation wait +
-  tx-hash log.
+  tx-hash log. **Only when `esr.autofund.enabled` is explicitly true.**
 - Guardrails exactly per §5.3: `esr.autofund.max` hard ceiling; interactive =
   confirm; unattended = amount must be explicitly set (no default transfer);
   idempotent top-up (`threshold`).
+- Default off ⇒ publish only PRINTS the address and how to fund it; it never
+  moves value on its own.
 - Reuses the web3 wiring `publish.py`/`image_registry.py` already have per network.
 
 ### Phase 5 — `StateRegistry` in-enclave API + client helpers + reference contract

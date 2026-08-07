@@ -6,8 +6,13 @@ ESR_DEFAULTS = {
     "enabled": False,
     "contract_address": "",
     "wallet_address": "",
+    # Auto-funding is an OPT-IN CONVENIENCE, never a default. Manual funding by
+    # the data owner is the documented path: the payload uses the ESR address
+    # for its own purposes, and only the data owner knows what it needs. With
+    # this off, publish merely PRINTS the enclave's address and never moves
+    # value -- so publishing can never transfer funds as a side effect.
     "autofund": {
-        "enabled": True,
+        "enabled": False,
         "amount": "",
         "threshold": "",
         "max": "",
