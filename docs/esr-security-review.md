@@ -136,7 +136,10 @@ per enclave identity" model ESR assumes — worth settling before the port.
    matches it independently of the certificate and stores it in a new
    `esr_wallet_address` column, and `/api/checkHash` returns it as
    `esrWalletAddress`. Both SDKs already consumed that optional field, so
-   ESR + mainnet + no local SGX now yields an address.
+   ESR + mainnet + no local SGX now yields an address. **Deployed and live**;
+   verified on the running service that the column migrated on the production
+   database and that a real pre-existing hash still returns its certificate
+   unchanged, with no extra field.
 
    Backward compatibility was verified against the *published* SDKs (JS 1.2.0,
    Python 0.3.18): both test `if "publicKey" in response` and branch on its

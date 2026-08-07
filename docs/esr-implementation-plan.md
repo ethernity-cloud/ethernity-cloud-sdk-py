@@ -204,8 +204,21 @@ non-SDK enclaves emit the address too. Takes effect on the next enclave build
 `template-export-public-key` now relays the enclave-emitted line so the address
 reaches both SDKs (see security-review Q4, which this resolves). Backward
 compatibility verified against the published SDKs; the workers run the schema
-migration themselves so deploy order does not matter. **Deployed? No — pushed to
-`main`, still needs a pull + restart on the host.**
+migration themselves so deploy order does not matter. **DEPLOYED and live.**
+
+Deploying it surfaced that the extractor host carried ~350 lines of uncommitted
+hardening (IPFS-tar validation, log-polling cert harvest, input sanitisation)
+that existed nowhere in git — a `git pull` would have destroyed it. That work was
+committed first, the ESR relay was then rewritten against the live code (the
+certificate now comes from a `docker logs` poll whose `$LOGS` is scoped to the
+retry loop), and `main` is now byte-identical to the running host. The live
+database was also untracked (`.gitignore`) since its permanent-modified status is
+what hid the drift; every process now bootstraps the schema so a fresh checkout
+works regardless of start order.
+
+Verified on the live system: both units active, the `esr_wallet_address` column
+migrated on the production database at startup, and a real pre-existing hash
+still returns its certificate with no extra field.
 
 ---
 
@@ -219,7 +232,7 @@ migration themselves so deploy order does not matter. **Deployed? No — pushed 
 | 4 | auto-funding | 1d | 3 | **not started — gated on the Phase 3 review** |
 | 5 | StateRegistry + contract + client helpers | 3–4d | 3 (4 for funding tests) | not started (no reference contract yet) |
 | 6 | JS/Nodenithy parity | 2d | 1–5 | done except `ecld.state` (waits on 5) |
-| — | certex relays the address | — | 3 | code done, **not deployed** |
+| — | certex relays the address | — | 3 | **deployed and live** |
 
 ~9–11 engineering days total. Phases 1+2 are independent, immediately valuable, and
 risk-free (no crypto, no money) — ship them as the next SDK minor (0.4.0: the ESR
