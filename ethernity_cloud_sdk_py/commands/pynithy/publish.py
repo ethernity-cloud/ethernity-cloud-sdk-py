@@ -470,6 +470,13 @@ def _capture_esr_wallet_address(output):
         if "[TESTNET-INSECURE]" in (output or ""):
             print("\t⚠  This network's enclave identity is NOT secret: the ESR wallet's private")
             print("\t   key is reproducible by anyone. Do not fund it with real value.")
+        # Manual funding by the data owner is the DEFAULT path (auto-funding is an
+        # opt-in convenience that is off unless explicitly enabled). Publishing
+        # never moves value on its own, so say plainly that the wallet starts
+        # empty -- otherwise the first task that needs gas fails with no clue why.
+        if not (esr.get("autofund") or {}).get("enabled"):
+            print("\t   This wallet starts EMPTY. Fund it from your own wallet with whatever")
+            print("\t   your payload needs; publishing never transfers value on its own.")
         return address
 
 
