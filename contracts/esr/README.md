@@ -24,8 +24,16 @@ encrypt state, pin to IPFS         state[enclave][key]
 
 | Network | Address |
 |---|---|
+| bloxberg mainnet | `0x4f6c0Ae54567CAeD372d265fEF412C2B5ed1302A` |
 | bloxberg testnet | `0x4f6c0Ae54567CAeD372d265fEF412C2B5ed1302A` |
-| bloxberg mainnet | *not yet deployed* |
+| polygon / amoy / iotex / sepolia / litvm | *not deployed* |
+
+Bloxberg mainnet and testnet are the **same chain** (both chainId 8995, both
+reachable via `core.bloxberg.org` and `bloxberg.ethernity.cloud`) — they are
+separated by different *protocol* contract addresses, not different networks.
+The ESR above was verified present from both RPCs, so both point at that one
+deployment. Deploying a second instance would spend real value duplicating a
+contract on the same chain and split state across two registries.
 
 Verified against the deployed testnet bytecode: all four function selectors are
 present, the event topic matches, and the instance has live `StateCommitted`

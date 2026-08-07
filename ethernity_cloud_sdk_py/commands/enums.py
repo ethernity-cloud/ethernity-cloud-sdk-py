@@ -251,3 +251,46 @@ class BlockchainNetworks(Enum):
         except KeyError:
             print(f"Enum member '{enum_name}' does not exist.")
             return None
+
+    @classmethod
+    def get_esr_contract_address(cls, enum_name):
+        """Canonical Enclave State Registry address for a network, or "".
+
+        Kept as a side map rather than another positional field in the tuples
+        above: those entries are unlabelled, so inserting a value would mean
+        editing all seven and risking a silent shift that assigns, say, an RPC
+        URL to a contract address.
+
+        Empty string = ESR is not deployed on that network yet. Callers must
+        treat that as "ESR unavailable here" and fail loudly rather than baking
+        an empty address into a sealed enclave (which is exactly the
+        empty-result class of bug ESR is meant to close).
+        """
+        return ESR_CONTRACT_ADDRESSES.get(enum_name, "")
+
+
+# Canonical ESR (Enclave State Registry) deployments, keyed by BlockchainNetworks
+# member name. See contracts/esr/ for the contract, its ABI and the design
+# decisions; the address is baked into the enclave at build time so developers
+# never hand-wire it.
+#
+# "" means not deployed on that network yet -- ecld-build refuses to build an
+# ESR-enabled enclave for such a network instead of sealing in an empty value.
+ESR_CONTRACT_ADDRESSES = {
+    # Bloxberg "mainnet" and "testnet" are the SAME CHAIN (both chainId 8995,
+    # both reachable via core.bloxberg.org and bloxberg.ethernity.cloud); they
+    # are separated by different PROTOCOL contract addresses, not by different
+    # networks. The ESR below was verified present from both RPCs, so both
+    # entries point at that one deployment -- deploying a second instance would
+    # spend real value to duplicate a contract on the same chain and split state
+    # across two registries for no benefit.
+    "BLOXBERG_MAINNET": "0x4f6c0Ae54567CAeD372d265fEF412C2B5ed1302A",
+    "BLOXBERG_TESTNET": "0x4f6c0Ae54567CAeD372d265fEF412C2B5ed1302A",
+    # Not deployed yet on these chains. ecld-build must refuse to build an
+    # ESR-enabled enclave here rather than sealing in an empty address.
+    "POLYGON_MAINNET": "",
+    "POLYGON_AMOY": "",
+    "IOTEX_TESTNET": "",
+    "ETHEREUM_SEPOLIA": "",
+    "LITVM_LITEFORGE": "",
+}
