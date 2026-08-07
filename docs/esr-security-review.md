@@ -97,11 +97,23 @@ per enclave identity" model ESR assumes — worth settling before the port.
 
 ## Reviewer questions to settle before Phase 4 (auto-funding)
 
-1. **Is keccak-of-the-DER the right binding?** The DER encoding of the identity
-   key is stable for a given key, but it is an encoding, not a canonical scalar.
-   If CAS ever re-encodes the same key differently the address would change.
-   Consider binding to the raw private scalar instead — cheap to change now,
-   breaking later (funds sit at the old address).
+1. **Is keccak-of-the-DER the right binding? — SETTLED: yes, keep the key as
+   held.** The raw-scalar alternative was implemented and then deliberately
+   reverted. Reasoning: the certificate is the same for a given MR_ENCLAVE on
+   both paths, so the certificate's private key is *already* the stable
+   canonical input — same MRENCLAVE ⇒ same cert ⇒ same key ⇒ same address. The
+   re-encoding worry is theoretical, while extracting a scalar is concrete added
+   cost: key-parsing surface inside the enclave, and a second place for the two
+   language implementations to disagree — which is the very failure it was meant
+   to prevent.
+
+   This also matters on the CAS path specifically: on mainnet the identity is
+   *provisioned as a certificate + private key*, so the key bytes the enclave
+   reads are what CAS produced, not something re-serialized in between.
+
+   The Nodenithy/JS port binds identically, verified byte-exact: the same
+   identity key yields the same address in both languages
+   (`0xFFfFcE35b19189990f6823EbB47E604aFC7E4E22` for the shared test key).
 2. **Address-change handling.** A new MRENCLAVE (any SDK upgrade or code change
    on testnet) yields a new identity and therefore a new address. `publish.py`
    warns; should it also refuse to proceed if the old address holds a balance?
@@ -109,14 +121,37 @@ per enclave identity" model ESR assumes — worth settling before the port.
    probably refuse to fund above a hard-coded dust ceiling when
    `is_secret_identity()` is False, rather than relying on the configured
    `autofund.max`.
-4. **Remote extraction gap.** On mainnet the address can only come from a local
-   (SGX) extraction, because the identity key never leaves the enclave. The
-   extraction service would have to relay the enclave's own emitted line (an
-   `esrWalletAddress` field is already consumed if present). Until then,
-   ESR + mainnet + no local SGX = no address; publish says so explicitly.
-5. **Key-material audit.** Confirm no logging path can serialize
-   `private_key_pem` alongside the ESR code (the enclave already truncates the
-   key file after load on mainnet).
+4. **Remote extraction gap — RESOLVED.** ~~On mainnet the address can only come
+   from a local (SGX) extraction.~~ The extraction service
+   (`template-export-public-key`, "certex") now relays the enclave's own emitted
+   line: `extract-publickey-hash.sh` greps a strictly-formatted
+   `ESR_WALLET_ADDRESS:` line out of the enclave output and echoes it, the worker
+   matches it independently of the certificate and stores it in a new
+   `esr_wallet_address` column, and `/api/checkHash` returns it as
+   `esrWalletAddress`. Both SDKs already consumed that optional field, so
+   ESR + mainnet + no local SGX now yields an address.
+
+   Backward compatibility was verified against the *published* SDKs (JS 1.2.0,
+   Python 0.3.18): both test `if "publicKey" in response` and branch on its
+   value, never enumerating keys, so the added sibling field is invisible to
+   them. The field is emitted only when an address was actually captured, so
+   non-ESR responses are byte-identical to before. The cert-extraction path was
+   deliberately left untouched (raw stdout stays untrusted — a leaked log line
+   once got stored as the public key and broke on-chain registration).
+5. **Key-material audit — partly settled.** The wallet private-key derivation is
+   no longer part of either module's public surface (`_derive_wallet_private_key`
+   + `__all__` in Python; not exported in the JS port), because the client
+   payload is exec'd/eval'd inside the securelock image and can import from it —
+   an exported helper handed untrusted code a ready-made way to materialize the
+   key. Only the address-producing surface is public.
+
+   **Still open, and it matters for Phase 4:** this removes the convenient path,
+   not the underlying capability. Payload code runs *inside* securelock with
+   filesystem and import access, so it can still read the identity key file and
+   re-implement the derivation itself. Genuinely sealing this needs payload
+   sandboxing (a VM context without `require`/`import`, or dropping the key file
+   before `execute()`), which is a larger design change and is NOT done. Worth
+   settling before real value sits behind these wallets.
 
 ## Out of scope (unchanged)
 

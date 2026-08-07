@@ -168,18 +168,47 @@ first, CI second, crypto third, money last.
 Same schema, same env matrix, same PUBLIC_KEY-mode emission from the JS securelock,
 `ecld.state`-equivalent module for `backend.js`.
 
+**Status: done except the `ecld.state` module** (which is the JS half of Phase 5
+and correctly waits for Phase 5 to land on Pynithy first — there is no reference
+implementation to mirror yet). Shipped, adapted to this SDK's `.env`-based
+project config rather than `.config.json`:
+
+- `esr_wallet.js` — same derivation as `esr_wallet.py`, binding to the identity
+  key as held (see security-review Q1). Verified byte-exact against Python.
+- securelock emits `ESR_WALLET_ADDRESS` in PUBLIC_KEY mode, reading the key from
+  `key_file` — the only source that is correct on *both* paths (CAS provisions it
+  there on mainnet, the testnet self-sign writes it there).
+- `ecld-init` ESR step + `ECLD_ESR_ENABLE` / `ECLD_ESR_CONTRACT` env overrides.
+- `build.mjs` fail-fast gate + `__ESR_ENV__` rendered only when enabled, so
+  non-ESR images keep their previous layer content.
+- `CONFIG_ERROR = 32` (Phase 1's enclave half) in `task_status.js` +
+  `etny_exec.js`, synced across the three runtime nodenithy enclave trees.
+
+The same emission was added to the **stock runtime nodenithy** securelock, so
+non-SDK enclaves emit the address too. Takes effect on the next enclave build
+(which changes MRENCLAVE and needs re-registration, as any enclave change does).
+
+### Extraction service (certex) — relays the address
+
+`template-export-public-key` now relays the enclave-emitted line so the address
+reaches both SDKs (see security-review Q4, which this resolves). Backward
+compatibility verified against the published SDKs; the workers run the schema
+migration themselves so deploy order does not matter. **Deployed? No — pushed to
+`main`, still needs a pull + restart on the host.**
+
 ---
 
 ## 4. Sequencing & effort summary
 
-| Phase | Deliverable | Est. | Depends on |
-|---|---|---|---|
-| 1 | ESR schema, build gate, `CONFIG_ERROR` 32 | 1d | — |
-| 2 | full unattended CLI + CI acceptance job | 1.5d | — (parallel with 1) |
-| 3 | identity wallet + enclave-emitted address | 2d + review | 1 |
-| 4 | auto-funding | 1d | 3 |
-| 5 | StateRegistry + contract + client helpers | 3–4d | 3 (4 for funding tests) |
-| 6 | JS/Nodenithy parity | 2d | 1–5 |
+| Phase | Deliverable | Est. | Depends on | Status |
+|---|---|---|---|---|
+| 1 | ESR schema, build gate, `CONFIG_ERROR` 32 | 1d | — | done (py + js) |
+| 2 | full unattended CLI + CI acceptance job | 1.5d | — (parallel with 1) | done (py) |
+| 3 | identity wallet + enclave-emitted address | 2d + review | 1 | implemented; **awaiting review sign-off** |
+| 4 | auto-funding | 1d | 3 | **not started — gated on the Phase 3 review** |
+| 5 | StateRegistry + contract + client helpers | 3–4d | 3 (4 for funding tests) | not started (no reference contract yet) |
+| 6 | JS/Nodenithy parity | 2d | 1–5 | done except `ecld.state` (waits on 5) |
+| — | certex relays the address | — | 3 | code done, **not deployed** |
 
 ~9–11 engineering days total. Phases 1+2 are independent, immediately valuable, and
 risk-free (no crypto, no money) — ship them as the next SDK minor (0.4.0: the ESR
