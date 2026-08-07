@@ -95,6 +95,27 @@ def _state_key() -> bytes:
     return _keccak256(DOMAIN_SEP_STATE + material)
 
 
+def looks_like_cid(value) -> bool:
+    """True only for values shaped like an IPFS CID.
+
+    The contract accepts any non-empty string as the pointer, so a buggy writer
+    can commit something that is not a CID (the live registry currently holds
+    one 0x… digest). That is a defect in the writer, not a supported format:
+    such an entry is rejected here rather than fetched, because passing it on
+    means an error at best and a retry-loop at worst.
+
+    CIDv0 is 46 chars starting "Qm"; CIDv1 is base32 starting "b".
+    """
+    cid = (value or "").strip()
+    if not cid or cid.startswith("0x"):
+        return False
+    if cid.startswith("Qm") and len(cid) == 46:
+        return True
+    if cid.startswith("b") and len(cid) >= 46 and cid.islower():
+        return True
+    return False
+
+
 def cidv1_raw(content: bytes) -> str:
     """CIDv1/raw/sha2-256 for `content`, computed without touching IPFS.
 
@@ -198,6 +219,13 @@ class StateRegistry:
             self.wallet_address, _key_hash(key)).call()
         if not version or not cid:
             return default
+        if not looks_like_cid(cid):
+            # Fail loudly rather than returning `default`: treating a broken
+            # pointer as "no state" would let the next commit overwrite state
+            # that may still be recoverable once the writer is fixed.
+            raise RuntimeError(
+                f"ESR entry for '{key}' holds a pointer that is not a CID "
+                f"({cid[:32]}…). The committing code is writing a non-CID value.")
         blob = self._fetch(key, cid)
         return json.loads(_decrypt(blob).decode("utf-8"))
 
