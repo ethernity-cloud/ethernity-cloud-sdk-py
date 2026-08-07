@@ -4,7 +4,11 @@
 **Repos:** `ethernity-cloud-sdk-py` (primary), `ethernity-cloud-sdk-js` (parity),
 `ethernity-cloud-runner-py` / `@ethernity-cloud/runner` (client helpers),
 `pox-smart-contract` (reference ESR contract), `etny-pynithy` (PUBLIC_KEY mode change)
-**Status:** plan — reviewed against the code, not yet implemented
+**Status:** implemented. Phases 1–6 are done across sdk-py, sdk-js, both runners,
+etny-nodenithy and mvp-pox-node (PR #106 awaiting merge). Phase 3 still wants a
+security-review sign-off, and nothing has yet run end to end on a live node —
+that needs the enclaves rebuilt and re-registered, since these changes alter
+MRENCLAVE.
 
 ---
 
@@ -155,23 +159,43 @@ deliberately turned it on, not as a side effect of publishing.
 - Reuses the web3 wiring `publish.py`/`image_registry.py` already have per network.
 
 ### Phase 5 — `StateRegistry` in-enclave API + client helpers + reference contract
-**Repos: sdk-py, runner-py, runner-js, pox-smart-contract** · est. ~3–4 days
+**Repos: sdk-py, sdk-js, runner-py, runner-js, mvp-pox-node** · **DONE**
 
-- Reference ESR contract (`pox-smart-contract/EsrRegistry.sol` + ABI): keyed state
-  CIDs with `expectedVersion` optimistic concurrency, event per commit. Seeded from
-  StarChart's working flow. Deployed by `ecld-init --esr-contract deploy` on testnets.
-- In-enclave module vendored into securelock src (`ecld/state.py`):
-  `StateRegistry().get(key)` / `.commit(key, mutate_fn)` / `.wallet_address` —
-  encryption key derived from the identity with a **second** domain separator
-  (`…/esr-encryption/v1`), signing via the Phase-3 wallet, version conflict retry.
-- Client helpers: `ethernity_cloud_runner_py.state` + a matching JS export in
-  `@ethernity-cloud/runner` — read/decrypt path sharing the ABI + address from one
-  source (kills StarChart's duplicated ABI in `index.html`).
-- `ecld-test` parity: the local API gains an in-memory ESR stub so `StateRegistry`
-  code paths run locally (get/commit against a dict, versioning honored) — keeps the
-  local-first developer loop we just shipped intact.
-- Migration per §10: deprecation warning when a backend derives a wallet from
-  `MR_ENCLAVE` (grep-able pattern at build time, one minor version window).
+- **Reference contract**: vendored as `contracts/esr/` (`.sol`, `.abi`, README of
+  decisions) rather than newly written — the design was already deployed and in
+  production use. Every selector computed from the vendored ABI was verified
+  against the deployed bytecode, and the `StateCommitted` topic matches. Not
+  redeployed per project: the SDK ships canonical per-network addresses.
+- **In-enclave module** `ecld_state.py` (+ `ecld_state.js` for Nodenithy):
+  `get(key)` / `commit(key, mutate_fn)` / `wallet_address`, encryption keyed by a
+  **second** domain separator (`…/esr-encryption/v1`), optimistic-concurrency retry.
+  Wired in by securelock immediately before the payload runs; a no-op when ESR is
+  disabled.
+- **Client helpers**: `ESRContract` in both runners. **Metadata only** — version,
+  `updatedAt`, pointer, plus a `valid` flag. State stays enclave-private by design;
+  anything a dApp should see is returned by a function the payload chooses to
+  expose. `waitForVersion` lets a dApp wait for a task's effect to land.
+- **Node-side replication** (PR #106): nodes pin published state so a dApp does not
+  depend on the node that produced it; current versions are protected from the
+  retention sweep while superseded ones age out.
+
+Two corrections to the original design, both from testing rather than review:
+
+1. **The enclave computes its own CID.** The node is untrusted — if it supplied the
+   CID it could pin the enclave's blob and return the CID of *different* content,
+   which the enclave would then sign onto the chain. Since a CID is a hash of the
+   content, the enclave derives it (CIDv1/raw) and commits that; the node pins and
+   verifies but never chooses. This also removes the round-trip: the enclave never
+   waits on the node. Reads are verified against the on-chain CID for the same
+   reason, since the node is the delivery path.
+2. **The contract does not validate the pointer.** It accepts any non-empty string,
+   and the live registry holds one entry containing a `0x…` digest rather than a
+   CID. That is a bug in the writer, not a supported format: it is rejected and
+   logged everywhere it is read, because handing it to IPFS can only error or
+   retry-loop.
+
+Not done: the `ecld-test` in-memory ESR stub, and the §10 migration warning for
+backends deriving a wallet from `MR_ENCLAVE`.
 
 ### Phase 6 — Nodenithy/JS parity
 **Repo: sdk-js** · est. ~2 days, after 1–5 stabilize on Pynithy
@@ -179,10 +203,12 @@ deliberately turned it on, not as a side effect of publishing.
 Same schema, same env matrix, same PUBLIC_KEY-mode emission from the JS securelock,
 `ecld.state`-equivalent module for `backend.js`.
 
-**Status: done except the `ecld.state` module** (which is the JS half of Phase 5
-and correctly waits for Phase 5 to land on Pynithy first — there is no reference
-implementation to mirror yet). Shipped, adapted to this SDK's `.env`-based
-project config rather than `.config.json`:
+**Status: done**, including `ecld_state.js` — the JS half of Phase 5, ported once
+the Python side landed. Its CID implementation (hand-written base32) was verified
+byte-identical to both the real IPFS daemon and the Python enclave, so the two
+languages commit the same pointer for the same bytes.
+
+Adapted to this SDK's `.env`-based project config rather than `.config.json`:
 
 - `esr_wallet.js` — same derivation as `esr_wallet.py`, binding to the identity
   key as held (see security-review Q1). Verified byte-exact against Python.
@@ -230,9 +256,10 @@ still returns its certificate with no extra field.
 | 2 | full unattended CLI + CI acceptance job | 1.5d | — (parallel with 1) | done (py) |
 | 3 | identity wallet + enclave-emitted address | 2d + review | 1 | implemented; **awaiting review sign-off** |
 | 4 | auto-funding | 1d | 3 | done (opt-in, off by default) |
-| 5 | StateRegistry + contract + client helpers | 3–4d | 3 (4 for funding tests) | not started (no reference contract yet) |
-| 6 | JS/Nodenithy parity | 2d | 1–5 | done except `ecld.state` (waits on 5) |
+| 5 | StateRegistry + contract + client helpers | 3–4d | 3 (4 for funding tests) | done |
+| 6 | JS/Nodenithy parity | 2d | 1–5 | done |
 | — | certex relays the address | — | 3 | **deployed and live** |
+| — | node: pin retention + state replication | — | 5 | PR #106, awaiting merge |
 
 ~9–11 engineering days total. Phases 1+2 are independent, immediately valuable, and
 risk-free (no crypto, no money) — ship them as the next SDK minor (0.4.0: the ESR
