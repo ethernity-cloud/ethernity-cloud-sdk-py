@@ -73,6 +73,52 @@ class ImageRegistry:
             print(e)
             return 0
 
+    def get_balance_of(self, address):
+        """Native-token balance of `address`, in ether units."""
+        try:
+            balance = self.provider.eth.get_balance(to_checksum_address(address))
+            return Web3.from_wei(balance, "ether")
+        except Exception as e:
+            print(f"Error reading balance of {address}: {e}")
+            return None
+
+    def transfer_native(self, to_address, amount_ether):
+        """Send `amount_ether` of the native token to `to_address`.
+
+        Used only by the opt-in ESR auto-funding path (ESR RFC §5.3). Signs with
+        the same developer key that already pays for image registration, so no
+        new key material is introduced. Returns the tx hash on success, None on
+        failure -- funding must never abort a publish that otherwise succeeded.
+        """
+        try:
+            to_address = to_checksum_address(to_address)
+            value = Web3.to_wei(str(amount_ether), "ether")
+            tx = {
+                "from": self.acct.address,
+                "to": to_address,
+                "value": value,
+                "nonce": self.provider.eth.get_transaction_count(self.acct.address),
+                "chainId": self.blockchain_config.chain_id,
+            }
+            # Gas: a plain transfer is 21000. Price via the node so this works on
+            # both legacy and EIP-1559 chains without special-casing each network.
+            tx["gas"] = 21000
+            try:
+                tx["gasPrice"] = self.provider.eth.gas_price
+            except Exception:
+                pass
+
+            signed = self.provider.eth.account.sign_transaction(tx, self.private_key)
+            tx_hash = self.provider.eth.send_raw_transaction(signed.raw_transaction)
+            receipt = self.provider.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
+            if receipt and receipt.get("status") == 1:
+                return self.provider.to_hex(tx_hash)
+            print(f"\t✘  Funding transaction reverted (status={receipt and receipt.get('status')})")
+            return None
+        except Exception as e:
+            print(f"\t✘  Funding transfer failed: {e}")
+            return None
+
     def check_image_permissions(self):
         try:
             image_hash = self._get_latest_image_version_public_key(

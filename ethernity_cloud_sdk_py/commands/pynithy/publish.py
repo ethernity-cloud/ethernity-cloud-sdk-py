@@ -480,6 +480,121 @@ def _capture_esr_wallet_address(output):
         return address
 
 
+def _autofund_esr_wallet(output=None):
+        """Opt-in top-up of the enclave's ESR wallet (ESR RFC §5.3).
+
+        OFF unless esr.autofund.enabled is explicitly true. Manual funding by the
+        data owner is the default path -- publishing must never move value as a
+        side effect. Guardrails, in order:
+
+          * enabled must be true, and a wallet address must be known;
+          * `amount` must be explicitly set -- there is no default transfer;
+          * `max` is a hard ceiling; a larger `amount` is refused, not clamped
+            silently, because a wrong ceiling should be visible;
+          * `threshold` makes it idempotent: skip when the balance already
+            covers it, so republishing does not stack transfers;
+          * interactive runs confirm; unattended runs proceed only because every
+            value was set deliberately in config.
+
+        Never raises: a funding failure must not fail a publish that otherwise
+        succeeded. Returns the tx hash, or None when nothing was sent.
+        """
+        from decimal import Decimal, InvalidOperation
+
+        esr = config.read_esr()
+        autofund = esr.get("autofund") or {}
+        if not esr.get("enabled") or not autofund.get("enabled"):
+            return None
+
+        address = (esr.get("wallet_address") or "").strip()
+        if not address:
+            print("\t⚠  ESR auto-funding is on but the wallet address is unknown; skipping.")
+            return None
+
+        def _dec(name, raw):
+            raw = str(raw or "").strip()
+            if not raw:
+                return None
+            try:
+                v = Decimal(raw)
+            except (InvalidOperation, ValueError):
+                print(f"\t⚠  ESR autofund.{name}={raw!r} is not a number; skipping funding.")
+                return "invalid"
+            if v < 0:
+                print(f"\t⚠  ESR autofund.{name} must not be negative; skipping funding.")
+                return "invalid"
+            return v
+
+        amount = _dec("amount", autofund.get("amount"))
+        ceiling = _dec("max", autofund.get("max"))
+        threshold = _dec("threshold", autofund.get("threshold"))
+        if amount == "invalid" or ceiling == "invalid" or threshold == "invalid":
+            return None
+
+        # No implicit transfer: the amount is always deliberate.
+        if amount is None or amount == 0:
+            print("\t⚠  ESR auto-funding is on but autofund.amount is not set; nothing sent.")
+            print("\t   Set an explicit amount (ECLD_ESR_AUTOFUND_AMOUNT) or fund manually.")
+            return None
+
+        # A hard ceiling is REQUIRED, not optional: without it an out-of-range
+        # amount (a typo, a bad env var) has nothing stopping it. Refuse rather
+        # than invent a default, since any default would be a guess about how
+        # much of someone else's money is acceptable to move.
+        if ceiling is None:
+            print("\t✘  ESR autofund.max is not set; nothing sent.")
+            print("\t   A hard ceiling is required whenever auto-funding is enabled")
+            print("\t   (ECLD_ESR_AUTOFUND_MAX or ESR.autofund.max).")
+            return None
+
+        # Refuse rather than clamp, so a bad config is obvious.
+        if amount > ceiling:
+            print(f"\t✘  ESR autofund.amount ({amount}) exceeds autofund.max ({ceiling}); nothing sent.")
+            return None
+
+        # The testnet identity is reproducible by anyone who runs the published
+        # image (there is no attestation), so the wallet is drainable. Config is
+        # honoured, but this must be impossible to miss.
+        # BLOCKCHAIN_CONFIG is built inside the publish functions, not at module
+        # level, so resolve the network type from config the same way they do.
+        try:
+            network_type = str(
+                BlockchainNetworks.get_details_by_enum_name(
+                    config.read("BLOCKCHAIN_NETWORK")
+                ).network_type
+                or ""
+            ).strip().lower()
+        except Exception:
+            network_type = ""
+        if network_type and network_type != "mainnet":
+            print("\t⚠  This network has NO enclave attestation: the ESR wallet's private key is")
+            print("\t   reproducible by anyone who runs the published image, so anything you send")
+            print("\t   here is drainable. Funding anyway because autofund is enabled.")
+
+        try:
+            balance = image_registry.get_balance_of(address)
+        except Exception:
+            balance = None
+        if balance is not None:
+            print(f"\t   ESR wallet balance: {balance}")
+            # Idempotent: only top up when it has fallen below the threshold.
+            if threshold is not None and Decimal(str(balance)) >= threshold:
+                print(f"\t✔  Balance already at/above autofund.threshold ({threshold}); nothing sent.")
+                return None
+
+        if not non_interactive():
+            answer = input(f"\tSend {amount} to the ESR wallet {address}? [y/N]: ").strip().lower()
+            if answer not in ("y", "yes"):
+                print("\t   Funding skipped.")
+                return None
+
+        print(f"\t   Sending {amount} to {address} ...")
+        tx_hash = image_registry.transfer_native(address, amount)
+        if tx_hash:
+            print(f"\t✔  ESR wallet funded. tx: {tx_hash}")
+        return tx_hash
+
+
 def _extract_certificate_pem(output):
         """Return the first full PEM certificate block found in `output`, or ''.
 
@@ -952,3 +1067,12 @@ def main(private_key):
     except Exception as e:
         print(e)
         exit()
+
+    # ESR auto-funding (RFC §5.3) runs LAST, only after the enclave is actually
+    # registered -- a publish that failed must never move value. Opt-in and off
+    # by default; it returns immediately unless autofund.enabled is true.
+    try:
+        _autofund_esr_wallet()
+    except Exception as e:
+        # Funding is a convenience: never let it fail an otherwise good publish.
+        print(f"\t⚠  ESR auto-funding skipped: {e}")

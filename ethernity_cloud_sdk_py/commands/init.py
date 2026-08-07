@@ -140,7 +140,10 @@ def configure_esr():
     # data owner is the documented path. Inert unless explicitly enabled.
     esr["autofund"]["amount"] = env_str("ECLD_ESR_AUTOFUND_AMOUNT", esr["autofund"]["amount"] or "0.02")
     esr["autofund"]["threshold"] = env_str("ECLD_ESR_TOPUP_THRESHOLD", esr["autofund"]["threshold"] or "0.01")
-    esr["autofund"]["max"] = env_str("ECLD_ESR_AUTOFUND_MAX", esr["autofund"]["max"] or "")
+    # A ceiling is REQUIRED once auto-funding is switched on (publish refuses to
+    # send without one), so seed a conservative default rather than leaving it
+    # empty -- an empty ceiling would otherwise look enabled but never send.
+    esr["autofund"]["max"] = env_str("ECLD_ESR_AUTOFUND_MAX", esr["autofund"]["max"] or "0.1")
     config.write_esr(esr)
     print(f"ESR enabled: contract {address}")
     print("Fund the enclave's ESR wallet manually once its address is known"
