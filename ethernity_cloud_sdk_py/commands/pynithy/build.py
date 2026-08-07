@@ -265,18 +265,47 @@ def build_and_push_services(build_dir: str):
 def validate_esr_config():
     """ESR fail-fast gate (RFC §5.4): never build an ESR-enabled enclave with
     an unresolved registry address — inside the sealed image it would read as
-    empty and every task would fail after gas is spent."""
+    empty and every task would fail after gas is spent.
+
+    Address resolution, in order:
+      1. an explicitly configured contract_address (BYO / private registry), else
+      2. the canonical deployment for this network, shipped with the SDK.
+
+    Shipping the canonical address is the point: hand-wiring it is exactly the
+    gap that produced the empty-result bug. A network with no deployment fails
+    the build here rather than sealing an empty value into the image.
+    """
     esr = config.read_esr()
     if not esr.get("enabled"):
         return esr
+
+    network = config.read("BLOCKCHAIN_NETWORK")
     addr = (esr.get("contract_address") or "").strip()
+    source = "configured"
+    if not addr:
+        addr = (BlockchainNetworks.get_esr_contract_address(network) or "").strip()
+        source = "canonical (shipped with the SDK)"
+
     if not re.fullmatch(r"0x[0-9a-fA-F]{40}", addr):
-        print("ERROR: ESR is enabled but ESR contract_address is not a valid address"
-              f" (got {addr!r}).")
-        print("       The enclave is sealed: a missing value bakes in as EMPTY and every")
-        print("       task fails at runtime after gas is spent. Set it with:")
-        print("         ecld-init (ESR step), ECLD_ESR_CONTRACT, or .config.json ESR.contract_address")
+        if not addr:
+            print(f"ERROR: ESR is enabled but no ESR registry is deployed on {network}.")
+            print("       The enclave is sealed: an empty address bakes in and every task")
+            print("       fails at runtime after gas is spent. Either build for a network")
+            print("       that has one, or set an explicit address (ECLD_ESR_CONTRACT /")
+            print("       .config.json ESR.contract_address) pointing at your own registry.")
+        else:
+            print("ERROR: ESR is enabled but the ESR contract_address is not a valid"
+                  f" address (got {addr!r}).")
+            print("       Set it with ecld-init (ESR step), ECLD_ESR_CONTRACT, or")
+            print("       .config.json ESR.contract_address")
         sys.exit(1)
+
+    # Persist the resolved address so publish/runtime see the same value the
+    # image was built with, and the developer can see what was baked in.
+    if esr.get("contract_address") != addr:
+        esr["contract_address"] = addr
+        config.write_esr(esr)
+    print(f"\t✔  ESR registry [{source}]: {addr}")
     return esr
 
 
