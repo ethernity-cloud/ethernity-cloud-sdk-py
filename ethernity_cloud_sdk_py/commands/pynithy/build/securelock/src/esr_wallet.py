@@ -27,6 +27,19 @@ makes the wallet fundable and readable without weakening secrecy.
 
 import hashlib
 
+# The wallet PRIVATE key derivation is deliberately not part of the public
+# surface: the client payload is exec'd inside this image and can import any
+# module here, so an exported key-derivation helper would hand untrusted code a
+# ready-made way to materialize the ESR private key. Only the ADDRESS leaves
+# this module (RFC §5.2); _derive_wallet_private_key stays an implementation
+# detail of derive_wallet_address.
+__all__ = [
+    "DOMAIN_SEP",
+    "derive_wallet_address",
+    "is_secret_identity",
+    "INSECURE_IDENTITY_WARNING",
+]
+
 DOMAIN_SEP = b"ethernity-cloud/esr-wallet/v1"
 
 # secp256k1 group order; a valid private scalar is in [1, N-1].
@@ -47,7 +60,7 @@ def _keccak256(data: bytes) -> bytes:
         return eth_keccak(data)
 
 
-def derive_wallet_private_key(identity_priv_der: bytes) -> bytes:
+def _derive_wallet_private_key(identity_priv_der: bytes) -> bytes:
     """32-byte secp256k1 private key derived from the enclave identity key.
 
     Kept private to this module's callers; never log or transmit the result.
@@ -66,7 +79,7 @@ def derive_wallet_private_key(identity_priv_der: bytes) -> bytes:
 
 def derive_wallet_address(identity_priv_der: bytes) -> str:
     """Checksummed 0x address of the enclave's ESR wallet (safe to publish)."""
-    priv = derive_wallet_private_key(identity_priv_der)
+    priv = _derive_wallet_private_key(identity_priv_der)
     try:
         from eth_keys import keys
 
