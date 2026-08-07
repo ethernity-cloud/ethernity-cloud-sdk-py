@@ -285,10 +285,45 @@ class EtnySecureLock:
         self.input_signature = self.__get_file_content_and_decrypt(self.input + ".sig")
 
         self.validate_trustedzone_data()
+        self.configure_state_registry()
         task_result = execute_task_v3(self.payload_data, self.input_data)
 
         self.task_code = str(task_result[0])
         self.task_result = task_result[1]
+
+    def configure_state_registry(self):
+        """Make StateRegistry usable from payload code, if ESR is enabled.
+
+        Wires the module to this enclave's identity key, the SwiftStream client
+        and bucket the node shares with us, the registry address baked in at
+        build time, and web3. Payload code then just does:
+
+            from ecld_state import StateRegistry
+            StateRegistry().commit("key", lambda s: ...)
+
+        No-op when ESR is disabled (no ESR_CONTRACT_ADDRESS baked in), so
+        non-ESR enclaves are completely unaffected.
+
+        Never raises: a state-registry setup problem must not stop the task from
+        running. Payload code that then uses StateRegistry gets a clear error
+        from the registry itself rather than a task that died before starting.
+        """
+        contract_address = os.getenv("ESR_CONTRACT_ADDRESS", "").strip()
+        if not contract_address:
+            return
+        try:
+            import ecld_state
+
+            ecld_state.configure(
+                identity_priv=self.private_key_pem,
+                swift_stream_service=self.swift_stream_service,
+                bucket=self.etny_bucket,
+                contract_address=contract_address,
+                web3=self.w3,
+            )
+            logging.info(f"StateRegistry ready (ESR {contract_address})")
+        except Exception as e:
+            logging.error(f"ESR_STATE_ERROR: could not configure StateRegistry: {e}")
 
     def validate_trustedzone_data(self):
         """
