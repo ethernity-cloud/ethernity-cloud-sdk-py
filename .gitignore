@@ -5,6 +5,11 @@ __pycache__/
 
 # C extensions
 *.so
+# ...except the prebuilt SGX key-gen module. The SDK ships it as a binary
+# artifact of the etny-pynithy / etny-nodenithy pipelines (never the .c
+# source), so it must be tracked. The generic *.so rule above silently
+# excluded it, which is why builds failed on a missing get_sgx_report.so.
+!**/securelock/src/get_sgx_report.so
 
 # Distribution / packaging
 .Python
