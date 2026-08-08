@@ -1,0 +1,2 @@
+# No extra dependencies: ecld_state uses only what the securelock image already
+# ships (web3/eth_account for the chain, pycryptodome for AES-GCM).

@@ -1,0 +1,20 @@
+{
+  "PROJECT_NAME": "esr-counter",
+  "DAPP_TYPE": "Pynithy",
+  "BLOCKCHAIN_NETWORK": "BLOXBERG_TESTNET",
+  "VERSION": 0,
+  "IPFS_ENDPOINT": "https://ipfs.ethernity.cloud",
+  "IPFS_TOKEN": "",
+  "PREDECESSOR_HASH_SECURELOCK": "",
+  "ESR": {
+    "enabled": true,
+    "contract_address": "",
+    "wallet_address": "",
+    "autofund": {
+      "enabled": false,
+      "amount": "",
+      "threshold": "",
+      "max": ""
+    }
+  }
+}
