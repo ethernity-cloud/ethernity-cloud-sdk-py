@@ -137,14 +137,22 @@ assert a1.startswith("0x") and len(a1) == 42, a1
 assert a1 != a1.lower(), "address must be EIP-55 checksummed"
 
 import hashlib
-assert w.derive_wallet_private_key(k1) != hashlib.sha256(k1).digest(), \
+assert w._derive_wallet_private_key(k1) != hashlib.sha256(k1).digest(), \
     "domain separation missing"
 N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-assert 0 < int.from_bytes(w.derive_wallet_private_key(k1), "big") < N
+assert 0 < int.from_bytes(w._derive_wallet_private_key(k1), "big") < N
 
 from eth_account import Account
-assert Account.from_key(w.derive_wallet_private_key(k1)).address == a1, \
+assert Account.from_key(w._derive_wallet_private_key(k1)).address == a1, \
     "address must match the derived key"
+
+# The key derivation must stay OUT of the public surface: the client payload is
+# exec'd inside the securelock image and can import this module, so exporting it
+# would hand untrusted code a ready-made way to materialise the wallet key.
+assert "derive_wallet_private_key" not in getattr(w, "__all__", []), \
+    "the private-key derivation must not be in __all__"
+assert not hasattr(w, "derive_wallet_private_key"), \
+    "the private-key derivation must not be public"
 
 assert w.is_secret_identity("mainnet") and not w.is_secret_identity("testnet")
 try:
