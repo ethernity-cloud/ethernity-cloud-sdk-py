@@ -9,8 +9,18 @@
 # Stage 1 - SGX report helper (unchanged, crosscompiler build tool)
 ########################################################################
 FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers:alpine-scone6.0.7 AS build-sgx-module
-COPY src/get_sgx_report.c /etny-securelock/
-RUN cd /etny-securelock/ && scone-gcc -shared -fPIC -O3 -o get_sgx_report.so get_sgx_report.c
+# The SDK ships the SGX key-gen module ONLY as a PREBUILT .so
+# (get_sgx_report.so) -- never the .c source. The source of truth for
+# get_sgx_report.c lives in the etny-pynithy / etny-nodenithy repos; the .so is
+# produced once from it via scripts/build_keygen_so.sh (scone-gcc, hardened +
+# stripped) and committed here. No source is compiled during the developer's
+# build, so a developer inspecting the wheel or build tree never sees the
+# derivation algorithm.
+#
+# NOTE (see esr_wallet.py): the .so still contains the executable logic and the
+# enclave image is public, so this hides the SOURCE, not the algorithm; on
+# testnet the key remains reproducible because there is no attestation.
+COPY src/get_sgx_report.so /etny-securelock/get_sgx_report.so
 
 ########################################################################
 # Stage 2 - PyInstaller freeze on a NORMAL python 3.14 (no SCONE / no SGX)
@@ -95,6 +105,7 @@ ENV SCONE_EXTENSIONS_PATH=/lib/libbinary-fs.so
 # those resolve (the base image's build WORKDIR /b/Python-3.14.6 otherwise leaks
 # in as the enclave PWD).
 ENV SCONE_PWD=/etny-securelock
+__ESR_ENV__
 WORKDIR /etny-securelock
 
 # Rendered by build.py: signs the EXECUTED binary (/usr/local/bin/python) with

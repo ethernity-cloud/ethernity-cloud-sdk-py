@@ -120,6 +120,17 @@ def main(
                 exit(1)
             else:
                 _progress(f"\t{CHECK}Public key extraction", transient=False)
+                # ESR (RFC §5.2): the enclave also prints ESR_WALLET_ADDRESS on
+                # the cert channel. The service currently returns only
+                # "publicKey"; when it starts relaying the enclave's output (or
+                # adds an "esrWalletAddress" field) it is picked up here without
+                # further changes. Until then, ESR projects must extract locally
+                # on an SGX host once to learn the address -- publish.py says so
+                # explicitly rather than silently leaving it empty.
+                esr_address = check_response.get("esrWalletAddress")
+                if esr_address:
+                    return {"publicKey": check_response["publicKey"],
+                            "esrWalletAddress": esr_address}
                 return check_response["publicKey"]
         else:
             print("\t\tThe Ethernity cloud certificate extraction service is unavailable at this time. Please try again later.", check_response)

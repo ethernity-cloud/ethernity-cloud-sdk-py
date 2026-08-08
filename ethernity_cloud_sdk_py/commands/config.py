@@ -1,5 +1,25 @@
 import json
 
+# Default (disabled) Enclave State Registry block. Additive and optional: a
+# .config.json without an "ESR" key behaves exactly as before ESR existed.
+ESR_DEFAULTS = {
+    "enabled": False,
+    "contract_address": "",
+    "wallet_address": "",
+    # Auto-funding is an OPT-IN CONVENIENCE, never a default. Manual funding by
+    # the data owner is the documented path: the payload uses the ESR address
+    # for its own purposes, and only the data owner knows what it needs. With
+    # this off, publish merely PRINTS the enclave's address and never moves
+    # value -- so publishing can never transfer funds as a side effect.
+    "autofund": {
+        "enabled": False,
+        "amount": "",
+        "threshold": "",
+        "max": "",
+    },
+}
+
+
 class Config:
     def __init__(self, file_path):
         """
@@ -61,5 +81,25 @@ class Config:
         except Exception as e:
             print(f"Error writing to file: {e}")
         return self.config
+
+    def read_esr(self):
+        """Typed ESR block, stored defaults merged over ESR_DEFAULTS.
+
+        Always returns a complete dict; an absent/partial "ESR" key is filled
+        from ESR_DEFAULTS so callers never need existence checks.
+        """
+        stored = self.config.get("ESR") or {}
+        merged = json.loads(json.dumps(ESR_DEFAULTS))  # deep copy
+        if isinstance(stored, dict):
+            for k, v in stored.items():
+                if k == "autofund" and isinstance(v, dict):
+                    merged["autofund"].update(v)
+                else:
+                    merged[k] = v
+        return merged
+
+    def write_esr(self, esr):
+        return self.write("ESR", esr)
+
 
 config = None

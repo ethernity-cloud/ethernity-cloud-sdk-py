@@ -174,6 +174,17 @@ def copy_from_module_to_build_dir(build_dir):
 
     if dest_file.exists():
         shutil.rmtree(dest_file)
+    # The SGX key-gen module ships as a PREBUILT get_sgx_report.so (never the
+    # .c source). Guard the build with a clear error if the .so is missing --
+    # e.g. a checkout that never ran scripts/build_keygen_so.sh.
+    so_path = src_file / "get_sgx_report.so"
+    if not so_path.is_file():
+        print(f"ERROR: {so_path} not found.")
+        print("       The SDK ships the SGX key-gen module as a prebuilt .so, not source.")
+        print("       It is a build artifact of the etny-pynithy / etny-nodenithy")
+        print("       pipelines. Copy it in with scripts/get_keygen_so.sh and commit")
+        print("       src/get_sgx_report.so (see scripts/README-keygen.md).")
+        sys.exit(1)
     shutil.copytree(src_file, dest_file)
 
     return True
@@ -251,12 +262,61 @@ def build_and_push_services(build_dir: str):
 
     return True
 
+def validate_esr_config():
+    """ESR fail-fast gate (RFC §5.4): never build an ESR-enabled enclave with
+    an unresolved registry address — inside the sealed image it would read as
+    empty and every task would fail after gas is spent.
+
+    Address resolution, in order:
+      1. an explicitly configured contract_address (BYO / private registry), else
+      2. the canonical deployment for this network, shipped with the SDK.
+
+    Shipping the canonical address is the point: hand-wiring it is exactly the
+    gap that produced the empty-result bug. A network with no deployment fails
+    the build here rather than sealing an empty value into the image.
+    """
+    esr = config.read_esr()
+    if not esr.get("enabled"):
+        return esr
+
+    network = config.read("BLOCKCHAIN_NETWORK")
+    addr = (esr.get("contract_address") or "").strip()
+    source = "configured"
+    if not addr:
+        addr = (BlockchainNetworks.get_esr_contract_address(network) or "").strip()
+        source = "canonical (shipped with the SDK)"
+
+    if not re.fullmatch(r"0x[0-9a-fA-F]{40}", addr):
+        if not addr:
+            print(f"ERROR: ESR is enabled but no ESR registry is deployed on {network}.")
+            print("       The enclave is sealed: an empty address bakes in and every task")
+            print("       fails at runtime after gas is spent. Either build for a network")
+            print("       that has one, or set an explicit address (ECLD_ESR_CONTRACT /")
+            print("       .config.json ESR.contract_address) pointing at your own registry.")
+        else:
+            print("ERROR: ESR is enabled but the ESR contract_address is not a valid"
+                  f" address (got {addr!r}).")
+            print("       Set it with ecld-init (ESR step), ECLD_ESR_CONTRACT, or")
+            print("       .config.json ESR.contract_address")
+        sys.exit(1)
+
+    # Persist the resolved address so publish/runtime see the same value the
+    # image was built with, and the developer can see what was baked in.
+    if esr.get("contract_address") != addr:
+        esr["contract_address"] = addr
+        config.write_esr(esr)
+    print(f"\t✔  ESR registry [{source}]: {addr}")
+    return esr
+
+
 def main():
     global current_dir
     # Set current directory
     current_dir = os.getcwd()
     # Set the build directory path
     build_dir = Path.cwd() / "build"
+
+    ESR = validate_esr_config()
 
     copy_from_module_to_build_dir(build_dir)
 
@@ -411,6 +471,19 @@ def main():
         .replace("__TRUSTED_ZONE_IMAGE__", TRUSTED_ZONE_IMAGE)
         .replace("__NETWORK_TYPE__", BLOCKCHAIN_CONFIG.network_type)
         .replace("__MEMORY_TO_ALLOCATE__", MEMORY_TO_ALLOCATE_FORMATED)
+    )
+
+    # ESR env injection (RFC §5.4). Disabled projects get the placeholder line
+    # removed entirely, so the rendered Dockerfile is byte-identical to a
+    # pre-ESR render and existing MRENCLAVEs are unaffected. Enabled projects
+    # get the address(es) baked as runtime env in the final (signed) stage.
+    esr_env_block = ""
+    if ESR.get("enabled"):
+        esr_env_block = f"ENV ESR_CONTRACT_ADDRESS={ESR['contract_address']}\n"
+        if (ESR.get("wallet_address") or "").strip():
+            esr_env_block += f"ENV ESR_WALLET_ADDRESS={ESR['wallet_address']}\n"
+    dockerfile_secure_content = dockerfile_secure_content.replace(
+        "__ESR_ENV__\n", esr_env_block
     )
 
     # CRITICAL: sign /usr/local/bin/python -- the binary the enclave actually

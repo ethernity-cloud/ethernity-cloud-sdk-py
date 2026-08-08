@@ -118,7 +118,29 @@ def main():
 
     spinner = Spinner()
 
-    if not ENC_PRIVATE_KEY or not WALLET_ADDRESS:
+    # Unattended key path (RFC §9): ECLD_PRIVATE_KEY supersedes every prompt.
+    # With ECLD_KEY_PASSWORD also set, the key is additionally stored encrypted
+    # in .config.json so later interactive runs work without the env var.
+    ECLD_PRIVATE_KEY = os.environ.get("ECLD_PRIVATE_KEY", "").strip()
+    ECLD_KEY_PASSWORD = os.environ.get("ECLD_KEY_PASSWORD", "")
+
+    if ECLD_PRIVATE_KEY:
+        PRIVATE_KEY = ECLD_PRIVATE_KEY
+        try:
+            image_registry.set_private_key(str(PRIVATE_KEY))
+        except Exception as e:
+            print(f"ERROR: ECLD_PRIVATE_KEY is not a usable private key: {e}")
+            exit(2)
+        pkm = PrivateKeyManager(ECLD_KEY_PASSWORD)
+        WALLET_ADDRESS = pkm.extract_address_from_private_key(PRIVATE_KEY)
+        config.write("WALLET_ADDRESS", WALLET_ADDRESS)
+        if ECLD_KEY_PASSWORD:
+            config.write("ENC_PRIVATE_KEY", pkm.encrypt_private_key(PRIVATE_KEY))
+    elif not ENC_PRIVATE_KEY or not WALLET_ADDRESS:
+        if non_interactive():
+            print("ERROR: no wallet configured and no TTY to prompt on.")
+            print("       Set ECLD_PRIVATE_KEY (optionally ECLD_KEY_PASSWORD) for unattended publish.")
+            exit(2)
         has_wallet = prompt(
             "Do you have an existing wallet?", default_value="yes"
         ).lower()
@@ -148,16 +170,28 @@ def main():
         config.write("WALLET_ADDRESS", WALLET_ADDRESS)
         print()
     else:
-        while True:
+        if ECLD_KEY_PASSWORD:
             try:
-                PASSWORD = getpass.getpass("Enter your private key password:")
-                ENC_PRIVATE_KEY = config.read("ENC_PRIVATE_KEY")
-                pkm = PrivateKeyManager(PASSWORD)
-                PRIVATE_KEY = pkm.decrypt_private_key(ENC_PRIVATE_KEY)
-                break
-            except Exception as e:
-                print("Incorrect password. Please try again.")
-                continue
+                pkm = PrivateKeyManager(ECLD_KEY_PASSWORD)
+                PRIVATE_KEY = pkm.decrypt_private_key(config.read("ENC_PRIVATE_KEY"))
+            except Exception:
+                print("ERROR: ECLD_KEY_PASSWORD does not decrypt the stored key.")
+                exit(2)
+        elif non_interactive():
+            print("ERROR: stored key is encrypted and no TTY to prompt on.")
+            print("       Set ECLD_KEY_PASSWORD (or ECLD_PRIVATE_KEY) for unattended publish.")
+            exit(2)
+        else:
+            while True:
+                try:
+                    PASSWORD = getpass.getpass("Enter your private key password:")
+                    ENC_PRIVATE_KEY = config.read("ENC_PRIVATE_KEY")
+                    pkm = PrivateKeyManager(PASSWORD)
+                    PRIVATE_KEY = pkm.decrypt_private_key(ENC_PRIVATE_KEY)
+                    break
+                except Exception as e:
+                    print("Incorrect password. Please try again.")
+                    continue
 
     image_registry.set_private_key(PRIVATE_KEY)
 

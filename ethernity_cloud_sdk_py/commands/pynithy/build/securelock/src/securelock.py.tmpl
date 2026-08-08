@@ -2,6 +2,7 @@
 
 import binascii
 import hashlib
+import hmac
 import os
 import io
 import time
@@ -25,6 +26,10 @@ from web3.middleware import ExtraDataToPOAMiddleware
 from etny_exec import execute_task_v3, TaskStatus
 from models import *
 from swift_stream_service import SwiftStreamService
+# Static import so PyInstaller's dependency analysis bundles it into binary-fs
+# (a lazy import inside a function is invisible to the freeze and would fail
+# only at runtime, inside the enclave, where it cannot be diagnosed).
+import esr_wallet
 # Suppress pkg_resources warning if using web3
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="web3")
@@ -70,47 +75,31 @@ class EtnySecureLock:
         sgx_lib = ctypes.CDLL(sgx_lib_path)
         sgx_lib.get_mr_enclave.restype = ctypes.c_char_p
         sgx_lib.get_mr_signer.restype = ctypes.c_char_p
+        sgx_lib.derive_identity_scalar.restype = ctypes.c_char_p
+        sgx_lib.derive_identity_scalar.argtypes = [ctypes.c_int]
 
-        # Get MR_ENCLAVE and MR_SIGNER from SGX
+        # Get MR_ENCLAVE (for the cert extension / log) from the module.
         mr_enclave_ptr = sgx_lib.get_mr_enclave()
-        mr_signer_ptr = sgx_lib.get_mr_signer()
-
-        if not mr_enclave_ptr or not mr_signer_ptr:
-            raise ValueError("Failed to retrieve MR_ENCLAVE or MR_SIGNER from SGX")
-
+        if not mr_enclave_ptr:
+            raise ValueError("Failed to retrieve MR_ENCLAVE from SGX")
         mr_enclave_hex = mr_enclave_ptr.decode('utf-8')
-        mr_signer_hex = mr_signer_ptr.decode('utf-8')
-
         logging.info(f"MR_ENCLAVE: {mr_enclave_hex}")
-        # Concatenate mr_signer and mr_enclave twice to form the seed (each is 32 bytes, so 128 bytes total)
-        mr_enclave = bytes.fromhex(mr_enclave_hex)
-        mr_signer = bytes.fromhex(mr_signer_hex)
-        seed = mr_signer + mr_enclave + mr_signer + mr_enclave
 
-        def generate_scalar(seed: bytes, label: bytes, order: int, bit_size: int) -> int:
-            byte_size = (bit_size + 7) // 8
-            counter = 0
-            while True:
-                base_hash = hashlib.sha256(seed + label + struct.pack('>I', counter)).digest()
-                rand_bytes = b''
-                hash_counter = 0
-                while len(rand_bytes) < byte_size:
-                    h = hashlib.sha256(base_hash + struct.pack('>I', hash_counter)).digest()
-                    rand_bytes += h
-                    hash_counter += 1
-                rand_bytes = rand_bytes[:byte_size]
-                candidate = int.from_bytes(rand_bytes, 'big')
-                if 1 <= candidate < order:
-                    return candidate
-                counter += 1
+        # Identity-key derivation now lives ENTIRELY in the compiled module
+        # (get_sgx_report.so). derive_identity_scalar(role) returns the 96-hex
+        # secp384r1 scalar; role 0 = SecureLock. The algorithm (HKDF-SHA512,
+        # domain tags, 4096-round stretch, rejection sampling) is not present in
+        # this interpreted source -- it is in the .so only, so reading the
+        # Python reveals nothing about how the key is derived. The .c source of
+        # truth lives in the etny-pynithy / etny-nodenithy repos; the SDK ships
+        # only the built .so.
+        ROLE_SECURELOCK = 0
+        scalar_ptr = sgx_lib.derive_identity_scalar(ROLE_SECURELOCK)
+        if not scalar_ptr:
+            raise ValueError("derive_identity_scalar failed in the SGX module")
+        private_value = int(scalar_ptr.decode('utf-8'), 16)
 
-        # Define the order for secp384r1
-        order = 39402006196394479212279040100143613805079739270465446667946905279627659399113263569398956308152294913554433653942643
-
-        # Generate deterministic EC private key
         curve = ec.SECP384R1()
-        bit_size = 384
-        private_value = generate_scalar(seed, b'd', order, bit_size)
         private_key = ec.derive_private_key(private_value, curve, default_backend())
         public_key = private_key.public_key()
 
@@ -296,10 +285,45 @@ class EtnySecureLock:
         self.input_signature = self.__get_file_content_and_decrypt(self.input + ".sig")
 
         self.validate_trustedzone_data()
+        self.configure_state_registry()
         task_result = execute_task_v3(self.payload_data, self.input_data)
 
         self.task_code = str(task_result[0])
         self.task_result = task_result[1]
+
+    def configure_state_registry(self):
+        """Make StateRegistry usable from payload code, if ESR is enabled.
+
+        Wires the module to this enclave's identity key, the SwiftStream client
+        and bucket the node shares with us, the registry address baked in at
+        build time, and web3. Payload code then just does:
+
+            from ecld_state import StateRegistry
+            StateRegistry().commit("key", lambda s: ...)
+
+        No-op when ESR is disabled (no ESR_CONTRACT_ADDRESS baked in), so
+        non-ESR enclaves are completely unaffected.
+
+        Never raises: a state-registry setup problem must not stop the task from
+        running. Payload code that then uses StateRegistry gets a clear error
+        from the registry itself rather than a task that died before starting.
+        """
+        contract_address = os.getenv("ESR_CONTRACT_ADDRESS", "").strip()
+        if not contract_address:
+            return
+        try:
+            import ecld_state
+
+            ecld_state.configure(
+                identity_priv=self.private_key_pem,
+                swift_stream_service=self.swift_stream_service,
+                bucket=self.etny_bucket,
+                contract_address=contract_address,
+                web3=self.w3,
+            )
+            logging.info(f"StateRegistry ready (ESR {contract_address})")
+        except Exception as e:
+            logging.error(f"ESR_STATE_ERROR: could not configure StateRegistry: {e}")
 
     def validate_trustedzone_data(self):
         """
@@ -420,6 +444,23 @@ if __name__ == '__main__':
     # Real task runs also benefit: the cert is available up-front and the same
     # PUBLIC_CERT line is still printed in the except handler for compatibility.
     logging.info(f"PUBLIC_CERT: {cert_pem.decode('utf-8')}")
+
+    # ESR (RFC §5.2): emit the enclave's ESR wallet ADDRESS on the same channel
+    # as the cert, so publish can capture it locally or via the remote
+    # extraction service. It MUST be derived here rather than by the extraction
+    # service: on mainnet the identity key is CAS-provisioned and exists only
+    # inside this enclave, so nobody outside can compute the address. Only the
+    # address is emitted — the private key never leaves.
+    if os.getenv("ESR_CONTRACT_ADDRESS", "").strip():
+        try:
+            esr_address = esr_wallet.derive_wallet_address(private_key_pem)
+            logging.info(f"ESR_WALLET_ADDRESS: {esr_address}")
+            if not esr_wallet.is_secret_identity(network_type):
+                logging.warning(esr_wallet.INSECURE_IDENTITY_WARNING)
+        except Exception as e:
+            # Never let ESR derivation break a task: report it the way every
+            # other enclave-side config problem is reported.
+            logging.error(f"ESR_WALLET_ERROR: {e}")
 
     # Cert-harvest (public-key extraction) mode: the extraction service runs
     # securelock with NO SwiftStream and NO task, purely to read the PUBLIC_CERT

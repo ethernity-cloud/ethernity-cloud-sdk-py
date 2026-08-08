@@ -43,6 +43,7 @@ TASK_STATUS_NAMES = {
     7: "INPUT_CHECKSUM_ERROR",
     8: "EXECVE",
     28: "IMPORT_ERROR",
+    32: "CONFIG_ERROR",
 }
 
 VENDORED_EXEC = os.path.join(
@@ -105,6 +106,7 @@ def main(argv=None):
     parser.add_argument("--file", "-f", help="read the payload from a file instead")
     parser.add_argument("--input", "-i", dest="input_file", help="file whose content becomes ___etny_data_set___")
     parser.add_argument("--input-text", dest="input_text", help="literal string for ___etny_data_set___")
+    parser.add_argument("--expect", help="exact expected result; exit non-zero on mismatch (ECLD_TEST_EXPECT)")
     parser.add_argument("--src", default="src", help="project source dir containing serverless/backend.py (default: src)")
     parser.add_argument("--host", default="127.0.0.1", help="serve: bind address (default 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8745, help="serve: port (default 8745)")
@@ -113,13 +115,17 @@ def main(argv=None):
     if args.code and args.code[0] == "serve":
         return _serve(os.path.abspath(args.src), args.host, args.port)
 
+    # RFC §9 env equivalents: flag -> env -> error/prompt-free default.
+    env = os.environ.get
     if args.file:
         with open(args.file, encoding="utf-8") as fh:
             payload = fh.read()
     elif args.code:
         payload = " ".join(args.code)
+    elif env("ECLD_TEST_CODE", "").strip():
+        payload = env("ECLD_TEST_CODE").strip()
     else:
-        parser.error("provide a payload string or --file")
+        parser.error("provide a payload string, --file, or ECLD_TEST_CODE")
 
     input_data = None
     if args.input_file is not None and args.input_text is not None:
@@ -129,6 +135,10 @@ def main(argv=None):
             input_data = fh.read()
     elif args.input_text is not None:
         input_data = args.input_text
+    elif env("ECLD_TEST_INPUT") is not None:
+        input_data = env("ECLD_TEST_INPUT")
+
+    expected = args.expect if args.expect is not None else env("ECLD_TEST_EXPECT")
 
     project_src = os.path.abspath(args.src)
     backend_path = os.path.join(project_src, "serverless", "backend.py")
@@ -155,7 +165,14 @@ def main(argv=None):
             "\nThis is exactly what the network would write on-chain — the failed"
             "\nattempt would still cost gas. Fix locally, then submit."
         )
-    return 0 if code == 0 else 1
+        return 1
+    if expected is not None:
+        actual = result if isinstance(result, str) else repr(result)
+        if actual != expected:
+            print(f"\nEXPECT MISMATCH:\n  expected: {expected!r}\n  actual  : {actual!r}")
+            return 1
+        print("expect   : matched")
+    return 0
 
 
 if __name__ == "__main__":

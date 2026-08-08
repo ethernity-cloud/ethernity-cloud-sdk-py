@@ -430,10 +430,169 @@ def extract_public_key_local():
             result = _extract_certificate_pem(output)
             if result and "-----BEGIN CERTIFICATE-----" not in result:
                 result = ""
+            # ESR (RFC §5.2): the enclave prints its wallet address on the same
+            # channel as the cert. Capture it here — on mainnet this is the only
+            # place it can come from, since the identity key never leaves.
+            _capture_esr_wallet_address(output)
         except subprocess.CalledProcessError as e:
             return False
 
         return result
+
+
+def _capture_esr_wallet_address(output):
+        """Persist an ESR_WALLET_ADDRESS emitted by the enclave, if present.
+
+        Only the ADDRESS is ever emitted (never the key), so storing it in
+        .config.json is safe and is what makes the wallet fundable/readable.
+        """
+        import re
+
+        esr = config.read_esr()
+        if not esr.get("enabled"):
+            return None
+        m = re.search(r"ESR_WALLET_ADDRESS:\s*(0x[0-9a-fA-F]{40})", output or "")
+        if not m:
+            err = re.search(r"ESR_WALLET_ERROR:\s*(.+)", output or "")
+            if err:
+                print(f"\t✘  Enclave could not derive its ESR wallet: {err.group(1).strip()}")
+            return None
+        address = m.group(1)
+        if esr.get("wallet_address") and esr["wallet_address"] != address:
+            # The address is a deterministic function of the enclave identity;
+            # a change means the identity changed (new MRENCLAVE on testnet, or
+            # a different CAS secret). Say so — funds sit at the OLD address.
+            print(f"\t⚠  ESR wallet address changed: {esr['wallet_address']} -> {address}")
+            print("\t   Any balance at the previous address belongs to the previous enclave identity.")
+        esr["wallet_address"] = address
+        config.write_esr(esr)
+        print(f"\t✔  ESR wallet address: {address}")
+        if "[TESTNET-INSECURE]" in (output or ""):
+            print("\t⚠  This network's enclave identity is NOT secret: the ESR wallet's private")
+            print("\t   key is reproducible by anyone. Do not fund it with real value.")
+        # Manual funding by the data owner is the DEFAULT path (auto-funding is an
+        # opt-in convenience that is off unless explicitly enabled). Publishing
+        # never moves value on its own, so say plainly that the wallet starts
+        # empty -- otherwise the first task that needs gas fails with no clue why.
+        if not (esr.get("autofund") or {}).get("enabled"):
+            print("\t   This wallet starts EMPTY. Fund it from your own wallet with whatever")
+            print("\t   your payload needs; publishing never transfers value on its own.")
+        return address
+
+
+def _autofund_esr_wallet(output=None):
+        """Opt-in top-up of the enclave's ESR wallet (ESR RFC §5.3).
+
+        OFF unless esr.autofund.enabled is explicitly true. Manual funding by the
+        data owner is the default path -- publishing must never move value as a
+        side effect. Guardrails, in order:
+
+          * enabled must be true, and a wallet address must be known;
+          * `amount` must be explicitly set -- there is no default transfer;
+          * `max` is a hard ceiling; a larger `amount` is refused, not clamped
+            silently, because a wrong ceiling should be visible;
+          * `threshold` makes it idempotent: skip when the balance already
+            covers it, so republishing does not stack transfers;
+          * interactive runs confirm; unattended runs proceed only because every
+            value was set deliberately in config.
+
+        Never raises: a funding failure must not fail a publish that otherwise
+        succeeded. Returns the tx hash, or None when nothing was sent.
+        """
+        from decimal import Decimal, InvalidOperation
+
+        esr = config.read_esr()
+        autofund = esr.get("autofund") or {}
+        if not esr.get("enabled") or not autofund.get("enabled"):
+            return None
+
+        address = (esr.get("wallet_address") or "").strip()
+        if not address:
+            print("\t⚠  ESR auto-funding is on but the wallet address is unknown; skipping.")
+            return None
+
+        def _dec(name, raw):
+            raw = str(raw or "").strip()
+            if not raw:
+                return None
+            try:
+                v = Decimal(raw)
+            except (InvalidOperation, ValueError):
+                print(f"\t⚠  ESR autofund.{name}={raw!r} is not a number; skipping funding.")
+                return "invalid"
+            if v < 0:
+                print(f"\t⚠  ESR autofund.{name} must not be negative; skipping funding.")
+                return "invalid"
+            return v
+
+        amount = _dec("amount", autofund.get("amount"))
+        ceiling = _dec("max", autofund.get("max"))
+        threshold = _dec("threshold", autofund.get("threshold"))
+        if amount == "invalid" or ceiling == "invalid" or threshold == "invalid":
+            return None
+
+        # No implicit transfer: the amount is always deliberate.
+        if amount is None or amount == 0:
+            print("\t⚠  ESR auto-funding is on but autofund.amount is not set; nothing sent.")
+            print("\t   Set an explicit amount (ECLD_ESR_AUTOFUND_AMOUNT) or fund manually.")
+            return None
+
+        # A hard ceiling is REQUIRED, not optional: without it an out-of-range
+        # amount (a typo, a bad env var) has nothing stopping it. Refuse rather
+        # than invent a default, since any default would be a guess about how
+        # much of someone else's money is acceptable to move.
+        if ceiling is None:
+            print("\t✘  ESR autofund.max is not set; nothing sent.")
+            print("\t   A hard ceiling is required whenever auto-funding is enabled")
+            print("\t   (ECLD_ESR_AUTOFUND_MAX or ESR.autofund.max).")
+            return None
+
+        # Refuse rather than clamp, so a bad config is obvious.
+        if amount > ceiling:
+            print(f"\t✘  ESR autofund.amount ({amount}) exceeds autofund.max ({ceiling}); nothing sent.")
+            return None
+
+        # The testnet identity is reproducible by anyone who runs the published
+        # image (there is no attestation), so the wallet is drainable. Config is
+        # honoured, but this must be impossible to miss.
+        # BLOCKCHAIN_CONFIG is built inside the publish functions, not at module
+        # level, so resolve the network type from config the same way they do.
+        try:
+            network_type = str(
+                BlockchainNetworks.get_details_by_enum_name(
+                    config.read("BLOCKCHAIN_NETWORK")
+                ).network_type
+                or ""
+            ).strip().lower()
+        except Exception:
+            network_type = ""
+        if network_type and network_type != "mainnet":
+            print("\t⚠  This network has NO enclave attestation: the ESR wallet's private key is")
+            print("\t   reproducible by anyone who runs the published image, so anything you send")
+            print("\t   here is drainable. Funding anyway because autofund is enabled.")
+
+        try:
+            balance = image_registry.get_balance_of(address)
+        except Exception:
+            balance = None
+        if balance is not None:
+            print(f"\t   ESR wallet balance: {balance}")
+            # Idempotent: only top up when it has fallen below the threshold.
+            if threshold is not None and Decimal(str(balance)) >= threshold:
+                print(f"\t✔  Balance already at/above autofund.threshold ({threshold}); nothing sent.")
+                return None
+
+        if not non_interactive():
+            answer = input(f"\tSend {amount} to the ESR wallet {address}? [y/N]: ").strip().lower()
+            if answer not in ("y", "yes"):
+                print("\t   Funding skipped.")
+                return None
+
+        print(f"\t   Sending {amount} to {address} ...")
+        tx_hash = image_registry.transfer_native(address, amount)
+        if tx_hash:
+            print(f"\t✔  ESR wallet funded. tx: {tx_hash}")
+        return tx_hash
 
 
 def _extract_certificate_pem(output):
@@ -646,7 +805,10 @@ def update_cas_session():
 def main(private_key):
     spinner = Spinner()
     image_registry.set_private_key(private_key)
-    ipfs_client = IPFSClient(config.read("IPFS_ENDPOINT"))
+    # ECLD_IPFS_ENDPOINT / ECLD_IPFS_TOKEN override the stored choice (RFC §9).
+    ipfs_endpoint = os.environ.get("ECLD_IPFS_ENDPOINT", "").strip() or config.read("IPFS_ENDPOINT")
+    ipfs_token = os.environ.get("ECLD_IPFS_TOKEN", "").strip() or (config.read("IPFS_TOKEN") or "")
+    ipfs_client = IPFSClient(ipfs_endpoint, ipfs_token or None)
 
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
     DAPP_TYPE = config.read("DAPP_TYPE")
@@ -818,7 +980,13 @@ def main(private_key):
         # publishes upload to IPFS and use the remote extraction service without
         # asking again. Delete REMOTE_CERT_EXTRACTION from .config.json (or set
         # it to anything other than "always") to be prompted once more.
-        saved_choice = str(config.read("REMOTE_CERT_EXTRACTION") or "").lower()
+        # ECLD_REMOTE_CERT_EXTRACTION overrides both (RFC §9): "always"/"never".
+        env_choice = os.environ.get("ECLD_REMOTE_CERT_EXTRACTION", "").strip().lower()
+        if env_choice == "never":
+            print("\t\t✘  Remote extraction disabled by ECLD_REMOTE_CERT_EXTRACTION=never")
+            print("\n\t\tPlease configure local SGX support and run the setup again")
+            exit(1)
+        saved_choice = env_choice or str(config.read("REMOTE_CERT_EXTRACTION") or "").lower()
         if saved_choice == "always":
             print("\t\t✔  Using Ethernity Cloud public key extraction service (saved choice: always)")
             should_generate_certificates = "y"
@@ -850,7 +1018,23 @@ def main(private_key):
             ipfs_hash=IPFS_HASH,
             docker_composer_hash=IPFS_DOCKER_COMPOSE_HASH
         )
+        # The service may return either the bare cert or a dict that also
+        # carries the enclave's ESR wallet address (RFC §5.2).
+        if isinstance(ENCLAVE_PUBLIC_KEY, dict):
+            _esr_remote = ENCLAVE_PUBLIC_KEY.get("esrWalletAddress")
+            ENCLAVE_PUBLIC_KEY = ENCLAVE_PUBLIC_KEY.get("publicKey")
+            if _esr_remote:
+                _capture_esr_wallet_address(f"ESR_WALLET_ADDRESS: {_esr_remote}")
 
+        _esr_cfg = config.read_esr()
+        if _esr_cfg.get("enabled") and not _esr_cfg.get("wallet_address"):
+            print()
+            print("\t⚠  ESR is enabled but the enclave's wallet address is unknown.")
+            print("\t   The address is derived from the enclave identity key, which on")
+            print("\t   mainnet exists only inside the enclave — the remote extraction")
+            print("\t   service cannot compute it. Run one publish on an SGX-capable host")
+            print("\t   (local extraction) to record ESR.wallet_address, then republish.")
+            print()
 
     os.chdir(current_dir)
 
@@ -883,3 +1067,12 @@ def main(private_key):
     except Exception as e:
         print(e)
         exit()
+
+    # ESR auto-funding (RFC §5.3) runs LAST, only after the enclave is actually
+    # registered -- a publish that failed must never move value. Opt-in and off
+    # by default; it returns immediately unless autofund.enabled is true.
+    try:
+        _autofund_esr_wallet()
+    except Exception as e:
+        # Funding is a convenience: never let it fail an otherwise good publish.
+        print(f"\t⚠  ESR auto-funding skipped: {e}")

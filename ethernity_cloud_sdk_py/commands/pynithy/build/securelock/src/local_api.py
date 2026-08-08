@@ -41,6 +41,7 @@ TASK_STATUS_NAMES = {
     7: "INPUT_CHECKSUM_ERROR",
     8: "EXECVE",
     28: "IMPORT_ERROR",
+    32: "CONFIG_ERROR",
 }
 
 
