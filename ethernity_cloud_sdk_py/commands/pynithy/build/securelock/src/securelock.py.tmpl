@@ -410,6 +410,32 @@ class EtnySecureLock:
 
         logging.debug(f'Extracted trustedzone public key hex: {self.trustedzone_public_key[:20]}...')  # Log snippet for confirmation
         
+
+def _report_failure(app, exc):
+    """Best-effort: write a failure result so the trustedzone stops waiting.
+
+    Securelock only publishes the result (and its code); the trustedzone reads
+    those and builds the signed transaction. Guarded throughout -- this runs
+    while already handling a failure, so it must never raise or hang. If the
+    enclave died before it had enough state (no app, no keys), there is nothing
+    publishable and we exit quietly.
+    """
+    if app is None:
+        logging.error("cannot report failure: enclave died before initialization")
+        return
+    try:
+        # Preserve a specific code if one was already set (checksum mismatch,
+        # metadata fetch, ...); fall back to SYSTEM_ERROR for anything else.
+        if not getattr(app, 'task_code', None):
+            app.task_code = TaskStatus.SYSTEM_ERROR
+        if not getattr(app, 'task_result', None):
+            app.task_result = f'ENCLAVE ERROR: {exc}'
+        app.save_result()
+        logging.info(f"failure reported (task_code={app.task_code})")
+    except Exception as report_exc:
+        logging.error(f"could not report the failure result: {report_exc}")
+
+
 if __name__ == '__main__':
     network_type = '__NETWORK_TYPE__'
     logging.info(f'[SecureLock] Initializing enclave for {network_type}')
@@ -503,4 +529,11 @@ if __name__ == '__main__':
     except Exception as e:
         logging.error(f"Error: {e}")
         logging.info(f"PUBLIC_CERT: {cert_pem.decode('utf-8')}")
+        # Publish a failure result rather than exiting silently. The trustedzone
+        # blocks waiting for this enclave's result; without it that wait runs to
+        # its timeout and the whole order stalls with no diagnosis. Note the
+        # validation path above RAISES on invalid client data, so without this
+        # even a checksum mismatch -- which sets task_code/task_result -- was
+        # never reported.
+        _report_failure(locals().get('app'), e)
         exit(1)
