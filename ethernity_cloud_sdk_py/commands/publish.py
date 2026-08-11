@@ -219,9 +219,12 @@ def main():
                                     
         https://faucet.bloxberg.org
 """)
-        if BLOCKCHAIN_NETWORK=="Polygon_Testnet" or BLOCKCHAIN_NETWORK=="Polygon_Mainnet":
-            print ("""  
-        Please fill the wallet wit at least 0.001 POL
+        if BLOCKCHAIN_NETWORK=="Polygon_Amoy" or BLOCKCHAIN_NETWORK=="Polygon_Mainnet":
+            print ("""
+        Please fill the wallet with at least 0.001 POL.
+
+        On Polygon Amoy testnet, get free POL here:
+        https://faucet.polygon.technology  (select Amoy)
 """)
         exit(1) 
         

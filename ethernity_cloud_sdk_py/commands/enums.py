@@ -88,8 +88,8 @@ class BlockchainNetworks(Enum):
         "testnet", # Network type
         "0x1579b37C5a69ae02dDd23263A2b1318DE66a27C3", # protocol contract address
         "0xeFA33c3976f31961285Ae4f5D10188616C912728", # Image Registry Contract Address
-        "https://rpc.ankr.com/polygon_amoy",
-        80002,  # Chain ID for Polygon Mumbai Testnet
+        "https://polygon-amoy-bor-rpc.publicnode.com",
+        80002,  # Chain ID for Polygon Amoy Testnet
         True, # EIP 1559 SUPPORT
         100,  # Gas Price in Gwei
         64,  # maxFeePerGas in Gwei
