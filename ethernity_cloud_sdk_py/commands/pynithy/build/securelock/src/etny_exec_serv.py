@@ -249,7 +249,17 @@ def Exec(payload_data, input_data, globals=None, locals=None):
                         locals,
                     )
 
-            return ___etny_result___("\n".join(outputs))
+            # Function results are arbitrary Python values -- the shipped
+            # esr-counter example returns dicts -- so serialize anything that
+            # is not already a str instead of letting join() raise. None (an
+            # expression statement with no value, e.g. a bare print()) is
+            # dropped, matching REPL semantics.
+            rendered = [
+                out if isinstance(out, str) else json.dumps(out, default=str)
+                for out in outputs
+                if out is not None
+            ]
+            return ___etny_result___("\n".join(rendered))
         else:
             return (
                 TaskStatus.PAYLOAD_NOT_DEFINED,

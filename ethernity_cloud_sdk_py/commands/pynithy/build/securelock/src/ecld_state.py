@@ -43,6 +43,7 @@ Only the address and the CID are ever emitted.
 
 import base64
 import hashlib
+import io
 import json
 import os
 
@@ -279,9 +280,14 @@ class StateRegistry:
             address=_web3.to_checksum_address(_contract_address), abi=abi)
 
     def _publish(self, key: str, blob: bytes, cid: str):
-        """Drop the blob + our CID in the bucket for the node to pin."""
-        _swift.put_file_content(_bucket, f"state.{key}.enc", "", blob)
-        _swift.put_file_content(_bucket, f"state.{key}.cid", "", cid)
+        """Drop the blob + our CID in the bucket for the node to pin.
+
+        put_file_content sizes its upload via object_data.getbuffer(), so it
+        needs a BufferedIO object -- raw bytes/str raise AttributeError and
+        every commit() died here before anything reached the node.
+        """
+        _swift.put_file_content(_bucket, f"state.{key}.enc", "", io.BytesIO(blob))
+        _swift.put_file_content(_bucket, f"state.{key}.cid", "", io.BytesIO(cid.encode("utf-8")))
 
     def _fetch(self, key: str, cid: str) -> bytes:
         """Read a state object back, verifying it against the on-chain CID.
