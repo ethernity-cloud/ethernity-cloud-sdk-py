@@ -286,11 +286,14 @@ ESR_CONTRACT_ADDRESSES = {
     # across two registries for no benefit.
     "BLOXBERG_MAINNET": "0x4f6c0Ae54567CAeD372d265fEF412C2B5ed1302A",
     "BLOXBERG_TESTNET": "0x4f6c0Ae54567CAeD372d265fEF412C2B5ed1302A",
+    # LitVM LiteForge (chainId 4441): deployed via pox-smart-contract
+    # feature/litvm (deploy/08-deploy-esr.js); all four selectors verified
+    # on-chain against contracts/esr/EnclaveStateRegistry.abi after deploy.
+    "LITVM_LITEFORGE": "0xb0D2C139514C1B4e511c0eB83F22a842979B3ECa",
     # Not deployed yet on these chains. ecld-build must refuse to build an
     # ESR-enabled enclave here rather than sealing in an empty address.
     "POLYGON_MAINNET": "",
     "POLYGON_AMOY": "",
     "IOTEX_TESTNET": "",
     "ETHEREUM_SEPOLIA": "",
-    "LITVM_LITEFORGE": "",
 }

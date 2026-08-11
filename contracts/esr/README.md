@@ -26,7 +26,8 @@ encrypt state, pin to IPFS         state[enclave][key]
 |---|---|
 | bloxberg mainnet | `0x4f6c0Ae54567CAeD372d265fEF412C2B5ed1302A` |
 | bloxberg testnet | `0x4f6c0Ae54567CAeD372d265fEF412C2B5ed1302A` |
-| polygon / amoy / iotex / sepolia / litvm | *not deployed* |
+| LitVM LiteForge (4441) | `0xb0D2C139514C1B4e511c0eB83F22a842979B3ECa` |
+| polygon / amoy / iotex / sepolia | *not deployed* |
 
 Bloxberg mainnet and testnet are the **same chain** (both chainId 8995, both
 reachable via `core.bloxberg.org` and `bloxberg.ethernity.cloud`) — they are
