@@ -94,8 +94,7 @@ def configure_esr():
     """Opt-in Enclave State Registry step (ESR RFC §8). Skippable; defaults to
     disabled, so existing projects and plain runs are completely unaffected.
 
-    Env equivalents (RFC §9): ECLD_ESR_ENABLE, ECLD_ESR_CONTRACT,
-    ECLD_ESR_AUTOFUND_AMOUNT, ECLD_ESR_TOPUP_THRESHOLD, ECLD_ESR_AUTOFUND_MAX.
+    Env equivalents: ECLD_ESR_ENABLE, ECLD_ESR_CONTRACT.
     """
     esr = config.read_esr()
 
@@ -135,19 +134,9 @@ def configure_esr():
 
     esr["enabled"] = True
     esr["contract_address"] = address
-    # These seed the auto-funding knobs but do NOT turn funding on: autofund is
-    # opt-in (autofund.enabled defaults to False) because manual funding by the
-    # data owner is the documented path. Inert unless explicitly enabled.
-    esr["autofund"]["amount"] = env_str("ECLD_ESR_AUTOFUND_AMOUNT", esr["autofund"]["amount"] or "0.02")
-    esr["autofund"]["threshold"] = env_str("ECLD_ESR_TOPUP_THRESHOLD", esr["autofund"]["threshold"] or "0.01")
-    # A ceiling is REQUIRED once auto-funding is switched on (publish refuses to
-    # send without one), so seed a conservative default rather than leaving it
-    # empty -- an empty ceiling would otherwise look enabled but never send.
-    esr["autofund"]["max"] = env_str("ECLD_ESR_AUTOFUND_MAX", esr["autofund"]["max"] or "0.1")
     config.write_esr(esr)
     print(f"ESR enabled: contract {address}")
-    print("Fund the enclave's ESR wallet manually once its address is known"
-          " (printed at publish); auto-funding stays off unless you enable it.")
+    print("State commits are relayed and paid by the node -- nothing to fund.")
     print("The registry address will be baked into the enclave image at ecld-build.")
 
 

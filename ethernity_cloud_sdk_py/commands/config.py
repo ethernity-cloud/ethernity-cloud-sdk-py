@@ -6,17 +6,6 @@ ESR_DEFAULTS = {
     "enabled": False,
     "contract_address": "",
     "wallet_address": "",
-    # Auto-funding is an OPT-IN CONVENIENCE, never a default. Manual funding by
-    # the data owner is the documented path: the payload uses the ESR address
-    # for its own purposes, and only the data owner knows what it needs. With
-    # this off, publish merely PRINTS the enclave's address and never moves
-    # value -- so publishing can never transfer funds as a side effect.
-    "autofund": {
-        "enabled": False,
-        "amount": "",
-        "threshold": "",
-        "max": "",
-    },
 }
 
 
@@ -91,11 +80,7 @@ class Config:
         stored = self.config.get("ESR") or {}
         merged = json.loads(json.dumps(ESR_DEFAULTS))  # deep copy
         if isinstance(stored, dict):
-            for k, v in stored.items():
-                if k == "autofund" and isinstance(v, dict):
-                    merged["autofund"].update(v)
-                else:
-                    merged[k] = v
+            merged.update(stored)
         return merged
 
     def write_esr(self, esr):

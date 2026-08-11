@@ -14,7 +14,7 @@ leaves the enclave.
 
 
 def esr_address():
-    """The enclave's ESR wallet address. Fund this to let it commit."""
+    """The enclave's on-chain identity — the address its commits are filed under."""
     from ecld_state import StateRegistry
 
     return {"wallet": StateRegistry().wallet_address}
@@ -59,7 +59,7 @@ def esr_selftest():
     Verifies the module is wired, the wallet derives, encryption round-trips,
     and the in-enclave CID matches what IPFS would produce for the same bytes.
     A failure here means the enclave build is wrong; a failure only in
-    esr_increment means the chain/funding side is.
+    esr_increment means the chain or the operator's relay side is.
     """
     import json
 

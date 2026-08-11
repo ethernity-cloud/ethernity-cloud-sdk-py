@@ -1,3 +1,10 @@
+> **SUPERSEDED — historical record.** This plan describes the original
+> *enclave-pays* ESR design (the enclave funds a wallet and commits directly).
+> The shipped model is **node-relayed**: the enclave signs, the node pays, and
+> there is nothing to fund. The current design of record is
+> [`contracts/esr/RELAY-DESIGN.md`](../contracts/esr/RELAY-DESIGN.md); user docs
+> are in `docs/gitbook-managing-dapp-state.md`. Kept for provenance only.
+
 # Implementation Plan — Managed Enclave State Registry (ESR) + Unattended CLI
 
 **Source:** ESR_Managed_Proposal.pdf (RFC, 2026-08-06, StarChart reference project)

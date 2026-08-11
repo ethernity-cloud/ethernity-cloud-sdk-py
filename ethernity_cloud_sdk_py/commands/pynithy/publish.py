@@ -466,148 +466,20 @@ def _capture_esr_wallet_address(output):
             print("\t   Any balance at the previous address belongs to the previous enclave identity.")
         esr["wallet_address"] = address
         config.write_esr(esr)
-        print(f"\t✔  ESR wallet address: {address}")
+        print(f"\t✔  ESR identity address: {address}")
         if "[TESTNET-INSECURE]" in (output or ""):
-            print("\t⚠  This network's enclave identity is NOT secret: the ESR wallet's private")
-            print("\t   key is reproducible by anyone. Do not fund it with real value.")
-        # Manual funding by the data owner is the DEFAULT path (auto-funding is an
-        # opt-in convenience that is off unless explicitly enabled). Publishing
-        # never moves value on its own, so say plainly that the wallet starts
-        # empty -- otherwise the first task that needs gas fails with no clue why.
-        if not (esr.get("autofund") or {}).get("enabled"):
-            print("\t   This wallet starts EMPTY. Fund it from your own wallet with whatever")
-            print("\t   your payload needs; publishing never transfers value on its own.")
+            print("\t⚠  This network's enclave identity is NOT secret: it is reproducible")
+            print("\t   by anyone who runs the published image. Testnet state is not private.")
         return address
 
 
-def _autofund_esr_wallet(output=None):
-        """Opt-in top-up of the enclave's ESR wallet (ESR RFC §5.3).
-
-        OFF unless esr.autofund.enabled is explicitly true. Manual funding by the
-        data owner is the default path -- publishing must never move value as a
-        side effect. Guardrails, in order:
-
-          * enabled must be true, and a wallet address must be known;
-          * `amount` must be explicitly set -- there is no default transfer;
-          * `max` is a hard ceiling; a larger `amount` is refused, not clamped
-            silently, because a wrong ceiling should be visible;
-          * `threshold` makes it idempotent: skip when the balance already
-            covers it, so republishing does not stack transfers;
-          * interactive runs confirm; unattended runs proceed only because every
-            value was set deliberately in config.
-
-        Never raises: a funding failure must not fail a publish that otherwise
-        succeeded. Returns the tx hash, or None when nothing was sent.
-        """
-        from decimal import Decimal, InvalidOperation
-
-        esr = config.read_esr()
-        autofund = esr.get("autofund") or {}
-        if not esr.get("enabled") or not autofund.get("enabled"):
-            return None
-
-        address = (esr.get("wallet_address") or "").strip()
-        if not address:
-            print("\t⚠  ESR auto-funding is on but the wallet address is unknown; skipping.")
-            return None
-
-        def _dec(name, raw):
-            raw = str(raw or "").strip()
-            if not raw:
-                return None
-            try:
-                v = Decimal(raw)
-            except (InvalidOperation, ValueError):
-                print(f"\t⚠  ESR autofund.{name}={raw!r} is not a number; skipping funding.")
-                return "invalid"
-            if v < 0:
-                print(f"\t⚠  ESR autofund.{name} must not be negative; skipping funding.")
-                return "invalid"
-            return v
-
-        amount = _dec("amount", autofund.get("amount"))
-        ceiling = _dec("max", autofund.get("max"))
-        threshold = _dec("threshold", autofund.get("threshold"))
-        if amount == "invalid" or ceiling == "invalid" or threshold == "invalid":
-            return None
-
-        # No implicit transfer: the amount is always deliberate.
-        if amount is None or amount == 0:
-            print("\t⚠  ESR auto-funding is on but autofund.amount is not set; nothing sent.")
-            print("\t   Set an explicit amount (ECLD_ESR_AUTOFUND_AMOUNT) or fund manually.")
-            return None
-
-        # A hard ceiling is REQUIRED, not optional: without it an out-of-range
-        # amount (a typo, a bad env var) has nothing stopping it. Refuse rather
-        # than invent a default, since any default would be a guess about how
-        # much of someone else's money is acceptable to move.
-        if ceiling is None:
-            print("\t✘  ESR autofund.max is not set; nothing sent.")
-            print("\t   A hard ceiling is required whenever auto-funding is enabled")
-            print("\t   (ECLD_ESR_AUTOFUND_MAX or ESR.autofund.max).")
-            return None
-
-        # Refuse rather than clamp, so a bad config is obvious.
-        if amount > ceiling:
-            print(f"\t✘  ESR autofund.amount ({amount}) exceeds autofund.max ({ceiling}); nothing sent.")
-            return None
-
-        # The testnet identity is reproducible by anyone who runs the published
-        # image (there is no attestation), so the wallet is drainable. Config is
-        # honoured, but this must be impossible to miss.
-        # BLOCKCHAIN_CONFIG is built inside the publish functions, not at module
-        # level, so resolve the network type from config the same way they do.
-        try:
-            network_type = str(
-                BlockchainNetworks.get_details_by_enum_name(
-                    config.read("BLOCKCHAIN_NETWORK")
-                ).network_type
-                or ""
-            ).strip().lower()
-        except Exception:
-            network_type = ""
-        if network_type and network_type != "mainnet":
-            print("\t⚠  This network has NO enclave attestation: the ESR wallet's private key is")
-            print("\t   reproducible by anyone who runs the published image, so anything you send")
-            print("\t   here is drainable. Funding anyway because autofund is enabled.")
-
-        try:
-            balance = image_registry.get_balance_of(address)
-        except Exception:
-            balance = None
-        if balance is not None:
-            print(f"\t   ESR wallet balance: {balance}")
-            # Idempotent: only top up when it has fallen below the threshold.
-            if threshold is not None and Decimal(str(balance)) >= threshold:
-                print(f"\t✔  Balance already at/above autofund.threshold ({threshold}); nothing sent.")
-                return None
-
-        if not non_interactive():
-            answer = input(f"\tSend {amount} to the ESR wallet {address}? [y/N]: ").strip().lower()
-            if answer not in ("y", "yes"):
-                print("\t   Funding skipped.")
-                return None
-
-        print(f"\t   Sending {amount} to {address} ...")
-        tx_hash = image_registry.transfer_native(address, amount)
-        if tx_hash:
-            print(f"\t✔  ESR wallet funded. tx: {tx_hash}")
-        return tx_hash
-
-
 def _esr_summary():
-        """End-of-publish ESR banner: the address, both balances, and funding.
+        """End-of-publish ESR banner: the enclave's on-chain identity.
 
-        The ✔ line printed during cert capture scrolls away under pages of
-        docker output, and developers finished a publish unable to find the
-        address at all. This prints it LAST, where it cannot be missed, states
-        where it is saved, and -- interactively -- offers to fund the wallet
-        from the developer's own key (the same key that just paid for
-        registration). Publishing still never moves value on its own: sending
-        requires an explicitly typed amount and a confirmation.
+        State commits are relayed and PAID by the node (commitFor), so there is
+        nothing to fund. This prints the address LAST, where it cannot scroll
+        away under docker output, as the identity a frontend reads state by.
         """
-        from decimal import Decimal, InvalidOperation
-
         esr = config.read_esr()
         if not esr.get("enabled"):
             return
@@ -626,94 +498,10 @@ def _esr_summary():
             print("=" * 62)
             return
 
-        print(f"  ESR wallet address : {address}")
-        print("                       (saved in .config.json under ESR.wallet_address)")
-
-        esr_balance = None
-        try:
-            esr_balance = image_registry.get_balance_of(address)
-            print(f"  ESR wallet balance : {esr_balance}")
-        except Exception:
-            print("  ESR wallet balance : (could not read)")
-        try:
-            dev = image_registry.acct.address
-            dev_balance = image_registry.get_balance_of(dev)
-            print(f"  Your wallet        : {dev}  (balance: {dev_balance})")
-        except Exception:
-            dev = None
-
-        needs_gas = esr_balance is None or Decimal(str(esr_balance)) == 0
-        if needs_gas:
-            print("  ⚠  The ESR wallet pays for its own state commits; with no gas,")
-            print("     reads work but EVERY write fails.")
-            # Unattended control of the funding prompt (same rules as autofund:
-            # an explicit amount AND a hard ceiling, or nothing moves):
-            #   ECLD_ESR_FUND_AMOUNT=skip|0   never prompt, never send
-            #   ECLD_ESR_FUND_AMOUNT=<n>      send <n> without prompting, but
-            #                                 ONLY if ECLD_ESR_FUND_MAX is set
-            #                                 and <n> <= that ceiling
-            env_amt = os.getenv("ECLD_ESR_FUND_AMOUNT", "").strip()
-            if env_amt:
-                if env_amt.lower() in ("skip", "no", "none", "0"):
-                    print(f"     Funding suppressed (ECLD_ESR_FUND_AMOUNT={env_amt}).")
-                    print(f"     To fund later, send gas to {address} from any wallet.")
-                else:
-                    try:
-                        amount = Decimal(env_amt)
-                        if amount <= 0:
-                            raise InvalidOperation
-                    except (InvalidOperation, ValueError):
-                        print(f"  ✘  ECLD_ESR_FUND_AMOUNT={env_amt!r} is not a valid amount; nothing sent.")
-                        print("=" * 62)
-                        return
-                    env_max = os.getenv("ECLD_ESR_FUND_MAX", "").strip()
-                    try:
-                        ceiling = Decimal(env_max) if env_max else None
-                    except (InvalidOperation, ValueError):
-                        ceiling = None
-                    if ceiling is None:
-                        print("  ✘  ECLD_ESR_FUND_AMOUNT is set but ECLD_ESR_FUND_MAX is not;")
-                        print("     a hard ceiling is required for unattended funding. Nothing sent.")
-                    elif amount > ceiling:
-                        print(f"  ✘  ECLD_ESR_FUND_AMOUNT ({amount}) exceeds ECLD_ESR_FUND_MAX ({ceiling}); nothing sent.")
-                    else:
-                        print(f"     Sending {amount} to {address} (ECLD_ESR_FUND_AMOUNT)...")
-                        tx = image_registry.transfer_native(address, amount)
-                        if tx:
-                            print(f"  ✔  Funded. tx: {tx}")
-                        else:
-                            print("  ✘  Transfer failed; fund manually.")
-            elif not non_interactive() and dev:
-                try:
-                    raw = input(
-                        "  Fund it now from your wallet? amount to send (blank = skip): "
-                    ).strip()
-                except EOFError:
-                    raw = ""
-                if raw:
-                    try:
-                        amount = Decimal(raw)
-                        if amount <= 0:
-                            raise InvalidOperation
-                        confirm = input(
-                            f"  Send {amount} from {dev} to {address}? [y/N]: "
-                        ).strip().lower()
-                        if confirm in ("y", "yes"):
-                            tx = image_registry.transfer_native(address, amount)
-                            if tx:
-                                print(f"  ✔  Funded. tx: {tx}")
-                            else:
-                                print("  ✘  Transfer failed; fund manually.")
-                        else:
-                            print("     Skipped.")
-                    except (InvalidOperation, ValueError):
-                        print(f"     {raw!r} is not a valid amount; skipped.")
-                else:
-                    print(f"     To fund later, send gas to {address} from any wallet.")
-            else:
-                print(f"     Fund it by sending gas to {address}, or for unattended runs set")
-                print("     ECLD_ESR_FUND_AMOUNT + ECLD_ESR_FUND_MAX (one-shot at publish),")
-                print("     or enable ESR.autofund with explicit amount + max.")
+        print(f"  ESR identity address : {address}")
+        print("                         (saved in .config.json; the address your")
+        print("                          state is filed under -- read it by this)")
+        print("  The node relays and pays for your state commits; nothing to fund.")
         print("=" * 62)
 
 
@@ -1090,8 +878,6 @@ def main(private_key):
         os.remove("certificate.securelock.crt")
 
 
-    
-
     ENCLAVE_PUBLIC_KEY = spinner.spin_till_done("Extracing public key using local docker", extract_public_key_local)
 
 
@@ -1190,17 +976,9 @@ def main(private_key):
         print(e)
         exit()
 
-    # ESR auto-funding (RFC §5.3) runs LAST, only after the enclave is actually
-    # registered -- a publish that failed must never move value. Opt-in and off
-    # by default; it returns immediately unless autofund.enabled is true.
-    try:
-        _autofund_esr_wallet()
-    except Exception as e:
-        # Funding is a convenience: never let it fail an otherwise good publish.
-        print(f"\t⚠  ESR auto-funding skipped: {e}")
-
-    # The LAST thing a publish prints: the ESR address + funding state, where
-    # it cannot scroll away. Never allowed to fail the publish.
+    # The LAST thing a publish prints: the ESR identity address, where it
+    # cannot scroll away. State commits are relayed and paid by the node, so
+    # there is nothing to fund. Never allowed to fail the publish.
     try:
         _esr_summary()
     except Exception as e:

@@ -1,7 +1,8 @@
 # esr-counter — Enclave State Registry end-to-end example
 
 A minimal dApp that exercises the whole ESR path: encrypted state written by the
-enclave, pinned by the node, pointed to on-chain, and read back on the next run.
+enclave, relayed and paid for by the node, pointed to on-chain, and read back on
+the next run.
 
 Use it to verify an ESR deployment, or as the smallest working reference for
 using `StateRegistry` in your own backend.
@@ -21,32 +22,32 @@ just that a call returned.
 
 ## Functions
 
-| Function | Needs gas | Purpose |
+| Function | Touches chain | Purpose |
 |---|---|---|
 | `esr_selftest()` | no | Wallet derives, encryption round-trips, CID matches a known IPFS vector |
-| `esr_address()` | no | The enclave's wallet address — **fund this** |
+| `esr_address()` | no | The enclave's on-chain identity — the address commits are filed under |
 | `esr_read(key)` | no | Read state without writing |
 | `esr_increment(key)` | **yes** | Read-modify-write, commits on-chain |
 
-Start with `esr_selftest`. It touches no chain and no gas, so if it fails the
-problem is the enclave build; if only `esr_increment` fails, the problem is
-funding or the chain.
+Start with `esr_selftest`. It touches no chain, so if it fails the problem is the
+enclave build; if only `esr_increment` fails, the problem is the chain or the
+operator (see below).
 
 ## Running it
 
 ```bash
 ecld-build      # bakes ESR_CONTRACT_ADDRESS in; fails if the network has none
-ecld-publish    # prints ESR_WALLET_ADDRESS
+ecld-publish
 ```
 
-Then **fund the printed address** with a small amount of testnet gas — the
-enclave pays for its own `commit()` transactions. `.config.json` here leaves
-`ESR.contract_address` empty on purpose, to demonstrate that `ecld-build`
-resolves the canonical per-network address itself; hand-wiring it is what caused
-the empty-result class of bug this replaces.
+That's it — **nothing to fund**. The node that runs your task relays each commit
+and pays the gas, so a published dApp is autonomous. `.config.json` here leaves
+`ESR.contract_address` empty on purpose, to show that `ecld-build` resolves the
+canonical per-network address itself; hand-wiring it is what caused the
+empty-result class of bug this replaces.
 
-Auto-funding is off (`autofund.enabled: false`), so publishing never moves value
-on its own. Fund manually, or opt in explicitly.
+Run `esr_increment` on the same operator that runs the ESR stack; the node
+relays the commit and the version advances.
 
 ## State is enclave-private
 
@@ -61,12 +62,12 @@ in either runner, and wait for a commit to land with `waitForVersion`.
 ## Networks
 
 ESR is deployed on Bloxberg (mainnet and testnet share one chain, so both use
-the same registry). On a network without a deployment, `ecld-build` fails rather
-than sealing an empty address into the image.
+the same registry) and LitVM LiteForge. On a network without a deployment,
+`ecld-build` fails rather than sealing an empty address into the image.
 
 ## Caveat on testnet
 
 The testnet enclave identity is reproducible by anyone who runs the published
-image — there is no attestation. So a testnet ESR wallet is drainable and its
-state is readable by anyone who reproduces the identity. Treat testnet state as
-functional testing only, and do not fund these wallets with real value.
+image — there is no attestation. So testnet state is readable by anyone who
+reproduces the identity. Treat testnet state as functional testing only, and do
+not store real user data in it.

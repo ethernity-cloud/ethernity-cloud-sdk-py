@@ -7,15 +7,17 @@ The enclave is the only thing that can read it. That is the point: your state is
 ## How it works
 
 ```
-your backend            enclave (SGX)              chain
-------------            -------------              -----
+your backend            enclave (SGX)                 node                chain
+------------            -------------                 ----                -----
 state.commit(...)  -->  encrypt state
                         compute the CID
-                        publish to storage   -->   commit(key, cid, version)
-                                                   (node pins the content)
+                        SIGN commit(key, cid, ver) --> submit + PAY  -->  commit recorded
+                        stage blob for pinning         pin the blob        under the enclave
 ```
 
 Only a **pointer** goes on-chain — the content stays encrypted. Each key has a version that increments on every commit.
+
+You don't fund anything and you don't pay gas. The enclave **signs** each commit; the **node submits it and pays**. The commit is still recorded on-chain *as the enclave's* — the node can relay it or not, but it cannot forge, alter, or misattribute what your enclave signed.
 
 ## Enabling it
 
@@ -24,12 +26,11 @@ Run `ecld-init` and answer **yes** at the Enclave State Registry step, or add th
 ```json
 "ESR": {
   "enabled": true,
-  "contract_address": "",
-  "autofund": { "enabled": false }
+  "contract_address": ""
 }
 ```
 
-Leave `contract_address` empty. `ecld-build` fills in the correct registry for your network automatically.
+Leave `contract_address` empty. `ecld-build` fills in the correct registry for your network automatically. There is nothing else to configure — no wallet, no funding, no keys.
 
 ## Using it in your backend
 
@@ -68,27 +69,17 @@ async function addScore(userId, points) {
 | `get(key)` | Returns the decrypted state, or `{}` if nothing was ever stored |
 | `commit(key, mutate)` | Read-modify-write: `mutate` receives the current state and returns the new one |
 | `get_version(key)` | The current version number; `0` means never written |
-| `wallet_address` | The enclave's on-chain address — see funding below |
+| `wallet_address` | The enclave's on-chain identity — the address commits are recorded under |
 
 `commit` uses optimistic concurrency. If another task commits between your read and your write, it re-reads and retries automatically, so parallel tasks cannot silently overwrite each other.
 
-## Funding the enclave
+## Who pays for commits
 
-The enclave pays for its own commit transactions, so it needs its own funds.
+Nobody on your side. The node that runs your task **relays each commit and pays the gas** — so a dApp is autonomous once published, with no wallet to top up.
 
-When you run `ecld-publish`, it prints:
+To keep a runaway or hostile payload from spending an operator's money, each order has a **cumulative gas budget** for its state commits. If your task's commits would exceed it, the order fails with **`ESR_GAS_LIMIT_EXCEEDED` (34)** instead of overspending. In practice this only bites pathological cases — writing enormous state, or committing in a tight loop. Keep state small and commit deliberately (see *Designing your keys*) and you will never approach it.
 
-```
-✔  ESR wallet address: 0x...
-   This wallet starts EMPTY. Fund it from your own wallet with whatever
-   your payload needs; publishing never transfers value on its own.
-```
-
-Send a small amount of gas to that address. Without it, reads work but every write fails.
-
-{% hint style="warning" %}
-**The address changes when your enclave changes.** It is derived from the enclave's identity, so any SDK upgrade or backend edit produces a new address that must be funded again. Funds left at the previous address stay there. `ecld-publish` warns you when the address changes.
-{% endhint %}
+`wallet_address` is still useful: it is the on-chain identity your state is filed under, so a frontend reads state and metadata by that address (below).
 
 ## Reading state from your frontend
 
@@ -122,17 +113,14 @@ A key is any string — `keccak256` of it identifies the slot on-chain. Use one 
 - `game-<match_id>` — one slot per match
 - `config` — a single global slot
 
-Everything under one key is read and written together, so avoid putting unrelated data in the same key: two tasks touching different parts of it will contend over the same version.
+Everything under one key is read and written together, so avoid putting unrelated data in the same key: two tasks touching different parts of it will contend over the same version. Small, focused keys also keep each commit cheap, which keeps you comfortably under the per-order gas budget.
 
 ## Testnet warning
 
 {% hint style="danger" %}
-On testnet there is **no enclave attestation**, which means the enclave identity — and therefore its wallet and its state encryption key — can be reproduced by anyone who runs your published image.
+On testnet there is **no enclave attestation**, which means the enclave identity — and therefore its state encryption key — can be reproduced by anyone who runs your published image. Anyone reproducing the identity can read your testnet state.
 
-Treat testnet state as functional testing only:
-
-* do **not** fund testnet enclave wallets with real value
-* do **not** store real user data in testnet state
+Treat testnet state as functional testing only — do **not** store real user data in it.
 {% endhint %}
 
 ## Troubleshooting
@@ -141,9 +129,9 @@ Treat testnet state as functional testing only:
 |---|---|
 | `ESR is enabled but no ESR registry is deployed on <network>` | That network has no registry. Build for a supported network. |
 | Task returns `CONFIG_ERROR` (32) | The enclave was built without a required value. Re-run `ecld-build`. |
-| Reads work, writes fail | The enclave wallet is out of gas — fund the address from `ecld-publish`. |
+| Task returns `ESR_GAS_LIMIT_EXCEEDED` (34) | The order's commits would exceed its gas budget. Commit less, or smaller state. |
 | `holds a pointer that is not a CID` | A previous version of your code wrote an invalid pointer. |
 
 ## A complete example
 
-The SDK ships a working end-to-end example at `examples/esr-counter`. Its `esr_selftest()` function needs no gas and no chain access, so it is the fastest way to confirm your enclave is built correctly before you start debugging funding.
+The SDK ships a working end-to-end example at `examples/esr-counter`. Its `esr_selftest()` function touches no chain, so it is the fastest way to confirm your enclave is built correctly: run it first, then `esr_increment` twice and watch the version advance.

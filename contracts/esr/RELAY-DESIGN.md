@@ -125,6 +125,45 @@ payload: state.commit() xN  (streaming)
     else:        build result as normal
 ```
 
+## Validator verification of the delegated commits
+
+ESR commits are relayed by the untrusted node, so the **validator** (which
+re-runs the trustedzone flow to check a node behaved) must be able to verify the
+node relayed *exactly* what the enclave authorized — no dropped, added, or
+altered commits. Three layers, none of which the node can forge:
+
+1. **Result binds the ledger.** The result string gains a 5th field, an
+   `esrCommitDigest` = sha256 of the securelock's signed authorization ledger
+   (`esr.authorizations.json`), all-zero when the order made no ESR commits. The
+   trustedzone puts it in the signed result; the validator recomputes it. A node
+   that rewrites the ledger changes the digest and fails against the signed
+   result. **The result version bumps `v3` → `v4`** to mark the new field.
+
+2. **Each entry's signature.** For every ledger entry
+   `{enclave, keyHash, cid, expectedVersion, relayNonce, signature}` the
+   validator recomputes `commitDigest(...)` and confirms `recover(signature)` ==
+   `enclave`. The node cannot fabricate an entry — it has no enclave key. So the
+   digest, matched, means the result committed to a set of genuinely
+   enclave-signed authorizations.
+
+3. **On-chain cross-check.** For each entry the validator calls
+   `getState(entry.enclave, entry.keyHash)` on the ESR contract and requires the
+   on-chain **version ≥ expectedVersion + 1** — proof the commit actually landed
+   (a node that pocketed the delegation without relaying leaves the chain
+   unadvanced and fails here). `≥` rather than `==` so a later task re-committing
+   the same key does not fail an honest validation.
+
+**Where the validator looks — all from sealed state, nothing from the node:**
+
+| What it needs | Source |
+|---|---|
+| ESR contract address | `ESR_CONTRACT_ADDRESS` from the injected `.env` (the sealed address the securelock/trustedzone used) |
+| web3 provider | `ETNY_WEB3_PROVIDER` from the same `.env` |
+| enclave / key / version / cid to look up | the signed ledger entry (bound by the signature) |
+
+The node supplies none of the lookup coordinates and cannot point the validator
+at a different registry, so it cannot make a forged ledger pass.
+
 ## Chain-fee correctness
 
 Commit transactions must be built per-chain: **Bloxberg is legacy-gas**

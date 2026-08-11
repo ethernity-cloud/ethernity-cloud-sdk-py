@@ -1,8 +1,14 @@
 # ESR Phase 3 — Security Review Notes
 
-Companion to `docs/esr-implementation-plan.md` §Phase 3. This is the material a
-reviewer needs to sign off the enclave identity wallet before it is used with
-real value. **Status: implemented, awaiting review.**
+> **SUPERSEDED — historical record.** These notes review the original
+> *enclave-pays* wallet, whose central concern was "is the enclave wallet key
+> secret enough to hold value?" In the shipped **node-relayed** model the
+> enclave never holds gas — the node pays — so that concern is moot; the enclave
+> key is now only an *identity* the registry attributes commits to. The current
+> trust model is in [`contracts/esr/RELAY-DESIGN.md`](../contracts/esr/RELAY-DESIGN.md)
+> and `contracts/esr/README.md`. Kept for provenance only.
+
+Companion to `docs/esr-implementation-plan.md` §Phase 3.
 
 ## What was implemented
 

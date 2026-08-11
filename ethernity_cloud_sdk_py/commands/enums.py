@@ -277,19 +277,17 @@ class BlockchainNetworks(Enum):
 # "" means not deployed on that network yet -- ecld-build refuses to build an
 # ESR-enabled enclave for such a network instead of sealing in an empty value.
 ESR_CONTRACT_ADDRESSES = {
-    # Bloxberg "mainnet" and "testnet" are the SAME CHAIN (both chainId 8995,
-    # both reachable via core.bloxberg.org and bloxberg.ethernity.cloud); they
-    # are separated by different PROTOCOL contract addresses, not by different
-    # networks. The ESR below was verified present from both RPCs, so both
-    # entries point at that one deployment -- deploying a second instance would
-    # spend real value to duplicate a contract on the same chain and split state
-    # across two registries for no benefit.
-    "BLOXBERG_MAINNET": "0x4f6c0Ae54567CAeD372d265fEF412C2B5ed1302A",
-    "BLOXBERG_TESTNET": "0x4f6c0Ae54567CAeD372d265fEF412C2B5ed1302A",
-    # LitVM LiteForge (chainId 4441): deployed via pox-smart-contract
-    # feature/litvm (deploy/08-deploy-esr.js); all four selectors verified
-    # on-chain against contracts/esr/EnclaveStateRegistry.abi after deploy.
-    "LITVM_LITEFORGE": "0xb0D2C139514C1B4e511c0eB83F22a842979B3ECa",
+    # EXTENDED registry (adds commitFor: node-relayed, signature-verified state
+    # commits so enclaves need no gas -- see contracts/esr/RELAY-DESIGN.md).
+    # Replaces the original bloxberg 0x4f6c... / litvm 0xb0D2... which had only
+    # the direct commit() path.
+    #
+    # Bloxberg "mainnet" and "testnet" are the SAME CHAIN (both chainId 8995),
+    # separated by different PROTOCOL contracts, so both use the one deployment.
+    "BLOXBERG_MAINNET": "0xF76469A5659670B6ade366dE635e6463aaB8f3D8",
+    "BLOXBERG_TESTNET": "0xF76469A5659670B6ade366dE635e6463aaB8f3D8",
+    # LitVM LiteForge (chainId 4441), extended registry with commitFor.
+    "LITVM_LITEFORGE": "0xEF434486C0dbA37A9EaC8Ffe9A91190788D42054",
     # Not deployed yet on these chains. ecld-build must refuse to build an
     # ESR-enabled enclave here rather than sealing in an empty address.
     "POLYGON_MAINNET": "",
