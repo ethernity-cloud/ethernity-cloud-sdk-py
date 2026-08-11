@@ -595,6 +595,90 @@ def _autofund_esr_wallet(output=None):
         return tx_hash
 
 
+def _esr_summary():
+        """End-of-publish ESR banner: the address, both balances, and funding.
+
+        The ✔ line printed during cert capture scrolls away under pages of
+        docker output, and developers finished a publish unable to find the
+        address at all. This prints it LAST, where it cannot be missed, states
+        where it is saved, and -- interactively -- offers to fund the wallet
+        from the developer's own key (the same key that just paid for
+        registration). Publishing still never moves value on its own: sending
+        requires an explicitly typed amount and a confirmation.
+        """
+        from decimal import Decimal, InvalidOperation
+
+        esr = config.read_esr()
+        if not esr.get("enabled"):
+            return
+
+        print("\n" + "=" * 62)
+        print("  ENCLAVE STATE REGISTRY (ESR)")
+        print("=" * 62)
+
+        address = (esr.get("wallet_address") or "").strip()
+        if not address:
+            print("  ✘  ESR is enabled but NO wallet address was captured.")
+            print("     The enclave must emit ESR_WALLET_ADDRESS during publish; if it")
+            print("     did not, the image was likely built by an SDK older than the")
+            print("     ESR support or without ESR_CONTRACT_ADDRESS baked in.")
+            print("     Fix: pip install -U ethernity-cloud-sdk-py && ecld-build && ecld-publish")
+            print("=" * 62)
+            return
+
+        print(f"  ESR wallet address : {address}")
+        print("                       (saved in .config.json under ESR.wallet_address)")
+
+        esr_balance = None
+        try:
+            esr_balance = image_registry.get_balance_of(address)
+            print(f"  ESR wallet balance : {esr_balance}")
+        except Exception:
+            print("  ESR wallet balance : (could not read)")
+        try:
+            dev = image_registry.acct.address
+            dev_balance = image_registry.get_balance_of(dev)
+            print(f"  Your wallet        : {dev}  (balance: {dev_balance})")
+        except Exception:
+            dev = None
+
+        needs_gas = esr_balance is None or Decimal(str(esr_balance)) == 0
+        if needs_gas:
+            print("  ⚠  The ESR wallet pays for its own state commits; with no gas,")
+            print("     reads work but EVERY write fails.")
+            if not non_interactive() and dev:
+                try:
+                    raw = input(
+                        "  Fund it now from your wallet? amount to send (blank = skip): "
+                    ).strip()
+                except EOFError:
+                    raw = ""
+                if raw:
+                    try:
+                        amount = Decimal(raw)
+                        if amount <= 0:
+                            raise InvalidOperation
+                        confirm = input(
+                            f"  Send {amount} from {dev} to {address}? [y/N]: "
+                        ).strip().lower()
+                        if confirm in ("y", "yes"):
+                            tx = image_registry.transfer_native(address, amount)
+                            if tx:
+                                print(f"  ✔  Funded. tx: {tx}")
+                            else:
+                                print("  ✘  Transfer failed; fund manually.")
+                        else:
+                            print("     Skipped.")
+                    except (InvalidOperation, ValueError):
+                        print(f"     {raw!r} is not a valid amount; skipped.")
+                else:
+                    print(f"     To fund later, send gas to {address} from any wallet.")
+            else:
+                print(f"     Fund it by sending gas to {address}, or enable ESR.autofund")
+                print("     with an explicit amount + max for unattended publishes.")
+        print("=" * 62)
+
+
 def _extract_certificate_pem(output):
         """Return the first full PEM certificate block found in `output`, or ''.
 
@@ -1076,3 +1160,10 @@ def main(private_key):
     except Exception as e:
         # Funding is a convenience: never let it fail an otherwise good publish.
         print(f"\t⚠  ESR auto-funding skipped: {e}")
+
+    # The LAST thing a publish prints: the ESR address + funding state, where
+    # it cannot scroll away. Never allowed to fail the publish.
+    try:
+        _esr_summary()
+    except Exception as e:
+        print(f"\t⚠  could not print the ESR summary: {e}")
