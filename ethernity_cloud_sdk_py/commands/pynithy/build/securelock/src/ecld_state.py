@@ -57,18 +57,28 @@ _bucket = None
 _contract_address = None
 _web3 = None
 
+# ESR commits do NOT pay their own gas (ESR RELAY-DESIGN.md): the enclave only
+# SIGNS each commit (commitFor); the NODE relays it and pays, and does all gas
+# accounting because it is the payer. The securelock does no gas math and holds
+# no budget -- nothing it could compute about cost would be trusted anyway. It
+# just records every signed authorization this order so the node can relay them
+# and the trustedzone can independently price + adjudicate the whole set.
+_esr_evidence = []              # order-wide ledger of signed authorizations
 
-def configure(identity_priv, swift_stream_service, bucket, contract_address, web3=None):
+
+def configure(identity_priv, swift_stream_service, bucket, contract_address,
+              web3=None):
     """Wire the registry to the enclave's identity, storage and chain access.
 
     Called by securelock during startup; payload code never calls this.
     """
-    global _identity_priv, _swift, _bucket, _contract_address, _web3
+    global _identity_priv, _swift, _bucket, _contract_address, _web3, _esr_evidence
     _identity_priv = identity_priv
     _swift = swift_stream_service
     _bucket = bucket
     _contract_address = contract_address
     _web3 = web3
+    _esr_evidence = []
 
 
 def _keccak256(data: bytes) -> bytes:
@@ -310,13 +320,51 @@ class StateRegistry:
         raise RuntimeError(f"Could not read state object for '{key}' ({cid})")
 
     def _send_commit(self, key_hash: bytes, cid: str, expected_version: int):
+        """Authorize a commit for the NODE to relay and pay (commitFor).
+
+        The enclave never pays gas and does NO gas math: it just SIGNS the
+        commit (bound to enclave, key, cid, version, relay nonce, chain,
+        contract) and stages the signed authorization for the node. The NODE
+        prices the gas (it is paying, and knows live fees) and enforces the
+        per-order budget; the TRUSTEDZONE independently re-prices and adjudicates
+        as the attested check on the node. Cost is not the securelock's concern
+        and nothing it could write about cost would be trusted anyway.
+
+        Two artifacts are staged, both carrying only signature-bound fields:
+          - esr.commit.<nonce>.json  -- the single authorization for the node to
+            relay in order;
+          - esr.authorizations.json  -- the append-only ledger of EVERY commit
+            this order, which the trustedzone adjudicates over so no commit can
+            escape the cumulative gas accounting by never being seen.
+        """
         contract = self._contract()
         acct = self._signer()
-        tx = contract.functions.commit(key_hash, cid, expected_version).build_transaction({
-            "from": acct.address,
-            "nonce": _web3.eth.get_transaction_count(acct.address),
-            "chainId": _web3.eth.chain_id,
-        })
-        signed = acct.sign_transaction(tx)
-        tx_hash = _web3.eth.send_raw_transaction(signed.raw_transaction)
-        return _web3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
+        enclave = acct.address
+
+        relay_nonce = contract.functions.relayNonce(enclave).call()
+        digest = contract.functions.commitDigest(
+            enclave, key_hash, cid, expected_version, relay_nonce).call()
+
+        from eth_account.messages import encode_defunct
+        signature = acct.sign_message(encode_defunct(digest)).signature
+
+        auth = {
+            "enclave": enclave,
+            "keyHash": "0x" + key_hash.hex(),
+            "cid": cid,
+            "expectedVersion": expected_version,
+            "relayNonce": relay_nonce,
+            "signature": "0x" + signature.hex(),
+        }
+
+        # Append to the order-wide ledger (the trustedzone's adjudication input).
+        _esr_evidence.append(auth)
+        ledger = json.dumps(_esr_evidence, separators=(",", ":")).encode("utf-8")
+        _swift.put_file_content(
+            _bucket, "esr.authorizations.json", "", io.BytesIO(ledger))
+
+        # Stage the individually-relayable authorization for the node.
+        blob = json.dumps(auth, separators=(",", ":")).encode("utf-8")
+        _swift.put_file_content(
+            _bucket, f"esr.commit.{relay_nonce}.json", "", io.BytesIO(blob))
+        return {"relayed": True, "relayNonce": relay_nonce}

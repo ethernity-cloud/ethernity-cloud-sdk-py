@@ -54,6 +54,8 @@ class TaskStatus:
     # address that was never baked into the sealed image). Reported eagerly
     # with the variable named, instead of a confusing downstream crash.
     CONFIG_ERROR = 32
+    EXECUTION_TIMEOUT = 33       # Started but produced no result within the order duration.
+    ESR_GAS_LIMIT_EXCEEDED = 34  # ESR state commits would exceed the per-order relayed-gas budget.
 
 
 def _empty_required_config():
