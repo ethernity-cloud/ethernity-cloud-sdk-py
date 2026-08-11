@@ -175,7 +175,7 @@ print("ESR wallet derivation + capture OK")
 PY
 echo "ESR identity wallet OK"
 
-step "6. ESR publish summary: unattended funding parameters"
+step "6. ESR publish summary: identity address, no funding (relay model)"
 "$PY" - <<'PY'
 import sys, os, io as _io, ast
 src = open(os.path.join(os.environ["PYTHONPATH"],
@@ -188,21 +188,13 @@ fn_src = ast.get_source_segment(src, fn)
 class Cfg:
     def __init__(s, e): s.e = e
     def read_esr(s): return s.e
-class Reg:
-    class acct: address = "0xDEV"
-    def get_balance_of(s, a): return 0
-    def transfer_native(s, a, amt): return f"0xTX({amt})"
-class OsStub:
-    def __init__(s, env): s.env = env
-    def getenv(s, k, d=""): return s.env.get(k, d)
 
 A = "0x1286655050bA374F24BAc576673318E35DcFb23d"
-def run(env, ni=True):
-    ns = {"config": Cfg({"enabled": True, "wallet_address": A}),
-          "image_registry": Reg(), "non_interactive": lambda: ni,
-          "os": OsStub(env)}
+def run(esr):
+    ns = {"config": Cfg(esr)}
     exec(fn_src, ns)
-    # stdin is EMPTY: any attempt to prompt raises EOFError and fails the step
+    # stdin is EMPTY: any attempt to prompt would raise EOFError and fail here,
+    # proving the summary never prompts (the relay model has nothing to fund).
     old, sys.stdin = sys.stdin, _io.StringIO("")
     buf, out = _io.StringIO(), sys.stdout
     sys.stdout = buf
@@ -210,19 +202,19 @@ def run(env, ni=True):
     finally: sys.stdout, sys.stdin = out, old
     return buf.getvalue()
 
-# amount + ceiling -> sends, promptless (works even when a TTY is attached)
-assert "0xTX(0.3)" in run({"ECLD_ESR_FUND_AMOUNT": "0.3", "ECLD_ESR_FUND_MAX": "1"}, ni=False)
-# amount without ceiling -> refused (autofund's explicit-ceiling rule)
-o = run({"ECLD_ESR_FUND_AMOUNT": "0.3"})
-assert "ECLD_ESR_FUND_MAX" in o and "0xTX" not in o
-# over ceiling -> refused
-assert "0xTX" not in run({"ECLD_ESR_FUND_AMOUNT": "2", "ECLD_ESR_FUND_MAX": "1"})
-# skip -> suppressed, promptless
-assert "0xTX" not in run({"ECLD_ESR_FUND_AMOUNT": "skip"}, ni=False)
-# unattended with nothing set -> instructions, no prompt, nothing sent
-o = run({})
-assert "0xTX" not in o and "ECLD_ESR_FUND_AMOUNT" in o
-print("ESR funding parameters OK")
+# enabled + address -> prints the identity address and says the node pays;
+# no funding PROMPT, no send-value UX (the old ECLD_ESR_FUND_* / transfer flow).
+o = run({"enabled": True, "wallet_address": A})
+assert A in o, "identity address must be printed"
+assert "node relays and pays" in o.lower(), "must state the node pays"
+assert "ECLD_ESR_FUND" not in o, "no funding env params in the relay model"
+assert "Fund it now" not in o and "Send " not in o, "no funding prompt/transfer"
+# no address captured -> loud, actionable
+o = run({"enabled": True, "wallet_address": ""})
+assert "NO wallet address" in o and "ECLD_ESR_FUND" not in o
+# disabled -> silent
+assert run({"enabled": False}) == ""
+print("ESR relay summary OK")
 PY
 echo "ESR unattended funding OK"
 
