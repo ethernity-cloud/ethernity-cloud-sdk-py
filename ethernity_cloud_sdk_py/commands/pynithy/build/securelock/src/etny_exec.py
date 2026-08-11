@@ -1,5 +1,6 @@
 import os.path
 import ast
+import json
 
 # If the serverless backend fails to import, remember WHY. Previously any
 # import failure was silently swallowed (backend = None), so every task then
@@ -125,7 +126,20 @@ def Exec(payload_data, input_data, globals=None, locals=None):
                         locals,
                     )
 
-            return ___etny_result___("\n".join(outputs))
+            # Function results are arbitrary Python values -- the shipped
+            # esr-counter example returns dicts -- so serialize anything that
+            # is not already a str instead of letting join() raise. None (an
+            # expression statement with no value, e.g. a bare print()) is
+            # dropped, matching REPL semantics. NOTE: this is the executor the
+            # serverless securelock actually runs (local_api.py imports
+            # etny_exec); the 0.8.3 fix landed only in etny_exec_serv.py,
+            # which nothing imports.
+            rendered = [
+                out if isinstance(out, str) else json.dumps(out, default=str)
+                for out in outputs
+                if out is not None
+            ]
+            return ___etny_result___("\n".join(rendered))
         else:
             return (
                 TaskStatus.PAYLOAD_NOT_DEFINED,
