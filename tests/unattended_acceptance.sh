@@ -175,5 +175,56 @@ print("ESR wallet derivation + capture OK")
 PY
 echo "ESR identity wallet OK"
 
+step "6. ESR publish summary: unattended funding parameters"
+"$PY" - <<'PY'
+import sys, os, io as _io, ast
+src = open(os.path.join(os.environ["PYTHONPATH"],
+    "ethernity_cloud_sdk_py", "commands", "pynithy", "publish.py"),
+    encoding="utf-8").read()
+fn = next(n for n in ast.parse(src).body
+          if isinstance(n, ast.FunctionDef) and n.name == "_esr_summary")
+fn_src = ast.get_source_segment(src, fn)
+
+class Cfg:
+    def __init__(s, e): s.e = e
+    def read_esr(s): return s.e
+class Reg:
+    class acct: address = "0xDEV"
+    def get_balance_of(s, a): return 0
+    def transfer_native(s, a, amt): return f"0xTX({amt})"
+class OsStub:
+    def __init__(s, env): s.env = env
+    def getenv(s, k, d=""): return s.env.get(k, d)
+
+A = "0x1286655050bA374F24BAc576673318E35DcFb23d"
+def run(env, ni=True):
+    ns = {"config": Cfg({"enabled": True, "wallet_address": A}),
+          "image_registry": Reg(), "non_interactive": lambda: ni,
+          "os": OsStub(env)}
+    exec(fn_src, ns)
+    # stdin is EMPTY: any attempt to prompt raises EOFError and fails the step
+    old, sys.stdin = sys.stdin, _io.StringIO("")
+    buf, out = _io.StringIO(), sys.stdout
+    sys.stdout = buf
+    try: ns["_esr_summary"]()
+    finally: sys.stdout, sys.stdin = out, old
+    return buf.getvalue()
+
+# amount + ceiling -> sends, promptless (works even when a TTY is attached)
+assert "0xTX(0.3)" in run({"ECLD_ESR_FUND_AMOUNT": "0.3", "ECLD_ESR_FUND_MAX": "1"}, ni=False)
+# amount without ceiling -> refused (autofund's explicit-ceiling rule)
+o = run({"ECLD_ESR_FUND_AMOUNT": "0.3"})
+assert "ECLD_ESR_FUND_MAX" in o and "0xTX" not in o
+# over ceiling -> refused
+assert "0xTX" not in run({"ECLD_ESR_FUND_AMOUNT": "2", "ECLD_ESR_FUND_MAX": "1"})
+# skip -> suppressed, promptless
+assert "0xTX" not in run({"ECLD_ESR_FUND_AMOUNT": "skip"}, ni=False)
+# unattended with nothing set -> instructions, no prompt, nothing sent
+o = run({})
+assert "0xTX" not in o and "ECLD_ESR_FUND_AMOUNT" in o
+print("ESR funding parameters OK")
+PY
+echo "ESR unattended funding OK"
+
 echo
 echo "ALL UNATTENDED ACCEPTANCE CHECKS PASSED"

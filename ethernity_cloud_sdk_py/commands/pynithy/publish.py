@@ -646,7 +646,44 @@ def _esr_summary():
         if needs_gas:
             print("  ⚠  The ESR wallet pays for its own state commits; with no gas,")
             print("     reads work but EVERY write fails.")
-            if not non_interactive() and dev:
+            # Unattended control of the funding prompt (same rules as autofund:
+            # an explicit amount AND a hard ceiling, or nothing moves):
+            #   ECLD_ESR_FUND_AMOUNT=skip|0   never prompt, never send
+            #   ECLD_ESR_FUND_AMOUNT=<n>      send <n> without prompting, but
+            #                                 ONLY if ECLD_ESR_FUND_MAX is set
+            #                                 and <n> <= that ceiling
+            env_amt = os.getenv("ECLD_ESR_FUND_AMOUNT", "").strip()
+            if env_amt:
+                if env_amt.lower() in ("skip", "no", "none", "0"):
+                    print(f"     Funding suppressed (ECLD_ESR_FUND_AMOUNT={env_amt}).")
+                    print(f"     To fund later, send gas to {address} from any wallet.")
+                else:
+                    try:
+                        amount = Decimal(env_amt)
+                        if amount <= 0:
+                            raise InvalidOperation
+                    except (InvalidOperation, ValueError):
+                        print(f"  ✘  ECLD_ESR_FUND_AMOUNT={env_amt!r} is not a valid amount; nothing sent.")
+                        print("=" * 62)
+                        return
+                    env_max = os.getenv("ECLD_ESR_FUND_MAX", "").strip()
+                    try:
+                        ceiling = Decimal(env_max) if env_max else None
+                    except (InvalidOperation, ValueError):
+                        ceiling = None
+                    if ceiling is None:
+                        print("  ✘  ECLD_ESR_FUND_AMOUNT is set but ECLD_ESR_FUND_MAX is not;")
+                        print("     a hard ceiling is required for unattended funding. Nothing sent.")
+                    elif amount > ceiling:
+                        print(f"  ✘  ECLD_ESR_FUND_AMOUNT ({amount}) exceeds ECLD_ESR_FUND_MAX ({ceiling}); nothing sent.")
+                    else:
+                        print(f"     Sending {amount} to {address} (ECLD_ESR_FUND_AMOUNT)...")
+                        tx = image_registry.transfer_native(address, amount)
+                        if tx:
+                            print(f"  ✔  Funded. tx: {tx}")
+                        else:
+                            print("  ✘  Transfer failed; fund manually.")
+            elif not non_interactive() and dev:
                 try:
                     raw = input(
                         "  Fund it now from your wallet? amount to send (blank = skip): "
@@ -674,8 +711,9 @@ def _esr_summary():
                 else:
                     print(f"     To fund later, send gas to {address} from any wallet.")
             else:
-                print(f"     Fund it by sending gas to {address}, or enable ESR.autofund")
-                print("     with an explicit amount + max for unattended publishes.")
+                print(f"     Fund it by sending gas to {address}, or for unattended runs set")
+                print("     ECLD_ESR_FUND_AMOUNT + ECLD_ESR_FUND_MAX (one-shot at publish),")
+                print("     or enable ESR.autofund with explicit amount + max.")
         print("=" * 62)
 
 
