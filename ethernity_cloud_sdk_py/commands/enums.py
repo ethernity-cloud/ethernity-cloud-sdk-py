@@ -284,11 +284,14 @@ ESR_CONTRACT_ADDRESSES = {
     # the direct commit() path.
     #
     # Bloxberg "mainnet" and "testnet" are the SAME CHAIN (both chainId 8995),
-    # separated by different PROTOCOL contracts, so both use the one deployment.
+    # separated by different PROTOCOL contracts. Mainnet stays on the
+    # pre-enumeration ESR until it is redeployed; the testnets run the
+    # enumerable upgrade (commitSeq + entryCount/getEntriesFrom).
     "BLOXBERG_MAINNET": "0xF76469A5659670B6ade366dE635e6463aaB8f3D8",
-    "BLOXBERG_TESTNET": "0xF76469A5659670B6ade366dE635e6463aaB8f3D8",
-    # LitVM LiteForge (chainId 4441), extended registry with commitFor.
-    "LITVM_LITEFORGE": "0xEF434486C0dbA37A9EaC8Ffe9A91190788D42054",
+    # Enumerable ESR, deployed 2026-08-12 (bloxberg_testnet, chain 8995).
+    "BLOXBERG_TESTNET": "0xda5e68Bb5e68ee14D73b8de2a4D3Ca15736fACfb",
+    # Enumerable ESR, deployed 2026-08-12 (LitVM LiteForge, chain 4441).
+    "LITVM_LITEFORGE": "0xbAa7F9E3287ff95D177104eD469E6d0Fd19dBB0F",
     # Not deployed yet on these chains. ecld-build must refuse to build an
     # ESR-enabled enclave here rather than sealing in an empty address.
     "POLYGON_MAINNET": "",
