@@ -164,9 +164,10 @@ class BlockchainNetworks(Enum):
         "https://liteforge.rpc.caldera.xyz/infra-partner-http",
         4441,  # Chain ID for LitVM LiteForge
         True, # EIP 1559 SUPPORT
-        5,   # Gas Price in Gwei
-        15,  # maxFeePerGas in Gwei
-        1,    # maxPriorityFeePerGas in Gwei
+        2,   # Gas Price in Gwei
+        2,  # maxFeePerGas in Gwei -- LitVM base fee is ~1.56 gwei (low volatility);
+            # 2 gwei clears base*1.1 (=~1.7) with the priority fee at 0.
+        0,    # maxPriorityFeePerGas in Gwei -- LitVM suggests 0 (no tip needed)
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
                 trusted_zone_image="ecld-pynithy-litvm-testnet",
