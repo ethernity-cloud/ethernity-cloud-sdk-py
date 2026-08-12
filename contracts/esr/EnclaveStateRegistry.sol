@@ -22,14 +22,38 @@ pragma solidity ^0.8.20;
 ///
 ///         Reference copy of the contract described in
 ///         "Design Proposal: Enclave State Registry (ESR) — Smart Contract"
-///         (2026-08-07), extended with commitFor (meta-transaction relay) so
-///         node operators can sponsor gas without becoming the on-chain author.
+///         (2026-08-07), extended with:
+///           - commitFor (meta-transaction relay) so node operators can sponsor
+///             gas without becoming the on-chain author, and
+///           - an ENUMERATION + GLOBAL SEQUENCE layer (2026-08-12) so replicator
+///             nodes can mirror EVERY enclave's state reliably without scanning
+///             event logs. The original mapping is not enumerable, so a
+///             replicator previously had to scan StateCommitted logs (which time
+///             out over large block ranges and need off-chain cursors). Now the
+///             contract itself exposes the full entry set and a monotonic
+///             commitSeq, so a replicator resumes from a sequence number with a
+///             single call and can never miss or re-scan.
 ///         Vendored here so the SDK ships the ABI it builds against.
+///
+///         Backward compatibility: every pre-existing function keeps its exact
+///         signature and behaviour. The additions are new view functions, a new
+///         `seq` field appended to StateCommitted, and internal bookkeeping.
+///         Entries committed to an OLDER deployment are readable there but only
+///         become enumerable here once (re)committed to this contract.
 contract EnclaveStateRegistry {
     struct StateEntry {
         string  cid;        // IPFS CID of the encrypted state blob
         uint256 version;    // monotonic; 0 = never committed, first commit => 1
         uint64  updatedAt;  // block timestamp of last commit
+    }
+
+    /// @dev A stable (enclave, key) identifier for enumeration. `enclave` IS the
+    ///      enclave's ESR identity address (it signs commits with its identity
+    ///      key), so (enclave, key) is the unambiguous identity a replicator
+    ///      tracks progress under.
+    struct EntryRef {
+        address enclave;
+        bytes32 key;
     }
 
     // enclave (author) => application key => entry
@@ -40,11 +64,28 @@ contract EnclaveStateRegistry {
     // the enclave's own transaction and does not touch this.
     mapping(address => uint256) private _relayNonce;
 
+    // --- enumeration + global sequence (replication support) ----------------
+
+    // Append-only list of every distinct (enclave, key) ever committed, in
+    // first-commit order. Never reordered or removed, so an index is a stable
+    // handle. Enables a replicator to enumerate the full state set directly.
+    EntryRef[] private _entries;
+
+    // (enclave => key => 1-based index into _entries, 0 = not present) so a
+    // repeated commit for an existing (enclave, key) does not append a duplicate.
+    mapping(address => mapping(bytes32 => uint256)) private _entryIndex1;
+
+    // Monotonic counter incremented on EVERY commit (not just first-time
+    // entries). A replicator that remembers the last seq it processed resumes
+    // from there with no event scanning and no block-range limits.
+    uint256 public commitSeq;
+
     event StateCommitted(
         address indexed enclave,
         bytes32 indexed key,
         string  cid,
-        uint256 version
+        uint256 version,
+        uint256 seq          // NEW: global monotonic sequence of this commit
     );
 
     error VersionMismatch(uint256 expected, uint256 actual);
@@ -142,6 +183,74 @@ contract EnclaveStateRegistry {
         return _state[enclave][key].version != 0;
     }
 
+    // --- enumeration API (replication support) ------------------------------
+
+    /// @notice Number of distinct (enclave, key) entries ever committed. Stable
+    ///         and append-only, so indices [0, entryCount()) are permanent
+    ///         handles a replicator can iterate.
+    function entryCount() external view returns (uint256) {
+        return _entries.length;
+    }
+
+    /// @notice The (enclave, key) at an enumeration index.
+    function entryAt(uint256 index)
+        external view returns (address enclave, bytes32 key)
+    {
+        EntryRef storage r = _entries[index];
+        return (r.enclave, r.key);
+    }
+
+    /// @notice Batch read of entries WITH their current state, starting at
+    ///         `startIndex` for up to `limit` entries. One call gives a
+    ///         replicator everything it needs to mirror a slice of the registry
+    ///         -- no event scanning, no per-entry getState round-trips. Returns
+    ///         the slice and the total count so the caller knows when it is done.
+    /// @dev    Arrays are returned parallel: enclaves[i]/keys[i]/cids[i]/
+    ///         versions[i]/updatedAts[i] all describe the same entry.
+    function getEntriesFrom(uint256 startIndex, uint256 limit)
+        external
+        view
+        returns (
+            address[] memory enclaves,
+            bytes32[] memory keys,
+            string[]  memory cids,
+            uint256[] memory versions,
+            uint64[]  memory updatedAts,
+            uint256   total
+        )
+    {
+        total = _entries.length;
+        if (startIndex >= total || limit == 0) {
+            return (
+                new address[](0),
+                new bytes32[](0),
+                new string[](0),
+                new uint256[](0),
+                new uint64[](0),
+                total
+            );
+        }
+        uint256 end = startIndex + limit;
+        if (end > total) end = total;
+        uint256 n = end - startIndex;
+
+        enclaves    = new address[](n);
+        keys        = new bytes32[](n);
+        cids        = new string[](n);
+        versions    = new uint256[](n);
+        updatedAts  = new uint64[](n);
+
+        for (uint256 i = 0; i < n; i++) {
+            EntryRef storage r = _entries[startIndex + i];
+            StateEntry storage e = _state[r.enclave][r.key];
+            enclaves[i]   = r.enclave;
+            keys[i]       = r.key;
+            cids[i]       = e.cid;
+            versions[i]   = e.version;
+            updatedAts[i] = e.updatedAt;
+        }
+    }
+
     // --- internal -----------------------------------------------------------
 
     function _commit(address enclave, bytes32 key, string calldata newCID, uint256 expectedVersion) private {
@@ -151,7 +260,19 @@ contract EnclaveStateRegistry {
         unchecked { e.version = expectedVersion + 1; }
         e.cid = newCID;
         e.updatedAt = uint64(block.timestamp);
-        emit StateCommitted(enclave, key, newCID, e.version);
+
+        // Register the (enclave, key) in the enumerable index the first time it
+        // is ever committed (version transitions 0 -> 1). Repeat commits update
+        // the existing entry in place, so the index stays duplicate-free.
+        if (_entryIndex1[enclave][key] == 0) {
+            _entries.push(EntryRef({enclave: enclave, key: key}));
+            _entryIndex1[enclave][key] = _entries.length; // 1-based
+        }
+
+        // Advance the global sequence on every commit and stamp it into the
+        // event, so a replicator can resume strictly after the last seq it saw.
+        unchecked { commitSeq += 1; }
+        emit StateCommitted(enclave, key, newCID, e.version, commitSeq);
     }
 
     /// @dev Recovers the signer of an eth_sign-style prefixed message hash. The
