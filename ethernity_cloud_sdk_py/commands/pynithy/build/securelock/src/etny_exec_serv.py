@@ -267,20 +267,56 @@ def Exec(payload_data, input_data, globals=None, locals=None):
             )
 
         return TaskStatus.SUCCESS, "TASK EXECUTED SUCCESSFULLY"
+    except SystemExit as e:
+        # A task returns its result ONLY through ___etny_result___(data) ->
+        # quit([code, data]) -> SystemExit carrying [code, data]. Honor that
+        # embedded code. Handled BEFORE SystemError: the read path's web3/crypto
+        # C-extensions intermittently raise a spurious SystemError during the
+        # SystemExit unwind, which previously stamped SYSTEM_ERROR onto a task
+        # that had already produced the correct value (~50% false read failure).
+        import traceback
+        try:
+            code, data = e.args[0][0], e.args[0][1]
+        except Exception:
+            tb = traceback.format_exc()
+            logging.error("SystemExit without [code, data]: %r -- %s", e, tb)
+            return TaskStatus.SYSTEM_ERROR, f"SYSTEM_ERROR: {e!r}\n{tb}"
+        if code == 0:
+            return TaskStatus.SUCCESS, data
+        return int(code), data
     except SystemError as e:
-        return TaskStatus.SYSTEM_ERROR, e.args[0]
+        # A spurious SystemError may replace the SystemExit mid-unwind; recover
+        # the real result from the chained exception before failing.
+        import traceback
+        for chained in (getattr(e, "__context__", None), getattr(e, "__cause__", None)):
+            if isinstance(chained, SystemExit):
+                try:
+                    code, data = chained.args[0][0], chained.args[0][1]
+                except Exception:
+                    continue
+                logging.warning(
+                    "SystemError during result unwind; recovered result from "
+                    "chained SystemExit (code=%r). Native error: %r", code, e)
+                if code == 0:
+                    return TaskStatus.SUCCESS, data
+                return int(code), data
+        tb = traceback.format_exc()
+        logging.error("SystemError in payload execution: %r -- %s", e, tb)
+        return TaskStatus.SYSTEM_ERROR, f"SYSTEM_ERROR: {e!r}\n{tb}"
     except KeyError as e:
         return TaskStatus.KEY_ERROR, e.args[0]
     except SyntaxWarning as e:
         return TaskStatus.SYNTAX_WARNING, e.args[0]
     except BaseException as e:
+        import traceback
         try:
             if e.args[0][0] == 0:
                 return TaskStatus.SUCCESS, e.args[0][1]
-            else:
-                return TaskStatus.BASE_EXCEPTION, e.args[0]
-        except Exception as e:
-            return TaskStatus.BASE_EXCEPTION, e.args[0]
+        except Exception:
+            pass
+        tb = traceback.format_exc()
+        logging.error("BaseException in payload execution: %r -- %s", e, tb)
+        return TaskStatus.BASE_EXCEPTION, f"BASE_EXCEPTION: {e!r}\n{tb}"
 
 
 # ===========================

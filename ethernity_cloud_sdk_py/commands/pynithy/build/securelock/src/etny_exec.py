@@ -1,6 +1,8 @@
 import os.path
 import ast
 import json
+import logging
+import traceback
 
 # If the serverless backend fails to import, remember WHY. Previously any
 # import failure was silently swallowed (backend = None), so every task then
@@ -149,18 +151,72 @@ def Exec(payload_data, input_data, globals=None, locals=None):
             )
 
         return TaskStatus.SUCCESS, "TASK EXECUTED SUCCESSFULLY"
+    except SystemExit as e:
+        # A task returns its result ONLY through ___etny_result___(data) ->
+        # quit([code, data]), which raises SystemExit carrying [code, data].
+        # Decode and honor that embedded code -- it is the authoritative outcome.
+        #
+        # Handled BEFORE `except SystemError` below on purpose. The read path runs
+        # web3/crypto C-extensions before returning; those intermittently raise a
+        # spurious SystemError ("error return without exception set") during the
+        # SystemExit unwind. With SystemError caught first, that spurious error
+        # stamped SYSTEM_ERROR onto a task that had already computed the correct
+        # value -- the ~50% false failure seen only on read tasks. Honoring the
+        # real result first fixes it.
+        try:
+            code, data = e.args[0][0], e.args[0][1]
+        except Exception:
+            tb = traceback.format_exc()
+            logging.error(
+                "SystemExit without a [code, data] result payload: %r (args=%r)"
+                " -- full traceback follows:\n%s", e, getattr(e, "args", None), tb)
+            return TaskStatus.SYSTEM_ERROR, f"SYSTEM_ERROR: {e!r}\n{tb}"
+        if code == 0:
+            return TaskStatus.SUCCESS, data
+        return int(code), data
     except SystemError as e:
-        return TaskStatus.SYSTEM_ERROR, e.args[0]
+        # A spurious native/interpreter SystemError can surface DURING the
+        # SystemExit unwind and REPLACE it, so the exception reaching here is a
+        # SystemError even though the task already produced its result via
+        # quit([code, data]). The real SystemExit is still on the chain as
+        # e.__context__ / e.__cause__ -- recover the result from there before
+        # treating this as a failure.
+        for chained in (getattr(e, "__context__", None), getattr(e, "__cause__", None)):
+            if isinstance(chained, SystemExit):
+                try:
+                    code, data = chained.args[0][0], chained.args[0][1]
+                except Exception:
+                    continue
+                logging.warning(
+                    "SystemError raised during result unwind; recovered task "
+                    "result from chained SystemExit (code=%r). Native error was: "
+                    "%r", code, e)
+                if code == 0:
+                    return TaskStatus.SUCCESS, data
+                return int(code), data
+        # No recoverable result -> genuine internal error. Deliver the FULL
+        # traceback to the data owner AS the result (visible in their runner
+        # output) and never crash the enclave.
+        tb = traceback.format_exc()
+        logging.error(
+            "SystemError in payload execution: %r (args=%r) -- full traceback "
+            "follows:\n%s", e, getattr(e, "args", None), tb)
+        return TaskStatus.SYSTEM_ERROR, f"SYSTEM_ERROR: {e!r}\n{tb}"
     except KeyError as e:
         return TaskStatus.KEY_ERROR, e.args[0]
     except SyntaxWarning as e:
         return TaskStatus.SYNTAX_WARNING, e.args[0]
     except BaseException as e:
+        # Deliver the traceback to the data owner as the result and never crash;
+        # preserve the embedded-result SUCCESS path (code 0).
         try:
             if e.args[0][0] == 0:
                 return TaskStatus.SUCCESS, e.args[0][1]
-            else:
-                return TaskStatus.BASE_EXCEPTION, e.args[0]
-        except Exception as e:
-            return TaskStatus.BASE_EXCEPTION, e.args[0]
+        except Exception:
+            pass
+        tb = traceback.format_exc()
+        logging.error(
+            "BaseException in payload execution: %r -- full traceback follows:\n%s",
+            e, tb)
+        return TaskStatus.BASE_EXCEPTION, f"BASE_EXCEPTION: {e!r}\n{tb}"
 
