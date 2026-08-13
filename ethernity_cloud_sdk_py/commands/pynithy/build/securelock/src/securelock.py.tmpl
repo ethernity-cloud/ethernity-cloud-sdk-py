@@ -291,6 +291,27 @@ class EtnySecureLock:
         self.task_code = str(task_result[0])
         self.task_result = task_result[1]
 
+        # Post-payload: re-assert the attested caller across the ESR ledger from
+        # THIS securelock's private copy (self.task_caller), captured before the
+        # payload ran and never handed to the payload's exec globals. Corrects
+        # any callerUsed the payload may have forged so the trustedzone reads the
+        # truth, and -- if a forgery is detected -- fails the task locally too.
+        # Defence in depth; the trustedzone (separate enclave) and the caller
+        # bound into each commit's CID remain the authoritative layers.
+        try:
+            import ecld_state
+            if ecld_state.restamp_ledger_caller(getattr(self, "task_caller", None)):
+                logging.error(
+                    "ESR ledger caller was tampered with by the payload -- "
+                    "failing the task (SECURITY_VIOLATION).")
+                self.task_code = str(TaskStatus.SECURITY_VIOLATION)
+                self.task_result = (
+                    "SECURITY_VIOLATION: the task attempted to forge the state "
+                    "commit caller. The attested submitter was re-asserted and "
+                    "the task was terminated.")
+        except Exception as e:
+            logging.error(f"ESR ledger re-stamp skipped: {e}")
+
     def configure_state_registry(self):
         """Make StateRegistry usable from payload code, if ESR is enabled.
 

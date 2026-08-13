@@ -121,6 +121,51 @@ def _norm_addr(addr):
     return addr.lower() if isinstance(addr, str) else None
 
 
+def restamp_ledger_caller(trusted_caller):
+    """Post-payload: re-assert the trusted caller across the ESR ledger.
+
+    Called by the SECURELOCK after the payload returns, with the attested
+    caller it captured BEFORE the payload ran (held on the securelock instance,
+    which the payload's exec globals never receive). We overwrite `callerUsed`
+    (and re-fix `enclave` to the real signer) in every ledger entry with that
+    trusted value and RE-STAGE the ledger, so a payload that had forged the
+    in-enclave caller cannot leave a false `callerUsed` for the trustedzone.
+
+    Returns True if any entry's callerUsed differed from the trusted caller
+    before re-stamping -- i.e. tampering was detected -- so the securelock can
+    fail the task locally in addition to the trustedzone catching it.
+
+    Bounds: this runs in the same process the payload subverted; a determined
+    payload could also patch THIS function. It is defence in depth, not the
+    sound layer -- the trustedzone (a separate enclave) is the authoritative
+    judge, and the caller is ALSO bound into each commit's CID (signed).
+    """
+    trusted = _norm_addr(trusted_caller)
+    tampered = False
+    if not _esr_evidence:
+        return False
+    try:
+        signer_addr = StateRegistry()._signer().address
+    except Exception:
+        signer_addr = None
+    for entry in _esr_evidence:
+        if not entry.get("owned"):
+            continue
+        prior = _norm_addr(entry.get("callerUsed"))
+        if prior != trusted:
+            tampered = True
+        entry["callerUsed"] = trusted or ""
+        if signer_addr:
+            entry["enclave"] = signer_addr
+    try:
+        ledger = json.dumps(_esr_evidence, separators=(",", ":")).encode("utf-8")
+        _swift.put_file_content(
+            _bucket, "esr.authorizations.json", "", io.BytesIO(ledger))
+    except Exception:
+        pass  # best-effort restage; the trustedzone still adjudicates
+    return tampered
+
+
 def _owner_op(key, mutator):
     """Owner-only ACL mutation. An unowned key is claimed first (owner =
     caller), so management on fresh keys works without a prior data commit.
@@ -262,16 +307,28 @@ class StatePermissionError(RuntimeError):
 
 
 def _unwrap(stored):
-    """(acl, data) from a stored blob; legacy blobs carry no acl."""
+    """(acl, data) from a stored blob; legacy blobs carry no acl.
+
+    `committedBy` (the caller that authored the commit) is metadata, not part
+    of get()'s returned data -- it is dropped here on read.
+    """
     if isinstance(stored, dict) and stored.get(_CONTAINER_MARK) == 1:
         return (stored.get("acl") or None), stored.get("data")
     return None, stored
 
 
-def _wrap(acl, data):
+def _wrap(acl, data, committed_by=None):
+    """Stored container. For owned state, bind the authoring caller
+    (`committedBy`) INTO the blob, so it lands in the CID -- which is the field
+    the securelock signs. That makes the caller cryptographically bound to the
+    commit, not merely a re-stampable sidecar. Unowned state keeps the legacy
+    bare shape (no ACL, no binding)."""
     if acl is None:
-        return data          # unowned state keeps the legacy shape
-    return {_CONTAINER_MARK: 1, "acl": acl, "data": data}
+        return data
+    container = {_CONTAINER_MARK: 1, "acl": acl, "data": data}
+    if committed_by:
+        container["committedBy"] = committed_by
+    return container
 
 
 def _acl_members(acl, field):
@@ -514,7 +571,10 @@ class StateRegistry:
         for _attempt in range(attempts):
             acl, data, current_version, _cid = self._read_container(key)
             new_acl, new_data = transform(acl, data, current_version)
-            stored = _wrap(new_acl, new_data)
+            # Bind the authoring caller into the blob (hence the CID/signature)
+            # for owned state.
+            stored = _wrap(new_acl, new_data,
+                           committed_by=_task_caller if new_acl else None)
 
             blob = _encrypt(json.dumps(stored, separators=(",", ":")).encode("utf-8"))
             # Compute the CID from OUR bytes -- never accept one from the node.

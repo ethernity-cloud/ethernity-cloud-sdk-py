@@ -119,6 +119,10 @@ class TaskStatus:
     CONFIG_ERROR = 32
     EXECUTION_TIMEOUT = 33       # Started but produced no result within the order duration.
     ESR_GAS_LIMIT_EXCEEDED = 34  # ESR state commits would exceed the per-order relayed-gas budget.
+    SECURITY_VIOLATION = 35      # A state commit was authorized under a caller other than the
+                                 # task's submitter (the in-enclave ownership check was bypassed).
+                                 # Set by the securelock when it detects a forged commit caller,
+                                 # and independently by the trustedzone re-adjudication.
 
 
 def _empty_required_config():
