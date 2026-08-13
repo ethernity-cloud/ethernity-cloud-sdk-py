@@ -47,3 +47,10 @@ def main_info():
     from ethernity_cloud_sdk_py.commands.info import main
 
     sys.exit(main())
+
+
+def main_run():
+    _utf8_stdio()
+    from ethernity_cloud_sdk_py.commands.run import main
+
+    sys.exit(main())
