@@ -104,14 +104,127 @@ def ledger_snapshot(include_state=True, keys=None):
     return {"wallet": reg.wallet_address, "entries": entries}
 
 
+# The authenticated task caller: the wallet that placed the DO request, read
+# from the PoX contract by the TRUSTEDZONE and forwarded over its signed
+# handoff (caller.securelock + .sig, verified by securelock before configure).
+# None when the trustedzone did not supply one (older trustedzone) -- anonymity
+# is never a privilege: None cannot claim ownership or touch owned state.
+_task_caller = None
+
+
+def task_caller():
+    """The verified wallet that submitted this task, or None (see above)."""
+    return _task_caller
+
+
+def _norm_addr(addr):
+    return addr.lower() if isinstance(addr, str) else None
+
+
+def _owner_op(key, mutator):
+    """Owner-only ACL mutation. An unowned key is claimed first (owner =
+    caller), so management on fresh keys works without a prior data commit.
+    Relays like any state write; no contract involvement beyond commitFor."""
+    if _task_caller is None:
+        raise StatePermissionError(
+            "state management requires an authenticated caller "
+            "(the trustedzone supplied none)")
+    reg = StateRegistry()
+
+    def transform(acl, data, version):
+        if acl is None:
+            acl = _new_acl(_task_caller)
+        if _norm_addr(acl.get("owner")) != _task_caller:
+            raise StatePermissionError(
+                f"caller {_task_caller} is not the owner of state key '{key}' "
+                f"(owner: {acl.get('owner')})")
+        return mutator(dict(acl)), data
+
+    acl, _data = reg._commit_transform(key, transform)
+    return dict(acl)
+
+
+def esr_grant(key, address, level="read"):
+    """Owner-only: grant `address` read or write access to `key`."""
+    if level not in ("read", "write"):
+        raise ValueError("level must be 'read' or 'write'")
+    addr = _norm_addr(address)
+    if not addr:
+        raise ValueError("a grantee address is required")
+
+    def mut(acl):
+        members = {a for a in (_norm_addr(x) for x in (acl.get(level) or [])) if a}
+        members.add(addr)
+        acl[level] = sorted(members)
+        return acl
+    return _owner_op(key, mut)
+
+
+def esr_revoke(key, address, level="read"):
+    """Owner-only: revoke `address`'s read or write access to `key`."""
+    if level not in ("read", "write"):
+        raise ValueError("level must be 'read' or 'write'")
+    addr = _norm_addr(address)
+
+    def mut(acl):
+        acl[level] = sorted(
+            a for a in (_norm_addr(x) for x in (acl.get(level) or []))
+            if a and a != addr)
+        return acl
+    return _owner_op(key, mut)
+
+
+def esr_set_public_read(key, enabled=True):
+    """Owner-only: make `key` readable by any caller (or revert to private)."""
+    def mut(acl):
+        acl["public_read"] = bool(enabled)
+        return acl
+    return _owner_op(key, mut)
+
+
+def esr_transfer(key, new_owner):
+    """Owner-only: transfer ownership of `key`. The old owner keeps nothing
+    unless separately granted."""
+    addr = _norm_addr(new_owner)
+    if not addr:
+        raise ValueError("a new owner address is required")
+
+    def mut(acl):
+        acl["owner"] = addr
+        return acl
+    return _owner_op(key, mut)
+
+
+def esr_owner(key):
+    """The owner address of `key`, or None while unowned. Does not expose the
+    state or the grant lists."""
+    acl, _data, _version, _cid = StateRegistry()._read_container(key)
+    return acl.get("owner") if acl else None
+
+
+def esr_acl(key):
+    """Owner-only: the full ACL of `key`."""
+    reg = StateRegistry()
+    acl, _data, _version, _cid = reg._read_container(key)
+    if acl is None:
+        return None
+    if _task_caller is None or _norm_addr(acl.get("owner")) != _task_caller:
+        raise StatePermissionError(
+            f"caller {_task_caller or '<anonymous>'} is not the owner of "
+            f"state key '{key}'")
+    return dict(acl)
+
+
 def configure(identity_priv, swift_stream_service, bucket, contract_address,
-              web3=None):
+              web3=None, caller=None):
     """Wire the registry to the enclave's identity, storage and chain access.
 
     Called by securelock during startup; payload code never calls this.
+    `caller` MUST only ever be the trustedzone-attested DO owner -- never a
+    value from the client payload or the node's .env.
     """
     global _identity_priv, _swift, _bucket, _contract_address, _web3, _esr_evidence
-    global _task_ledger
+    global _task_ledger, _task_caller
     _identity_priv = identity_priv
     _swift = swift_stream_service
     _bucket = bucket
@@ -119,6 +232,74 @@ def configure(identity_priv, swift_stream_service, bucket, contract_address,
     _web3 = web3
     _task_ledger = {}
     _esr_evidence = []
+    _task_caller = _norm_addr(caller)
+
+
+"""State container + ACL.
+
+Stored blobs are either legacy (the raw state JSON -- "unowned") or an owned
+container:
+
+    {"_ecld_state": 1, "acl": {...}, "data": <the state>}
+
+acl = {"owner": addr, "read": [addr...], "write": [addr...],
+       "public_read": bool}. Enforcement happens HERE, inside the enclave,
+against the trustedzone-attested caller:
+
+  read   -- owner, read/write members, or public_read; unowned reads freely
+            (legacy semantics).
+  write  -- owner or write members; an unowned key is writable and is CLAIMED
+            (owner = caller) on the first write that carries a caller.
+  None-caller (older trustedzone): may read unowned/public state and write
+            unowned state (never claiming) -- but can never touch owned state.
+"""
+
+_CONTAINER_MARK = "_ecld_state"
+
+
+class StatePermissionError(RuntimeError):
+    """Raised when the task caller lacks permission for a state operation."""
+
+
+def _unwrap(stored):
+    """(acl, data) from a stored blob; legacy blobs carry no acl."""
+    if isinstance(stored, dict) and stored.get(_CONTAINER_MARK) == 1:
+        return (stored.get("acl") or None), stored.get("data")
+    return None, stored
+
+
+def _wrap(acl, data):
+    if acl is None:
+        return data          # unowned state keeps the legacy shape
+    return {_CONTAINER_MARK: 1, "acl": acl, "data": data}
+
+
+def _acl_members(acl, field):
+    return {a for a in (_norm_addr(x) for x in (acl.get(field) or [])) if a}
+
+
+def _can_read(acl):
+    if acl is None or acl.get("public_read"):
+        return True
+    c = _task_caller
+    if c is None:
+        return False
+    return (c == _norm_addr(acl.get("owner"))
+            or c in _acl_members(acl, "read")
+            or c in _acl_members(acl, "write"))
+
+
+def _can_write(acl):
+    if acl is None:
+        return True          # unowned: writable; claimed when a caller exists
+    c = _task_caller
+    if c is None:
+        return False
+    return c == _norm_addr(acl.get("owner")) or c in _acl_members(acl, "write")
+
+
+def _new_acl(owner):
+    return {"owner": owner, "read": [], "write": [], "public_read": False}
 
 
 def _keccak256(data: bytes) -> bytes:
@@ -265,12 +446,26 @@ class StateRegistry:
         """
         if default is None:
             default = {}
+        acl, data, version, cid = self._read_container(key, default)
+        if not _can_read(acl):
+            raise StatePermissionError(
+                f"caller {_task_caller or '<anonymous>'} has no read permission "
+                f"on state key '{key}' (owner: {acl.get('owner')})")
+        if version:
+            _ledger_record(key, version, cid, data)
+        else:
+            _ledger_record(key, 0, None, data)
+        return data
+
+    def _read_container(self, key: str, default=None):
+        """(acl, data, version, cid) for `key`; NO permission check here."""
+        if default is None:
+            default = {}
         contract = self._contract()
         cid, version, _updated = contract.functions.getState(
             self.wallet_address, _key_hash(key)).call()
         if not version or not cid:
-            _ledger_record(key, 0, None, default)
-            return default
+            return None, default, 0, None
         if not looks_like_cid(cid):
             # Fail loudly rather than returning `default`: treating a broken
             # pointer as "no state" would let the next commit overwrite state
@@ -279,28 +474,49 @@ class StateRegistry:
                 f"ESR entry for '{key}' holds a pointer that is not a CID "
                 f"({cid[:32]}…). The committing code is writing a non-CID value.")
         blob = self._fetch(key, cid)
-        state = json.loads(_decrypt(blob).decode("utf-8"))
-        _ledger_record(key, version, cid, state)
-        return state
+        stored = json.loads(_decrypt(blob).decode("utf-8"))
+        acl, data = _unwrap(stored)
+        return acl, data, int(version), cid
 
     # -- writes ---------------------------------------------------------
 
     def commit(self, key: str, mutate, attempts: int = 3):
         """Read-modify-write `key` under optimistic concurrency.
 
-        `mutate` receives the current state and returns the new state. If another
-        commit lands in between, the contract rejects ours (VersionMismatch) and
-        we re-read and retry, so concurrent tasks cannot silently lose updates.
+        `mutate` receives the current state (the DATA, never the ACL
+        container) and returns the new state. Write permission is enforced
+        against the trustedzone-attested caller; the first write that carries
+        a caller CLAIMS an unowned key (owner = caller).
 
         Returns the new state.
         """
+        def transform(acl, data, version):
+            if not _can_write(acl):
+                raise StatePermissionError(
+                    f"caller {_task_caller or '<anonymous>'} has no write "
+                    f"permission on state key '{key}' (owner: {acl.get('owner')})")
+            if acl is None and _task_caller:
+                acl = _new_acl(_task_caller)   # first-writer-owns
+            return acl, mutate(data)
+
+        _acl, new_data = self._commit_transform(key, transform, attempts)
+        return new_data
+
+    def _commit_transform(self, key: str, transform, attempts: int = 3):
+        """Optimistic-concurrency commit of transform(acl, data, version).
+
+        `transform` returns (new_acl, new_data); the stored blob is the
+        wrapped container (or the bare data while unowned). If another commit
+        lands in between, the contract rejects ours (VersionMismatch) and we
+        re-read and retry, so concurrent tasks cannot silently lose updates.
+        """
         last_error = None
         for _attempt in range(attempts):
-            current_version = self.get_version(key)
-            current = self.get(key) if current_version else {}
-            new_state = mutate(current)
+            acl, data, current_version, _cid = self._read_container(key)
+            new_acl, new_data = transform(acl, data, current_version)
+            stored = _wrap(new_acl, new_data)
 
-            blob = _encrypt(json.dumps(new_state, separators=(",", ":")).encode("utf-8"))
+            blob = _encrypt(json.dumps(stored, separators=(",", ":")).encode("utf-8"))
             # Compute the CID from OUR bytes -- never accept one from the node.
             cid = cidv1_raw(blob)
 
@@ -313,8 +529,9 @@ class StateRegistry:
                 self._send_commit(_key_hash(key), cid, current_version)
                 # Record the POST-commit values: this is what the chain will
                 # show once the node's relay lands (version increments by one).
-                _ledger_record(key, current_version + 1, cid, new_state)
-                return new_state
+                # The ledger records the DATA -- the ACL never leaves in results.
+                _ledger_record(key, current_version + 1, cid, new_data)
+                return new_acl, new_data
             except Exception as e:
                 # A version race means someone else committed first: re-read and
                 # rebuild on top of their state rather than clobbering it.

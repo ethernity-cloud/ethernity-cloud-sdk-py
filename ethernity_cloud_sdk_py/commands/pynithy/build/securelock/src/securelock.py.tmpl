@@ -320,6 +320,7 @@ class EtnySecureLock:
                 bucket=self.etny_bucket,
                 contract_address=contract_address,
                 web3=self.w3,
+                caller=getattr(self, "task_caller", None),
             )
             logging.info(f"StateRegistry ready (ESR {contract_address})")
         except Exception as e:
@@ -348,6 +349,30 @@ class EtnySecureLock:
             raise ValueError('INVALID INPUT SIGNATURE')  # Or set error state as needed
 
         logging.info("Trustedzone signatures validated successfully")
+
+        # Authenticated task caller: the DO-request owner, read from the PoX
+        # contract by the TRUSTEDZONE and forwarded over this same signed
+        # channel (caller.securelock + .sig). Optional -- an older trustedzone
+        # does not send it, and the state ACL then treats the task as
+        # anonymous. NEVER accepted without a valid trustedzone signature.
+        self.task_caller = None
+        try:
+            caller_value = self.__get_file_content_and_decrypt('caller.securelock')
+            caller_sig = self.__get_file_content_and_decrypt('caller.securelock.sig')
+            if crypto.verify_signature(
+                    self.trustedzone_public_key,
+                    caller_value.encode('utf-8'),
+                    bytes.fromhex(caller_sig)):
+                self.task_caller = caller_value.strip()
+                logging.info(f"Task caller attested by trustedzone: {self.task_caller}")
+            else:
+                logging.error(
+                    "caller.securelock signature validation FAILED; "
+                    "treating task as anonymous")
+        except Exception as e:
+            logging.info(
+                f"No attested task caller supplied "
+                f"({e.__class__.__name__}); treating task as anonymous")
 
     def __get_file_content_and_decrypt(self, object_name: str) -> str:
         encrypted_base64 = self.__get_file_content(object_name)

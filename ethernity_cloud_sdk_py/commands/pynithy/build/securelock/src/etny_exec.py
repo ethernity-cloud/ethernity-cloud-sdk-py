@@ -160,6 +160,16 @@ def execute_task_v3(payload_data, input_data, extra_globals=None):
         "esr_fetch": esr_fetch,                   # standard state-fetch task
         **sdkFunctions,
     }
+    # State ownership / ACL API (present only in ESR-enabled builds). Enforced
+    # inside ecld_state against the trustedzone-attested caller.
+    try:
+        import ecld_state as _ecld_state
+        base_globals.setdefault("task_caller", _ecld_state.task_caller)
+        for _name in ("esr_grant", "esr_revoke", "esr_set_public_read",
+                      "esr_transfer", "esr_owner", "esr_acl"):
+            base_globals.setdefault(_name, getattr(_ecld_state, _name))
+    except Exception:
+        pass
     if extra_globals:
         base_globals.update(extra_globals)
     return Exec(payload_data, input_data, globals=base_globals)
