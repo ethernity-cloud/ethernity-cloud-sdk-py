@@ -121,6 +121,20 @@ def _norm_addr(addr):
     return addr.lower() if isinstance(addr, str) else None
 
 
+# LOCAL TESTING ONLY. In the real enclave the NODE applies commitFor on-chain,
+# so this is None and _send_commit merely SIGNS + stages the authorization. The
+# local ESR emulator (esr_local.install) sets a callback that applies the commit
+# to its in-memory registry, so `ecld-test` can run state-using backends with no
+# chain, node, or SGX. Never set in production.
+_local_commit_apply = None
+
+
+def set_local_commit_apply(fn):
+    """Install the local commit-apply hook (esr_local only)."""
+    global _local_commit_apply
+    _local_commit_apply = fn
+
+
 def restamp_ledger_caller(trusted_caller):
     """Post-payload: re-assert the trusted caller across the ESR ledger.
 
@@ -704,4 +718,11 @@ class StateRegistry:
         blob = json.dumps(auth, separators=(",", ":")).encode("utf-8")
         _swift.put_file_content(
             _bucket, f"esr.commit.{relay_nonce}.json", "", io.BytesIO(blob))
+
+        # LOCAL TESTING: with no node to relay commitFor, apply the commit to the
+        # local registry now so get()/get_version() reflect it. No-op in the real
+        # enclave (hook is None) -- there the node applies it on-chain.
+        if _local_commit_apply is not None:
+            _local_commit_apply(enclave, key_hash, cid, expected_version)
+
         return {"relayed": True, "relayNonce": relay_nonce}
