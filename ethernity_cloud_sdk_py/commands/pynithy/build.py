@@ -119,14 +119,44 @@ def copy_backend_to_build_dir(build_dir):
         print("       without it no backend function will exist inside the enclave.")
         print("       Run ecld-init to scaffold it, or create the file before building.")
         sys.exit(1)
+    backend_source = backend_file.read_text(encoding="utf-8")
     try:
         import ast as _ast
 
-        _ast.parse(backend_file.read_text(encoding="utf-8"))
+        _ast.parse(backend_source)
     except SyntaxError as e:
         print(f"ERROR: src/serverless/backend.py has a syntax error and cannot be imported")
         print(f"       inside the enclave: line {e.lineno}: {e.msg}")
         sys.exit(1)
+
+    # Safety lint: flag dynamic code execution -- especially of task input --
+    # before the image is sealed. A hard error only for the case that actually
+    # opens the enclave to a submitter (eval/exec/compile of ___etny_data_set___);
+    # everything else is a warning. See payload_lint.py for scope + opt-out.
+    try:
+        from ethernity_cloud_sdk_py.commands.pynithy.payload_lint import analyze as _lint
+    except Exception:
+        _lint = None
+    if _lint is not None:
+        findings, opted_out = _lint(backend_source, filename="src/serverless/backend.py")
+        errors = [f for f in findings if f.severity == "error"]
+        warnings = [f for f in findings if f.severity == "warning"]
+        for f in warnings:
+            print(f"WARNING: src/serverless/backend.py:{f.line}: {f.message}")
+        if errors:
+            print("")
+            print("ERROR: unsafe dynamic execution of task input in "
+                  "src/serverless/backend.py:")
+            for f in errors:
+                print(f"       line {f.line}: {f.message}")
+            print("")
+            print("       This would let a task submitter run arbitrary code inside "
+                  "your enclave")
+            print("       and reach other users' state. Fix it, or if the input is "
+                  "genuinely trusted,")
+            print("       add `# ecld: allow-eval` on that line to acknowledge the "
+                  "risk.")
+            sys.exit(1)
 
     # Remove destination directory if it exists to avoid conflicts
     if dest_dir.exists():
