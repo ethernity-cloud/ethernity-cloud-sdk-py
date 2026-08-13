@@ -33,8 +33,69 @@ if backend is not None:
             sdkFunctions.update({func: backend.__dict__[func]})
 
 
+def _encode_result_data(data):
+    """Automatic encoding for task results (single code path for all results).
+
+    Returns (type, encoded): JSON-serializable values ride as JSON, strings as
+    text, bytes-like as base64. Anything else is JSON-dumped with a stringify
+    fallback -- a task result never fails on encoding.
+    """
+    import base64 as _b64
+    if isinstance(data, (bytes, bytearray, memoryview)):
+        return "base64", _b64.b64encode(bytes(data)).decode("ascii")
+    if isinstance(data, str):
+        return "text", data
+    try:
+        json.dumps(data)
+        return "json", data
+    except (TypeError, ValueError):
+        try:
+            return "json", json.loads(json.dumps(data, default=str))
+        except Exception:
+            return "text", str(data)
+
+
+def ecld_result(data=None, *, state=True, keys=None):
+    """Return a task result (THE way to end a task).
+
+    Builds the structured result envelope and terminates execution with it:
+
+        {"ecld": 1, "type": "json"|"text"|"base64", "data": ..., "esr": ...}
+
+    - `data` is encoded automatically (see _encode_result_data).
+    - `state=True` (default) attaches the ESR state of every key this task
+      touched; `state="meta"` attaches {key, version, cid} without the state
+      payload; `state=False` attaches nothing.
+    - `keys=[...]` restricts the attachment to those keys, force-reading any
+      the task did not touch.
+
+    ESR attachment is best-effort: an ESR-disabled build (or any attachment
+    error) yields `esr: null`, never a failed task.
+    """
+    rtype, rdata = _encode_result_data(data)
+    envelope = {"ecld": 1, "type": rtype, "data": rdata, "esr": None}
+    if state or keys:
+        try:
+            import ecld_state
+            envelope["esr"] = ecld_state.ledger_snapshot(
+                include_state=(state is True), keys=keys)
+        except Exception:
+            envelope["esr"] = None
+    quit([0, json.dumps(envelope, default=str)])
+
+
 def ___etny_result___(data):
-    quit([0, data])
+    """Legacy alias: same builder, ESR attachment off -- today's behavior."""
+    return ecld_result(data, state=False)
+
+
+def esr_fetch(*keys):
+    """Standard state-fetch task body: no computation, just attach state.
+
+    The runner's cache-gated read submits this on a cache miss, so dApps never
+    write their own read function: `esr_fetch("profile-7")`.
+    """
+    return ecld_result(None, keys=list(keys) or None)
 
 
 class TaskStatus:
@@ -93,7 +154,12 @@ def execute_task_v3(payload_data, input_data, extra_globals=None):
             + " import inside backend.py (the enclave loads it as the package"
             + " 'serverless.backend' - use relative imports for sibling modules).",
         )
-    base_globals = {"___etny_result___": ___etny_result___, **sdkFunctions}
+    base_globals = {
+        "___etny_result___": ___etny_result___,   # legacy alias (no ESR)
+        "ecld_result": ecld_result,               # the result API
+        "esr_fetch": esr_fetch,                   # standard state-fetch task
+        **sdkFunctions,
+    }
     if extra_globals:
         base_globals.update(extra_globals)
     return Exec(payload_data, input_data, globals=base_globals)

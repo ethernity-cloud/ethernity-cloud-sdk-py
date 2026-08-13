@@ -65,6 +65,44 @@ _web3 = None
 # and the trustedzone can independently price + adjudicate the whole set.
 _esr_evidence = []              # order-wide ledger of signed authorizations
 
+# Task-scoped ledger of every state key this execution touched, recorded by
+# get()/commit(). ecld_result() snapshots it to attach the fresh state to the
+# task result, so callers (and the runner's state cache) get current state in
+# the same result -- no separate read task needed. Reset per task in configure().
+_task_ledger = {}
+
+
+def _ledger_record(key, version, cid, state):
+    _task_ledger[key] = {
+        "key": key, "version": int(version), "cid": cid, "state": state}
+
+
+def ledger_snapshot(include_state=True, keys=None):
+    """The `esr` attachment for ecld_result: wallet + entries.
+
+    Entries default to every key touched this task; `keys` restricts the
+    attachment to those keys and force-reads any of them the task did not
+    touch (so a pure fetch task can attach state it never mutated).
+    """
+    reg = StateRegistry()
+    if keys:
+        for k in keys:
+            if k not in _task_ledger:
+                reg.get(k)      # records into the ledger as a side effect
+        wanted = list(keys)
+    else:
+        wanted = list(_task_ledger.keys())
+    entries = []
+    for k in wanted:
+        entry = _task_ledger.get(k)
+        if entry is None:
+            continue
+        entry = dict(entry)
+        if not include_state:
+            entry.pop("state", None)
+        entries.append(entry)
+    return {"wallet": reg.wallet_address, "entries": entries}
+
 
 def configure(identity_priv, swift_stream_service, bucket, contract_address,
               web3=None):
@@ -73,11 +111,13 @@ def configure(identity_priv, swift_stream_service, bucket, contract_address,
     Called by securelock during startup; payload code never calls this.
     """
     global _identity_priv, _swift, _bucket, _contract_address, _web3, _esr_evidence
+    global _task_ledger
     _identity_priv = identity_priv
     _swift = swift_stream_service
     _bucket = bucket
     _contract_address = contract_address
     _web3 = web3
+    _task_ledger = {}
     _esr_evidence = []
 
 
@@ -229,6 +269,7 @@ class StateRegistry:
         cid, version, _updated = contract.functions.getState(
             self.wallet_address, _key_hash(key)).call()
         if not version or not cid:
+            _ledger_record(key, 0, None, default)
             return default
         if not looks_like_cid(cid):
             # Fail loudly rather than returning `default`: treating a broken
@@ -238,7 +279,9 @@ class StateRegistry:
                 f"ESR entry for '{key}' holds a pointer that is not a CID "
                 f"({cid[:32]}…). The committing code is writing a non-CID value.")
         blob = self._fetch(key, cid)
-        return json.loads(_decrypt(blob).decode("utf-8"))
+        state = json.loads(_decrypt(blob).decode("utf-8"))
+        _ledger_record(key, version, cid, state)
+        return state
 
     # -- writes ---------------------------------------------------------
 
@@ -268,6 +311,9 @@ class StateRegistry:
 
             try:
                 self._send_commit(_key_hash(key), cid, current_version)
+                # Record the POST-commit values: this is what the chain will
+                # show once the node's relay lands (version increments by one).
+                _ledger_record(key, current_version + 1, cid, new_state)
                 return new_state
             except Exception as e:
                 # A version race means someone else committed first: re-read and
