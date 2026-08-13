@@ -526,7 +526,9 @@ class StateRegistry:
             self._publish(key, blob, cid)
 
             try:
-                self._send_commit(_key_hash(key), cid, current_version)
+                owner_addr = _norm_addr(new_acl.get("owner")) if new_acl else None
+                self._send_commit(_key_hash(key), cid, current_version,
+                                  owner_addr=owner_addr)
                 # Record the POST-commit values: this is what the chain will
                 # show once the node's relay lands (version increments by one).
                 # The ledger records the DATA -- the ACL never leaves in results.
@@ -582,7 +584,8 @@ class StateRegistry:
                 return data
         raise RuntimeError(f"Could not read state object for '{key}' ({cid})")
 
-    def _send_commit(self, key_hash: bytes, cid: str, expected_version: int):
+    def _send_commit(self, key_hash: bytes, cid: str, expected_version: int,
+                     owner_addr: str = None):
         """Authorize a commit for the NODE to relay and pay (commitFor).
 
         The enclave never pays gas and does NO gas math: it just SIGNS the
@@ -618,6 +621,17 @@ class StateRegistry:
             "expectedVersion": expected_version,
             "relayNonce": relay_nonce,
             "signature": "0x" + signature.hex(),
+            # IMPERSONATION GUARD (see the trustedzone's re-adjudication):
+            # `callerUsed` is the caller this commit ran under; `owned` marks a
+            # commit to an owned key. The trustedzone requires callerUsed to
+            # equal the DO owner it reads from the PoX contract, so a payload
+            # that forged the in-enclave caller to IMPERSONATE another user is
+            # rejected outside the payload's process. It does NOT (and cannot,
+            # without reading the encrypted ACL) verify that this caller was a
+            # permitted writer of the key -- that stays an in-enclave check on
+            # honest payload code. Unowned commits carry no constraint.
+            "callerUsed": _task_caller or "",
+            "owned": bool(owner_addr),
         }
 
         # Append to the order-wide ledger (the trustedzone's adjudication input).
