@@ -82,11 +82,48 @@ The sdk has been tested on the following operating systems:
   ```
   Required after build, to build and integrate the secure certificates that will be used during executions and to register the project to the Ethernity Cloud Image Register.
 
-- **Run**: To run the project, run:
+- **Test (local, no chain)**: To run your backend locally with the enclave's own
+  executor — no SGX, no gas, instant — run:
   ```sh
-  python src/ethernity_task.py
+  ecld-test 'hello("World")'
+  ecld-test --file payload.py
+  ecld-test --input data.json 'process(___etny_data_set___)'
   ```
-  command to start the demo application and test the integration.
+  This validates the *call* (function names, arguments, result wiring) before a
+  single on-chain request is paid for. If your dApp uses ESR (Enclave State
+  Registry), state is emulated locally and **on by default**: `StateRegistry`
+  get/commit, ownership/ACL, and `task_caller()` all work in-process against an
+  in-memory registry, and persist between runs in `.ecld-esr-local.*.json`. The
+  task caller defaults to your developer address; override it with `--caller`.
+  `ecld-test serve` starts a local API so the runner's LOCAL mode drives your
+  real integration end to end. Exit code 0 on `SUCCESS`, 1 otherwise.
+
+- **Run (on the network)**: To submit a payload to the network and print the
+  decrypted result, run:
+  ```sh
+  ecld-run 'hello("World")'
+  ecld-run --file payload.py
+  ecld-run --input data.json 'process(___etny_data_set___)'
+  ecld-run --json 'esr_increment()'
+  ```
+  This is the network-side sibling of `ecld-test`: instead of executing locally
+  it drives the runner end to end — encrypt → IPFS → on-chain request → wait for
+  a node → download and decrypt the result. It **costs gas and needs a funded
+  key**. Network and enclaves come from `.config.json` (`BLOCKCHAIN_NETWORK`,
+  `PROJECT_NAME`, `TRUSTED_ZONE_IMAGE`), overridable with
+  `--network`/`--securelock`/`--trustedzone`; the signing key is
+  `ECLD_PRIVATE_KEY` (plaintext) or the encrypted `ENC_PRIVATE_KEY` unlocked with
+  `ECLD_KEY_PASSWORD` (or an interactive prompt). Resources are tunable with
+  `--task-price`/`--cpu`/`--memory`/`--storage`/`--bandwidth`/`--duration`/`--validators`.
+  Exit code 0 on a `SUCCESS` task result, 1 otherwise. (`python src/ethernity_task.py`
+  remains available as a scriptable template if you prefer driving the runner yourself.)
+
+- **Inspect (read-only)**: To read enclave and on-chain diagnostics — network,
+  trustedzone/securelock registration, and ESR state — without spending gas, run:
+  ```sh
+  ecld-info
+  ecld-info esr state <key>
+  ```
 
 ## Usage
 
