@@ -102,13 +102,19 @@ class _Functions:
     def relayNonce(self, enclave):
         return _Callable(self._reg.relay_nonce(enclave))
 
-    def commitDigest(self, enclave, key_hash, cid, expected_version, relay_nonce):
+    def commitDigest(self, enclave, key_hash, cid, expected_version, relay_nonce,
+                     nonce=0):
         # Deterministic 32-byte digest over the fields (no real signing needed
-        # locally; the securelock signs it with the local test key).
+        # locally; the securelock signs it with the local test key). The
+        # idempotency nonce is part of the digest, like on-chain.
         import hashlib
         m = hashlib.sha256()
-        m.update(str((enclave, key_hash, cid, expected_version, relay_nonce)).encode())
+        m.update(str((enclave, key_hash, cid, expected_version, relay_nonce,
+                      nonce)).encode())
         return _Callable(m.digest())
+
+    def getNonce(self, enclave, key_hash):
+        return _Callable(self._reg.idem_nonce(enclave, key_hash))
 
     def entryCount(self):
         return _Callable(self._reg.entry_count())
@@ -162,22 +168,42 @@ class MemRegistry:
             return ("", 0, 0)
         return (e["cid"], int(e["version"]), int(e.get("updatedAt", 0)))
 
+    def idem_nonce(self, enclave, key_hash):
+        """Last accepted idempotency nonce for (enclave, key) -- public data,
+        mirroring the on-chain getNonce view."""
+        e = self._entries.get(self._k(enclave, key_hash))
+        return int(e.get("nonce", 0)) if e else 0
+
     def relay_nonce(self, enclave):
         return int(self._nonce.get(str(enclave).lower(), 0))
 
     def entry_count(self):
         return len(self._entries)
 
-    def apply_commit(self, enclave, key_hash, cid, expected_version):
+    def apply_commit(self, enclave, key_hash, cid, expected_version, nonce=0):
         """The on-chain commitFor: bump version if expected matches current.
         Raises 'VersionMismatch' (string in message) on a race, exactly like
-        the contract, so StateRegistry.commit's retry loop behaves the same."""
+        the contract, so StateRegistry.commit's retry loop behaves the same.
+
+        Idempotency nonces are enforced IN ORDER per (enclave, key), exactly
+        like the contract: nonce != 0 must be strictly greater than the stored
+        value (gaps allowed) or 'NonceOutOfOrder' is raised; nonce == 0
+        preserves the stored value."""
         k = self._k(enclave, key_hash)
-        cur = int(self._entries.get(k, {}).get("version", 0))
+        entry = self._entries.get(k, {})
+        cur = int(entry.get("version", 0))
         if int(expected_version) != cur:
             raise RuntimeError("VersionMismatch: expected %s but current is %s"
                                % (expected_version, cur))
-        self._entries[k] = {"cid": cid, "version": cur + 1, "updatedAt": 0}
+        stored_nonce = int(entry.get("nonce", 0))
+        n = int(nonce or 0)
+        if n != 0:
+            if n <= stored_nonce:
+                raise RuntimeError("NonceOutOfOrder: stored %s, given %s"
+                                   % (stored_nonce, n))
+            stored_nonce = n
+        self._entries[k] = {"cid": cid, "version": cur + 1, "updatedAt": 0,
+                            "nonce": stored_nonce}
         self._nonce[str(enclave).lower()] = self.relay_nonce(enclave) + 1
         self._persist()
 
@@ -231,6 +257,6 @@ def install(ecld_state, caller=None, identity_priv=None, bucket="ecld-local",
     )
     # The node applies commitFor on-chain in real mode; locally, apply it here.
     ecld_state.set_local_commit_apply(
-        lambda enclave, key_hash, cid, expected_version:
-            reg.apply_commit(enclave, key_hash, cid, expected_version))
+        lambda enclave, key_hash, cid, expected_version, nonce=0:
+            reg.apply_commit(enclave, key_hash, cid, expected_version, nonce))
     return {"swift": swift, "registry": reg, "web3": web3}

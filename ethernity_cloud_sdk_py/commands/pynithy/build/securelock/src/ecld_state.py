@@ -71,6 +71,11 @@ _esr_evidence = []              # order-wide ledger of signed authorizations
 # the same result -- no separate read task needed. Reset per task in configure().
 _task_ledger = {}
 
+# Per-task memo of the last idempotency nonce ACCEPTED per key, so a
+# get_nonce() right after a commit in the SAME task returns the fresh value
+# even though the node's relay (and thus the chain) has not landed yet.
+_task_nonces = {}
+
 
 def _ledger_record(key, version, cid, state):
     _task_ledger[key] = {
@@ -289,13 +294,14 @@ def configure(identity_priv, swift_stream_service, bucket, contract_address,
     value from the client payload or the node's .env.
     """
     global _identity_priv, _swift, _bucket, _contract_address, _web3, _esr_evidence
-    global _task_ledger, _task_caller
+    global _task_ledger, _task_nonces, _task_caller
     _identity_priv = identity_priv
     _swift = swift_stream_service
     _bucket = bucket
     _contract_address = contract_address
     _web3 = web3
     _task_ledger = {}
+    _task_nonces = {}
     _esr_evidence = []
     _task_caller = _norm_addr(caller)
 
@@ -617,13 +623,30 @@ class StateRegistry:
     def get_nonce(self, key: str) -> int:
         """The last accepted idempotency nonce for `key` (0 if none was ever
         used). A dApp that wants duplicate suppression reads this, picks a
-        greater value (e.g. +1, or a timestamp), and passes it to commit()."""
-        acl, _data, _version, _cid, nonce = self._read_container(key)
-        if not _can_read(acl):
-            raise StatePermissionError(
-                f"caller {_task_caller or '<anonymous>'} has no read permission "
-                f"on state key '{key}' (owner: {acl.get('owner')})")
-        return nonce
+        greater value (e.g. +1, or a timestamp), and passes it to commit().
+
+        The nonce is PUBLIC data: the registry records it on-chain next to the
+        version, and anyone can read it with a free eth_call (getNonce) -- so
+        no read-ACL applies here, and web3 clients see the same value via the
+        runner's esrNonce. Use opaque monotonic values (a counter or a
+        timestamp), never secret-derived ones.
+
+        Reads chain-first (authoritative, post-relay), merged with this task's
+        own accepted commits so `commit(nonce=N); get_nonce()` returns N even
+        before the node's relay lands. Falls back to the in-blob value when the
+        registry predates the on-chain field."""
+        chain = 0
+        try:
+            contract = self._contract()
+            chain = int(contract.functions.getNonce(
+                self.wallet_address, _key_hash(key)).call())
+        except Exception:
+            # Registry without getNonce (older deployment): in-blob fallback.
+            try:
+                _acl, _data, _version, _cid, chain = self._read_container(key)
+            except Exception:
+                chain = 0
+        return max(int(chain or 0), int(_task_nonces.get(key, 0)))
 
     def _commit_transform(self, key: str, transform, attempts: int = 3,
                           nonce=None):
@@ -669,12 +692,18 @@ class StateRegistry:
 
             try:
                 owner_addr = _norm_addr(new_acl.get("owner")) if new_acl else None
+                # On-chain, 0 means "no guard: preserve the stored nonce".
+                # Only a caller-supplied nonce is sent; the preserved value
+                # stays inside the blob for registries without nonce support.
                 self._send_commit(_key_hash(key), cid, current_version,
-                                  owner_addr=owner_addr)
+                                  owner_addr=owner_addr,
+                                  nonce=(int(nonce) if nonce is not None else 0))
                 # Record the POST-commit values: this is what the chain will
                 # show once the node's relay lands (version increments by one).
                 # The ledger records the DATA -- the ACL never leaves in results.
                 _ledger_record(key, current_version + 1, cid, new_data)
+                if final_nonce:
+                    _task_nonces[key] = int(final_nonce)
                 return new_acl, new_data
             except Exception as e:
                 # A version race means someone else committed first: re-read and
@@ -727,7 +756,7 @@ class StateRegistry:
         raise RuntimeError(f"Could not read state object for '{key}' ({cid})")
 
     def _send_commit(self, key_hash: bytes, cid: str, expected_version: int,
-                     owner_addr: str = None):
+                     owner_addr: str = None, nonce: int = 0):
         """Authorize a commit for the NODE to relay and pay (commitFor).
 
         The enclave never pays gas and does NO gas math: it just SIGNS the
@@ -750,8 +779,13 @@ class StateRegistry:
         enclave = acct.address
 
         relay_nonce = contract.functions.relayNonce(enclave).call()
+        # The idempotency nonce is SIGNATURE-BOUND (part of the digest): the
+        # relaying node can only broadcast, or not, exactly what was signed --
+        # it cannot alter the nonce the registry will record. 0 = no guard,
+        # preserve the stored value. NOTE: the recorded nonce is PUBLIC on-chain.
         digest = contract.functions.commitDigest(
-            enclave, key_hash, cid, expected_version, relay_nonce).call()
+            enclave, key_hash, cid, expected_version, relay_nonce,
+            int(nonce or 0)).call()
 
         from eth_account.messages import encode_defunct
         signature = acct.sign_message(encode_defunct(digest)).signature
@@ -762,6 +796,7 @@ class StateRegistry:
             "cid": cid,
             "expectedVersion": expected_version,
             "relayNonce": relay_nonce,
+            "nonce": int(nonce or 0),
             "signature": "0x" + signature.hex(),
             # IMPERSONATION GUARD (see the trustedzone's re-adjudication):
             # `callerUsed` is the caller this commit ran under; `owned` marks a
@@ -791,6 +826,7 @@ class StateRegistry:
         # local registry now so get()/get_version() reflect it. No-op in the real
         # enclave (hook is None) -- there the node applies it on-chain.
         if _local_commit_apply is not None:
-            _local_commit_apply(enclave, key_hash, cid, expected_version)
+            _local_commit_apply(enclave, key_hash, cid, expected_version,
+                                int(nonce or 0))
 
         return {"relayed": True, "relayNonce": relay_nonce}
