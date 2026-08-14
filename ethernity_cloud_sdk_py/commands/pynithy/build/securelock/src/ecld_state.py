@@ -254,17 +254,23 @@ def esr_transfer(key, new_owner):
     return _owner_op(key, mut)
 
 
+def esr_nonce(key):
+    """The last accepted idempotency nonce for `key` (0 if none). See
+    StateRegistry.get_nonce / commit(nonce=...)."""
+    return StateRegistry().get_nonce(key)
+
+
 def esr_owner(key):
     """The owner address of `key`, or None while unowned. Does not expose the
     state or the grant lists."""
-    acl, _data, _version, _cid = StateRegistry()._read_container(key)
+    acl, _data, _version, _cid, _nonce = StateRegistry()._read_container(key)
     return acl.get("owner") if acl else None
 
 
 def esr_acl(key):
     """Owner-only: the full ACL of `key`."""
     reg = StateRegistry()
-    acl, _data, _version, _cid = reg._read_container(key)
+    acl, _data, _version, _cid, _nonce = reg._read_container(key)
     if acl is None:
         return None
     if _task_caller is None or _norm_addr(acl.get("owner")) != _task_caller:
@@ -320,6 +326,14 @@ class StatePermissionError(RuntimeError):
     """Raised when the task caller lacks permission for a state operation."""
 
 
+class StateNonceError(RuntimeError):
+    """Raised when a commit's idempotency nonce was already used.
+
+    The dApp supplied `nonce=` on commit() and that nonce is not greater than
+    the last accepted nonce for the key -- i.e. this is a duplicate (or
+    out-of-order) submission. The state was NOT changed."""
+
+
 def _unwrap(stored):
     """(acl, data) from a stored blob; legacy blobs carry no acl.
 
@@ -331,18 +345,31 @@ def _unwrap(stored):
     return None, stored
 
 
-def _wrap(acl, data, committed_by=None):
+def _wrap(acl, data, committed_by=None, nonce=None):
     """Stored container. For owned state, bind the authoring caller
     (`committedBy`) INTO the blob, so it lands in the CID -- which is the field
     the securelock signs. That makes the caller cryptographically bound to the
     commit, not merely a re-stampable sidecar. Unowned state keeps the legacy
-    bare shape (no ACL, no binding)."""
-    if acl is None:
+    bare shape (no ACL, no binding) -- unless a nonce must be carried, which
+    forces the container shape so the nonce survives inside the encrypted blob."""
+    if acl is None and nonce is None:
         return data
     container = {_CONTAINER_MARK: 1, "acl": acl, "data": data}
     if committed_by:
         container["committedBy"] = committed_by
+    if nonce is not None:
+        container["nonce"] = int(nonce)
     return container
+
+
+def _stored_nonce(stored):
+    """Last accepted idempotency nonce carried by a stored blob (0 if none)."""
+    if isinstance(stored, dict) and stored.get(_CONTAINER_MARK) == 1:
+        try:
+            return int(stored.get("nonce") or 0)
+        except (TypeError, ValueError):
+            return 0
+    return 0
 
 
 def _acl_members(acl, field):
@@ -490,6 +517,13 @@ class StateRegistry:
 
         return esr_wallet.derive_wallet_address(_identity_priv)
 
+    @property
+    def enclave_address(self) -> str:
+        """Alias of wallet_address — the ENCLAVE's own on-chain address (its
+        identity, and the namespace all its state keys live under). Preferred
+        name in new code; wallet_address remains for compatibility."""
+        return self.wallet_address
+
     def _signer(self):
         """eth_account signer for the ESR wallet. Never leaves this class."""
         if self._priv is None:
@@ -517,7 +551,7 @@ class StateRegistry:
         """
         if default is None:
             default = {}
-        acl, data, version, cid = self._read_container(key, default)
+        acl, data, version, cid, _nonce = self._read_container(key, default)
         if not _can_read(acl):
             raise StatePermissionError(
                 f"caller {_task_caller or '<anonymous>'} has no read permission "
@@ -529,14 +563,14 @@ class StateRegistry:
         return data
 
     def _read_container(self, key: str, default=None):
-        """(acl, data, version, cid) for `key`; NO permission check here."""
+        """(acl, data, version, cid, nonce) for `key`; NO permission check here."""
         if default is None:
             default = {}
         contract = self._contract()
         cid, version, _updated = contract.functions.getState(
             self.wallet_address, _key_hash(key)).call()
         if not version or not cid:
-            return None, default, 0, None
+            return None, default, 0, None, 0
         if not looks_like_cid(cid):
             # Fail loudly rather than returning `default`: treating a broken
             # pointer as "no state" would let the next commit overwrite state
@@ -547,17 +581,23 @@ class StateRegistry:
         blob = self._fetch(key, cid)
         stored = json.loads(_decrypt(blob).decode("utf-8"))
         acl, data = _unwrap(stored)
-        return acl, data, int(version), cid
+        return acl, data, int(version), cid, _stored_nonce(stored)
 
     # -- writes ---------------------------------------------------------
 
-    def commit(self, key: str, mutate, attempts: int = 3):
+    def commit(self, key: str, mutate, attempts: int = 3, nonce=None):
         """Read-modify-write `key` under optimistic concurrency.
 
         `mutate` receives the current state (the DATA, never the ACL
         container) and returns the new state. Write permission is enforced
         against the trustedzone-attested caller; the first write that carries
         a caller CLAIMS an unowned key (owner = caller).
+
+        `nonce` (optional int) is an idempotency guard the dApp controls: it
+        must be STRICTLY GREATER than the last accepted nonce for the key
+        (see get_nonce). A duplicate or stale nonce raises StateNonceError and
+        the state is NOT changed -- so a resubmitted task cannot apply the
+        same commit twice. Omit it to keep today's behavior.
 
         Returns the new state.
         """
@@ -570,25 +610,53 @@ class StateRegistry:
                 acl = _new_acl(_task_caller)   # first-writer-owns
             return acl, mutate(data)
 
-        _acl, new_data = self._commit_transform(key, transform, attempts)
+        _acl, new_data = self._commit_transform(key, transform, attempts,
+                                                nonce=nonce)
         return new_data
 
-    def _commit_transform(self, key: str, transform, attempts: int = 3):
+    def get_nonce(self, key: str) -> int:
+        """The last accepted idempotency nonce for `key` (0 if none was ever
+        used). A dApp that wants duplicate suppression reads this, picks a
+        greater value (e.g. +1, or a timestamp), and passes it to commit()."""
+        acl, _data, _version, _cid, nonce = self._read_container(key)
+        if not _can_read(acl):
+            raise StatePermissionError(
+                f"caller {_task_caller or '<anonymous>'} has no read permission "
+                f"on state key '{key}' (owner: {acl.get('owner')})")
+        return nonce
+
+    def _commit_transform(self, key: str, transform, attempts: int = 3,
+                          nonce=None):
         """Optimistic-concurrency commit of transform(acl, data, version).
 
         `transform` returns (new_acl, new_data); the stored blob is the
         wrapped container (or the bare data while unowned). If another commit
         lands in between, the contract rejects ours (VersionMismatch) and we
         re-read and retry, so concurrent tasks cannot silently lose updates.
+        The nonce check re-runs on every retry against the freshly read state,
+        so a racing commit that consumed the same nonce fails this one.
         """
         last_error = None
         for _attempt in range(attempts):
-            acl, data, current_version, _cid = self._read_container(key)
+            acl, data, current_version, _cid, stored_nonce = self._read_container(key)
+            if nonce is not None:
+                n = int(nonce)
+                if n <= stored_nonce:
+                    raise StateNonceError(
+                        f"nonce {n} was already used for state key '{key}' "
+                        f"(last accepted: {stored_nonce}); duplicate commit "
+                        f"suppressed, state unchanged")
+                final_nonce = n
+            else:
+                # Preserve the stored nonce so a nonce-less commit cannot
+                # reset the guard and reopen replays.
+                final_nonce = stored_nonce or None
             new_acl, new_data = transform(acl, data, current_version)
             # Bind the authoring caller into the blob (hence the CID/signature)
             # for owned state.
             stored = _wrap(new_acl, new_data,
-                           committed_by=_task_caller if new_acl else None)
+                           committed_by=_task_caller if new_acl else None,
+                           nonce=final_nonce)
 
             blob = _encrypt(json.dumps(stored, separators=(",", ":")).encode("utf-8"))
             # Compute the CID from OUR bytes -- never accept one from the node.

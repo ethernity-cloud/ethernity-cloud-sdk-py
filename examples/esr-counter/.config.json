@@ -9,12 +9,6 @@
   "ESR": {
     "enabled": true,
     "contract_address": "",
-    "wallet_address": "",
-    "autofund": {
-      "enabled": false,
-      "amount": "",
-      "threshold": "",
-      "max": ""
-    }
+    "wallet_address": ""
   }
 }

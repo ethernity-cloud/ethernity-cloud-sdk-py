@@ -119,6 +119,8 @@ class TaskStatus:
     CONFIG_ERROR = 32
     EXECUTION_TIMEOUT = 33       # Started but produced no result within the order duration.
     ESR_GAS_LIMIT_EXCEEDED = 34  # ESR state commits would exceed the per-order relayed-gas budget.
+    ESR_NONCE_VIOLATION = 36     # A commit's idempotency nonce was already used -- duplicate
+                                 # suppressed, state unchanged (StateNonceError).
     SECURITY_VIOLATION = 35      # A state commit was authorized under a caller other than the
                                  # task's submitter (the in-enclave ownership check was bypassed).
                                  # Set by the securelock when it detects a forged commit caller,
@@ -170,7 +172,7 @@ def execute_task_v3(payload_data, input_data, extra_globals=None):
         import ecld_state as _ecld_state
         base_globals.setdefault("task_caller", _ecld_state.task_caller)
         for _name in ("esr_grant", "esr_revoke", "esr_set_public_read",
-                      "esr_transfer", "esr_owner", "esr_acl"):
+                      "esr_transfer", "esr_owner", "esr_acl", "esr_nonce"):
             base_globals.setdefault(_name, getattr(_ecld_state, _name))
     except Exception:
         pass
@@ -287,6 +289,11 @@ def Exec(payload_data, input_data, globals=None, locals=None):
     except SyntaxWarning as e:
         return TaskStatus.SYNTAX_WARNING, e.args[0]
     except BaseException as e:
+        # A duplicate-suppressed commit (StateNonceError) gets its own task
+        # code so the dApp can distinguish "already applied" from a failure.
+        # Matched by name so non-ESR builds need no import.
+        if type(e).__name__ == "StateNonceError":
+            return TaskStatus.ESR_NONCE_VIOLATION, f"ESR_NONCE_VIOLATION: {e}"
         # Deliver the traceback to the data owner as the result and never crash;
         # preserve the embedded-result SUCCESS path (code 0).
         try:
