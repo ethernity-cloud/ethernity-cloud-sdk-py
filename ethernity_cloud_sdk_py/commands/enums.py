@@ -288,8 +288,11 @@ ESR_CONTRACT_ADDRESSES = {
     # pre-enumeration ESR until it is redeployed; the testnets run the
     # enumerable upgrade (commitSeq + entryCount/getEntriesFrom).
     "BLOXBERG_MAINNET": "0xF76469A5659670B6ade366dE635e6463aaB8f3D8",
-    # Enumerable ESR, deployed 2026-08-12 (bloxberg_testnet, chain 8995).
-    "BLOXBERG_TESTNET": "0xda5e68Bb5e68ee14D73b8de2a4D3Ca15736fACfb",
+    # Nonce-aware enumerable ESR, deployed 2026-08-15 (bloxberg_testnet,
+    # chain 8995). Adds the PUBLIC per-(enclave, key) idempotency nonce
+    # (getNonce view, in-order enforcement). Replaces the 2026-08-12
+    # enumerable deployment 0xda5e...ACfb.
+    "BLOXBERG_TESTNET": "0xdfDD088b9cB998280685aF4E93DC0b37952aB08e",
     # Enumerable ESR, deployed 2026-08-12 (LitVM LiteForge, chain 4441).
     "LITVM_LITEFORGE": "0xbAa7F9E3287ff95D177104eD469E6d0Fd19dBB0F",
     # Not deployed yet on these chains. ecld-build must refuse to build an

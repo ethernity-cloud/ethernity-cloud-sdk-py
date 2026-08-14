@@ -45,6 +45,14 @@ contract EnclaveStateRegistry {
         string  cid;        // IPFS CID of the encrypted state blob
         uint256 version;    // monotonic; 0 = never committed, first commit => 1
         uint64  updatedAt;  // block timestamp of last commit
+        // Last accepted idempotency nonce for this (enclave, key); 0 = none yet.
+        // PUBLIC DATA: anyone can read it (getNonce), by design -- clients derive
+        // their next nonce from it with a free eth_call. dApps must use opaque
+        // monotonic values (a counter or timestamp), never secret-derived ones.
+        // Enforced in order: a commit carrying nonce != 0 must be strictly
+        // greater than the stored value (gaps allowed); nonce == 0 means "no
+        // idempotency guard on this commit" and PRESERVES the stored value.
+        uint256 nonce;
     }
 
     /// @dev A stable (enclave, key) identifier for enumeration. `enclave` IS the
@@ -85,21 +93,26 @@ contract EnclaveStateRegistry {
         bytes32 indexed key,
         string  cid,
         uint256 version,
-        uint256 seq          // NEW: global monotonic sequence of this commit
+        uint256 seq,         // global monotonic sequence of this commit
+        uint256 nonce        // idempotency nonce carried by this commit (0 = none)
     );
 
     error VersionMismatch(uint256 expected, uint256 actual);
     error EmptyCID();
     error BadSignature();
     error RelayNonceMismatch(uint256 expected, uint256 actual);
+    error NonceOutOfOrder(uint256 stored, uint256 given);
 
     /// @notice Direct commit: the enclave sends and pays for its own transaction.
     /// @param key             App-defined key (e.g. keccak256(familyId)).
     /// @param newCID          IPFS CID of the new encrypted state blob.
     /// @param expectedVersion Version the caller based this update on (0 = first
     ///                        commit). Must equal the stored version or revert.
-    function commit(bytes32 key, string calldata newCID, uint256 expectedVersion) external {
-        _commit(msg.sender, key, newCID, expectedVersion);
+    /// @param nonce           Idempotency nonce; must be strictly greater than the
+    ///                        stored nonce for this (enclave, key), or 0 to skip
+    ///                        the guard and preserve the stored value.
+    function commit(bytes32 key, string calldata newCID, uint256 expectedVersion, uint256 nonce) external {
+        _commit(msg.sender, key, newCID, expectedVersion, nonce);
     }
 
     /// @notice Relayed commit: any sender submits a commit the enclave SIGNED,
@@ -117,34 +130,42 @@ contract EnclaveStateRegistry {
     /// @param relayNonce      Must equal the enclave's current relay nonce.
     /// @param signature       65-byte secp256k1 signature (r,s,v) over the digest
     ///                        from the enclave key.
+    /// @param nonce Idempotency nonce (signature-bound): strictly greater than
+    ///               the stored nonce for this (enclave, key), or 0 to skip the
+    ///               guard and preserve the stored value. Bound into the signed
+    ///               digest, so the relayer cannot alter it.
     function commitFor(
         address enclave,
         bytes32 key,
         string calldata newCID,
         uint256 expectedVersion,
         uint256 relayNonce,
+        uint256 nonce,
         bytes calldata signature
     ) external {
         uint256 expectedNonce = _relayNonce[enclave];
         if (relayNonce != expectedNonce) revert RelayNonceMismatch(expectedNonce, relayNonce);
 
-        bytes32 digest = commitDigest(enclave, key, newCID, expectedVersion, relayNonce);
+        bytes32 digest = commitDigest(enclave, key, newCID, expectedVersion, relayNonce, nonce);
         address signer = _recover(digest, signature);
         if (signer == address(0) || signer != enclave) revert BadSignature();
 
         unchecked { _relayNonce[enclave] = expectedNonce + 1; }
-        _commit(enclave, key, newCID, expectedVersion);
+        _commit(enclave, key, newCID, expectedVersion, nonce);
     }
 
     /// @notice The exact digest an enclave must sign for commitFor. Exposed so
     ///         the SDK derives the signature the same way the contract verifies
-    ///         it, with no room for drift.
+    ///         it, with no room for drift. The idempotency nonce is part of the
+    ///         digest: a relayer can only broadcast, or not, exactly what the
+    ///         enclave signed.
     function commitDigest(
         address enclave,
         bytes32 key,
         string memory newCID,
         uint256 expectedVersion,
-        uint256 relayNonce
+        uint256 relayNonce,
+        uint256 nonce
     ) public view returns (bytes32) {
         // Domain-separated so a signature is valid only for THIS contract on
         // THIS chain: block.chainid + address(this) are inside the hash.
@@ -157,7 +178,8 @@ contract EnclaveStateRegistry {
                 key,
                 keccak256(bytes(newCID)),
                 expectedVersion,
-                relayNonce
+                relayNonce,
+                nonce
             )
         );
     }
@@ -177,6 +199,13 @@ contract EnclaveStateRegistry {
 
     function getVersion(address enclave, bytes32 key) external view returns (uint256) {
         return _state[enclave][key].version;
+    }
+
+    /// @notice Last accepted idempotency nonce for (enclave, key); 0 if none was
+    ///         ever supplied. PUBLIC by design: clients derive their next nonce
+    ///         from this with a free eth_call (`getNonce()+1`, or a timestamp).
+    function getNonce(address enclave, bytes32 key) external view returns (uint256) {
+        return _state[enclave][key].nonce;
     }
 
     function exists(address enclave, bytes32 key) external view returns (bool) {
@@ -253,10 +282,17 @@ contract EnclaveStateRegistry {
 
     // --- internal -----------------------------------------------------------
 
-    function _commit(address enclave, bytes32 key, string calldata newCID, uint256 expectedVersion) private {
+    function _commit(address enclave, bytes32 key, string calldata newCID, uint256 expectedVersion, uint256 nonce) private {
         if (bytes(newCID).length == 0) revert EmptyCID();
         StateEntry storage e = _state[enclave][key];
         if (e.version != expectedVersion) revert VersionMismatch(expectedVersion, e.version);
+        // Idempotency guard: for the same (enclave, key), nonces are accepted
+        // strictly in order (gaps allowed). nonce == 0 opts out and preserves
+        // the stored value, so a plain commit can never reset the guard.
+        if (nonce != 0) {
+            if (nonce <= e.nonce) revert NonceOutOfOrder(e.nonce, nonce);
+            e.nonce = nonce;
+        }
         unchecked { e.version = expectedVersion + 1; }
         e.cid = newCID;
         e.updatedAt = uint64(block.timestamp);
@@ -272,7 +308,7 @@ contract EnclaveStateRegistry {
         // Advance the global sequence on every commit and stamp it into the
         // event, so a replicator can resume strictly after the last seq it saw.
         unchecked { commitSeq += 1; }
-        emit StateCommitted(enclave, key, newCID, e.version, commitSeq);
+        emit StateCommitted(enclave, key, newCID, e.version, commitSeq, nonce);
     }
 
     /// @dev Recovers the signer of an eth_sign-style prefixed message hash. The
