@@ -333,11 +333,11 @@ class StatePermissionError(RuntimeError):
 
 
 class StateNonceError(RuntimeError):
-    """Raised when a commit's idempotency nonce was already used.
+    """Raised when a commit's idempotency nonce is out of sequence.
 
-    The dApp supplied `nonce=` on commit() and that nonce is not greater than
-    the last accepted nonce for the key -- i.e. this is a duplicate (or
-    out-of-order) submission. The state was NOT changed."""
+    The dApp supplied `nonce=` on commit() and that nonce is not exactly the
+    last accepted nonce for the key + 1 -- i.e. this is a duplicate, stale, or
+    skipped-ahead submission. The state was NOT changed."""
 
 
 def _unwrap(stored):
@@ -610,10 +610,11 @@ class StateRegistry:
         a caller CLAIMS an unowned key (owner = caller).
 
         `nonce` (optional int) is an idempotency guard the dApp controls: it
-        must be STRICTLY GREATER than the last accepted nonce for the key
-        (see get_nonce). A duplicate or stale nonce raises StateNonceError and
-        the state is NOT changed -- so a resubmitted task cannot apply the
-        same commit twice. Omit it to keep today's behavior.
+        must be EXACTLY the last accepted nonce for the key + 1 (see
+        get_nonce; the sequence is 1, 2, 3, ... with no gaps and no reuse).
+        Anything else raises StateNonceError and the state is NOT changed --
+        so a resubmitted task cannot apply the same commit twice. Omit it to
+        keep today's behavior.
 
         Returns the new state.
         """
@@ -632,14 +633,14 @@ class StateRegistry:
 
     def get_nonce(self, key: str) -> int:
         """The last accepted idempotency nonce for `key` (0 if none was ever
-        used). A dApp that wants duplicate suppression reads this, picks a
-        greater value (e.g. +1, or a timestamp), and passes it to commit().
+        used). A dApp that wants duplicate suppression reads this and passes
+        get_nonce(key) + 1 to commit() -- the contract accepts EXACTLY the
+        next value in sequence, nothing else.
 
         The nonce is PUBLIC data: the registry records it on-chain next to the
         version, and anyone can read it with a free eth_call (getNonce) -- so
         no read-ACL applies here, and web3 clients see the same value via the
-        runner's esrNonce. Use opaque monotonic values (a counter or a
-        timestamp), never secret-derived ones.
+        runner's esrNonce.
 
         Reads the chain (authoritative, post-relay), merged with this task's
         own accepted commits so `commit(nonce=N); get_nonce()` returns N even
@@ -670,11 +671,12 @@ class StateRegistry:
                 # The contract re-enforces the same rule on-chain either way.
                 n = int(nonce)
                 stored_nonce = self.get_nonce(key)
-                if n <= stored_nonce:
+                if n != stored_nonce + 1:
                     raise StateNonceError(
-                        f"nonce {n} was already used for state key '{key}' "
-                        f"(last accepted: {stored_nonce}); duplicate commit "
-                        f"suppressed, state unchanged")
+                        f"nonce {n} is out of sequence for state key '{key}' "
+                        f"(last accepted: {stored_nonce}, expected: "
+                        f"{stored_nonce + 1}); commit suppressed, state "
+                        f"unchanged")
             new_acl, new_data = transform(acl, data, current_version)
             # The blob carries a REPORTING COPY of what the registry will
             # store for this key after this commit: the supplied nonce, or the

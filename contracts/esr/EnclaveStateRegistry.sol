@@ -47,11 +47,10 @@ contract EnclaveStateRegistry {
         uint64  updatedAt;  // block timestamp of last commit
         // Last accepted idempotency nonce for this (enclave, key); 0 = none yet.
         // PUBLIC DATA: anyone can read it (getNonce), by design -- clients derive
-        // their next nonce from it with a free eth_call. dApps must use opaque
-        // monotonic values (a counter or timestamp), never secret-derived ones.
-        // Enforced in order: a commit carrying nonce != 0 must be strictly
-        // greater than the stored value (gaps allowed); nonce == 0 means "no
-        // idempotency guard on this commit" and PRESERVES the stored value.
+        // their next nonce from it with a free eth_call: next = getNonce() + 1.
+        // Enforced strictly sequential: a commit carrying nonce != 0 must be
+        // EXACTLY the stored value + 1 (no gaps, no reuse); nonce == 0 means
+        // "no idempotency guard on this commit" and PRESERVES the stored value.
         uint256 nonce;
     }
 
@@ -108,9 +107,9 @@ contract EnclaveStateRegistry {
     /// @param newCID          IPFS CID of the new encrypted state blob.
     /// @param expectedVersion Version the caller based this update on (0 = first
     ///                        commit). Must equal the stored version or revert.
-    /// @param nonce           Idempotency nonce; must be strictly greater than the
-    ///                        stored nonce for this (enclave, key), or 0 to skip
-    ///                        the guard and preserve the stored value.
+    /// @param nonce           Idempotency nonce; must be EXACTLY the stored nonce
+    ///                        for this (enclave, key) + 1, or 0 to skip the guard
+    ///                        and preserve the stored value.
     function commit(bytes32 key, string calldata newCID, uint256 expectedVersion, uint256 nonce) external {
         _commit(msg.sender, key, newCID, expectedVersion, nonce);
     }
@@ -130,9 +129,9 @@ contract EnclaveStateRegistry {
     /// @param relayNonce      Must equal the enclave's current relay nonce.
     /// @param signature       65-byte secp256k1 signature (r,s,v) over the digest
     ///                        from the enclave key.
-    /// @param nonce Idempotency nonce (signature-bound): strictly greater than
-    ///               the stored nonce for this (enclave, key), or 0 to skip the
-    ///               guard and preserve the stored value. Bound into the signed
+    /// @param nonce Idempotency nonce (signature-bound): EXACTLY the stored
+    ///               nonce for this (enclave, key) + 1, or 0 to skip the guard
+    ///               and preserve the stored value. Bound into the signed
     ///               digest, so the relayer cannot alter it.
     function commitFor(
         address enclave,
@@ -203,7 +202,8 @@ contract EnclaveStateRegistry {
 
     /// @notice Last accepted idempotency nonce for (enclave, key); 0 if none was
     ///         ever supplied. PUBLIC by design: clients derive their next nonce
-    ///         from this with a free eth_call (`getNonce()+1`, or a timestamp).
+    ///         from this with a free eth_call -- the next value is always
+    ///         exactly `getNonce() + 1`.
     function getNonce(address enclave, bytes32 key) external view returns (uint256) {
         return _state[enclave][key].nonce;
     }
@@ -287,10 +287,11 @@ contract EnclaveStateRegistry {
         StateEntry storage e = _state[enclave][key];
         if (e.version != expectedVersion) revert VersionMismatch(expectedVersion, e.version);
         // Idempotency guard: for the same (enclave, key), nonces are accepted
-        // strictly in order (gaps allowed). nonce == 0 opts out and preserves
-        // the stored value, so a plain commit can never reset the guard.
+        // strictly sequentially -- exactly stored + 1, no gaps, no reuse.
+        // nonce == 0 opts out and preserves the stored value, so a plain
+        // commit can never reset the guard.
         if (nonce != 0) {
-            if (nonce <= e.nonce) revert NonceOutOfOrder(e.nonce, nonce);
+            if (nonce != e.nonce + 1) revert NonceOutOfOrder(e.nonce, nonce);
             e.nonce = nonce;
         }
         unchecked { e.version = expectedVersion + 1; }

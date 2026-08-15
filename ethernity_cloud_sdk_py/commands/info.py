@@ -289,9 +289,10 @@ def esr_query(args):
                                      _key_hash(args.key)).call())
         return {"enclave": args.enclave, "key": args.key, "nonce": n,
                 "note": ("last accepted idempotency nonce (PUBLIC data, free "
-                         "eth_call); 0 = no guarded commit yet. Pass any "
-                         "greater value to commit() to guard against "
-                         "duplicates; the contract enforces in-order per key")}
+                         "eth_call); 0 = no guarded commit yet. Pass EXACTLY "
+                         "nonce + 1 to commit() to guard against duplicates; "
+                         "the contract enforces the sequence strictly per "
+                         "key (no gaps, no reuse)")}
     if sub == "state":
         enclave = Web3.to_checksum_address(args.enclave)
         kh = _key_hash(args.key)
