@@ -73,8 +73,8 @@ ESR_ABI = [
     {"name": "exists", "stateMutability": "view", "type": "function",
      "inputs": [{"name": "enclave", "type": "address"}, {"name": "key", "type": "bytes32"}],
      "outputs": [{"name": "", "type": "bool"}]},
-    # The idempotency nonce is PUBLIC on-chain data (recorded next to the
-    # version); pre-nonce registries simply have no getNonce view.
+    # The idempotency nonce is PUBLIC on-chain data, recorded next to the
+    # version and enforced strictly in-order per (enclave, key).
     {"name": "getNonce", "stateMutability": "view", "type": "function",
      "inputs": [{"name": "enclave", "type": "address"}, {"name": "key", "type": "bytes32"}],
      "outputs": [{"name": "", "type": "uint256"}]},
@@ -92,18 +92,6 @@ ESR_ABI = [
                 {"name": "version", "type": "uint256", "indexed": False},
                 {"name": "seq", "type": "uint256", "indexed": False},
                 {"name": "nonce", "type": "uint256", "indexed": False}]},
-]
-
-# Pre-nonce registries emit a 5-field StateCommitted (no trailing nonce);
-# decoding their logs with the 6-field ABI fails, so event reads fall back to
-# this shape when the primary decode errors out.
-ESR_ABI_LEGACY_EVENT = [
-    {"anonymous": False, "type": "event", "name": "StateCommitted",
-     "inputs": [{"name": "enclave", "type": "address", "indexed": True},
-                {"name": "key", "type": "bytes32", "indexed": True},
-                {"name": "cid", "type": "string", "indexed": False},
-                {"name": "version", "type": "uint256", "indexed": False},
-                {"name": "seq", "type": "uint256", "indexed": False}]},
 ]
 
 
@@ -246,28 +234,17 @@ def section_esr(w3, esr_addr, enclave_wallet, events_n):
     if enclave_wallet:
         try:
             latest = w3.eth.block_number
-
-            def _scan(abi):
-                c = w3.eth.contract(
-                    address=Web3.to_checksum_address(esr_addr), abi=abi)
-                flt = c.events.StateCommitted.create_filter(
-                    from_block=max(0, latest - 500_000), to_block="latest",
-                    argument_filters={"enclave": Web3.to_checksum_address(enclave_wallet)})
-                return flt.get_all_entries()[-events_n:]
-
-            try:
-                logs = _scan(ESR_ABI)
-            except Exception:
-                # Pre-nonce registry: its events have no trailing nonce field.
-                logs = _scan(ESR_ABI_LEGACY_EVENT)
+            flt = esr.events.StateCommitted.create_filter(
+                from_block=max(0, latest - 500_000), to_block="latest",
+                argument_filters={"enclave": Web3.to_checksum_address(enclave_wallet)})
+            logs = flt.get_all_entries()[-events_n:]
             out["recent_commits"] = [{
                 "key_hash": "0x" + l["args"]["key"].hex(),
                 "version": int(l["args"]["version"]),
                 "cid": l["args"]["cid"],
                 "seq": int(l["args"]["seq"]),
                 # PUBLIC idempotency nonce; 0 = the commit carried no guard.
-                # Absent entirely on pre-nonce registries.
-                **({"nonce": int(l["args"]["nonce"])} if "nonce" in l["args"] else {}),
+                "nonce": int(l["args"]["nonce"]),
                 "block": l["blockNumber"],
             } for l in logs]
         except Exception as e:
@@ -320,18 +297,14 @@ def esr_query(args):
         kh = _key_hash(args.key)
         cid, version, updated = c.functions.getState(enclave, kh).call()
         exists = bool(c.functions.exists(enclave, kh).call())
-        out = {
+        return {
             "network": net_name, "enclave": args.enclave, "key": args.key,
             "key_hash": "0x" + kh.hex(), "exists": exists, "version": int(version),
+            # PUBLIC idempotency nonce; 0 = no guarded commit yet.
+            "nonce": int(c.functions.getNonce(enclave, kh).call()),
             "cid": cid or None, "cid_valid": _looks_like_cid(cid),
             "updated_at": int(updated),
             "note": "cid points at ENCRYPTED state; only the enclave can decrypt it"}
-        try:
-            # PUBLIC idempotency nonce; absent on pre-nonce registries.
-            out["nonce"] = int(c.functions.getNonce(enclave, kh).call())
-        except Exception:
-            pass
-        return out
     if sub == "list":
         encs, keys, cids, versions, updated, total = c.functions.getEntriesFrom(
             int(args.start), int(args.limit)).call()
@@ -397,9 +370,8 @@ def _print_full(info):
         if "recent_commits" in e:
             print("  recent state commits for this enclave: %d" % len(e["recent_commits"]))
             for c in e["recent_commits"]:
-                nonce_part = ("  nonce %s" % c["nonce"]) if c.get("nonce") else ""
-                print("    v%s  seq %s%s  %s  %s  (block %s)"
-                      % (c["version"], c["seq"], nonce_part,
+                print("    v%s  seq %s  nonce %s  %s  %s  (block %s)"
+                      % (c["version"], c["seq"], c["nonce"],
                          c["key_hash"], c["cid"], c["block"]))
         elif e.get("recent_commits_note"):
             print("  %s" % e["recent_commits_note"])

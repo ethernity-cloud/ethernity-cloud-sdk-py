@@ -284,17 +284,18 @@ ESR_CONTRACT_ADDRESSES = {
     # the direct commit() path.
     #
     # Bloxberg "mainnet" and "testnet" are the SAME CHAIN (both chainId 8995),
-    # separated by different PROTOCOL contracts. Mainnet stays on the
-    # pre-enumeration ESR until it is redeployed; the testnets run the
-    # enumerable upgrade (commitSeq + entryCount/getEntriesFrom).
-    "BLOXBERG_MAINNET": "0xF76469A5659670B6ade366dE635e6463aaB8f3D8",
+    # separated by different PROTOCOL contracts, so each keeps its own ESR.
+    # Nonce-aware enumerable ESR, deployed 2026-08-15. Replaces the original
+    # extended registry 0xF764...f3D8.
+    "BLOXBERG_MAINNET": "0x39d6f2A98f7FFF9866AAaa0EAa9aEd8bcf6f728E",
     # Nonce-aware enumerable ESR, deployed 2026-08-15 (bloxberg_testnet,
     # chain 8995). Adds the PUBLIC per-(enclave, key) idempotency nonce
     # (getNonce view, in-order enforcement). Replaces the 2026-08-12
     # enumerable deployment 0xda5e...ACfb.
     "BLOXBERG_TESTNET": "0xdfDD088b9cB998280685aF4E93DC0b37952aB08e",
-    # Enumerable ESR, deployed 2026-08-12 (LitVM LiteForge, chain 4441).
-    "LITVM_LITEFORGE": "0xbAa7F9E3287ff95D177104eD469E6d0Fd19dBB0F",
+    # Nonce-aware enumerable ESR, deployed 2026-08-15 (LitVM LiteForge,
+    # chain 4441). Replaces the 2026-08-12 enumerable deployment 0xbAa7...BB0F.
+    "LITVM_LITEFORGE": "0x71a4bb5AC4c8F37ea0d9394fB29bBC06eEC28000",
     # Not deployed yet on these chains. ecld-build must refuse to build an
     # ESR-enabled enclave here rather than sealing in an empty address.
     "POLYGON_MAINNET": "",

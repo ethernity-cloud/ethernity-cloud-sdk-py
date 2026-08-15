@@ -268,14 +268,14 @@ def esr_nonce(key):
 def esr_owner(key):
     """The owner address of `key`, or None while unowned. Does not expose the
     state or the grant lists."""
-    acl, _data, _version, _cid, _nonce = StateRegistry()._read_container(key)
+    acl, _data, _version, _cid = StateRegistry()._read_container(key)
     return acl.get("owner") if acl else None
 
 
 def esr_acl(key):
     """Owner-only: the full ACL of `key`."""
     reg = StateRegistry()
-    acl, _data, _version, _cid, _nonce = reg._read_container(key)
+    acl, _data, _version, _cid = reg._read_container(key)
     if acl is None:
         return None
     if _task_caller is None or _norm_addr(acl.get("owner")) != _task_caller:
@@ -355,9 +355,14 @@ def _wrap(acl, data, committed_by=None, nonce=None):
     """Stored container. For owned state, bind the authoring caller
     (`committedBy`) INTO the blob, so it lands in the CID -- which is the field
     the securelock signs. That makes the caller cryptographically bound to the
-    commit, not merely a re-stampable sidecar. Unowned state keeps the legacy
-    bare shape (no ACL, no binding) -- unless a nonce must be carried, which
-    forces the container shape so the nonce survives inside the encrypted blob."""
+    commit, not merely a re-stampable sidecar. Unowned state keeps the bare
+    shape (no ACL, no binding) -- unless a nonce must be carried, which forces
+    the container shape.
+
+    `nonce` is a REPORTING COPY of the registry's stored idempotency nonce as
+    of this commit. The on-chain value (getNonce) is always the primary; the
+    blob copy exists so the signed CID cryptographically commits to the nonce
+    the enclave intended, and reads verify the two match (_read_container)."""
     if acl is None and nonce is None:
         return data
     container = {_CONTAINER_MARK: 1, "acl": acl, "data": data}
@@ -366,16 +371,6 @@ def _wrap(acl, data, committed_by=None, nonce=None):
     if nonce is not None:
         container["nonce"] = int(nonce)
     return container
-
-
-def _stored_nonce(stored):
-    """Last accepted idempotency nonce carried by a stored blob (0 if none)."""
-    if isinstance(stored, dict) and stored.get(_CONTAINER_MARK) == 1:
-        try:
-            return int(stored.get("nonce") or 0)
-        except (TypeError, ValueError):
-            return 0
-    return 0
 
 
 def _acl_members(acl, field):
@@ -557,7 +552,7 @@ class StateRegistry:
         """
         if default is None:
             default = {}
-        acl, data, version, cid, _nonce = self._read_container(key, default)
+        acl, data, version, cid = self._read_container(key, default)
         if not _can_read(acl):
             raise StatePermissionError(
                 f"caller {_task_caller or '<anonymous>'} has no read permission "
@@ -569,14 +564,14 @@ class StateRegistry:
         return data
 
     def _read_container(self, key: str, default=None):
-        """(acl, data, version, cid, nonce) for `key`; NO permission check here."""
+        """(acl, data, version, cid) for `key`; NO permission check here."""
         if default is None:
             default = {}
         contract = self._contract()
         cid, version, _updated = contract.functions.getState(
             self.wallet_address, _key_hash(key)).call()
         if not version or not cid:
-            return None, default, 0, None, 0
+            return None, default, 0, None
         if not looks_like_cid(cid):
             # Fail loudly rather than returning `default`: treating a broken
             # pointer as "no state" would let the next commit overwrite state
@@ -587,7 +582,22 @@ class StateRegistry:
         blob = self._fetch(key, cid)
         stored = json.loads(_decrypt(blob).decode("utf-8"))
         acl, data = _unwrap(stored)
-        return acl, data, int(version), cid, _stored_nonce(stored)
+        if isinstance(stored, dict) and stored.get(_CONTAINER_MARK) == 1                 and "nonce" in stored:
+            # The blob carries a REPORTING COPY of the idempotency nonce; the
+            # chain is primary. Both were written by the same commit (the CID
+            # the chain points at IS this blob), so they must agree -- a
+            # mismatch means the registry entry and the state object have been
+            # tampered with or torn apart. Compare against the RAW chain value
+            # (not the task memo): the blob we fetched is the chain's cid.
+            chain_nonce = int(contract.functions.getNonce(
+                self.wallet_address, _key_hash(key)).call())
+            blob_nonce = int(stored.get("nonce") or 0)
+            if blob_nonce != chain_nonce:
+                raise RuntimeError(
+                    f"ESR nonce mismatch for '{key}': the state object reports "
+                    f"nonce {blob_nonce} but the registry records {chain_nonce} "
+                    f"-- refusing to use this state")
+        return acl, data, int(version), cid
 
     # -- writes ---------------------------------------------------------
 
@@ -631,22 +641,13 @@ class StateRegistry:
         runner's esrNonce. Use opaque monotonic values (a counter or a
         timestamp), never secret-derived ones.
 
-        Reads chain-first (authoritative, post-relay), merged with this task's
+        Reads the chain (authoritative, post-relay), merged with this task's
         own accepted commits so `commit(nonce=N); get_nonce()` returns N even
-        before the node's relay lands. Falls back to the in-blob value when the
-        registry predates the on-chain field."""
-        chain = 0
-        try:
-            contract = self._contract()
-            chain = int(contract.functions.getNonce(
-                self.wallet_address, _key_hash(key)).call())
-        except Exception:
-            # Registry without getNonce (older deployment): in-blob fallback.
-            try:
-                _acl, _data, _version, _cid, chain = self._read_container(key)
-            except Exception:
-                chain = 0
-        return max(int(chain or 0), int(_task_nonces.get(key, 0)))
+        before the node's relay lands."""
+        contract = self._contract()
+        chain = int(contract.functions.getNonce(
+            self.wallet_address, _key_hash(key)).call())
+        return max(chain, int(_task_nonces.get(key, 0)))
 
     def _commit_transform(self, key: str, transform, attempts: int = 3,
                           nonce=None):
@@ -661,20 +662,28 @@ class StateRegistry:
         """
         last_error = None
         for _attempt in range(attempts):
-            acl, data, current_version, _cid, stored_nonce = self._read_container(key)
+            acl, data, current_version, _cid = self._read_container(key)
             if nonce is not None:
+                # Pre-check against the freshest visible nonce (chain merged
+                # with this task's own accepted commits) so a duplicate fails
+                # in-enclave with task code 36 instead of as a failed relay.
+                # The contract re-enforces the same rule on-chain either way.
                 n = int(nonce)
+                stored_nonce = self.get_nonce(key)
                 if n <= stored_nonce:
                     raise StateNonceError(
                         f"nonce {n} was already used for state key '{key}' "
                         f"(last accepted: {stored_nonce}); duplicate commit "
                         f"suppressed, state unchanged")
-                final_nonce = n
-            else:
-                # Preserve the stored nonce so a nonce-less commit cannot
-                # reset the guard and reopen replays.
-                final_nonce = stored_nonce or None
             new_acl, new_data = transform(acl, data, current_version)
+            # The blob carries a REPORTING COPY of what the registry will
+            # store for this key after this commit: the supplied nonce, or the
+            # preserved current value for a nonce-less commit. Chain stays
+            # primary; reads verify the two match.
+            if nonce is not None:
+                final_nonce = int(nonce)
+            else:
+                final_nonce = self.get_nonce(key) or None
             # Bind the authoring caller into the blob (hence the CID/signature)
             # for owned state.
             stored = _wrap(new_acl, new_data,
@@ -693,8 +702,6 @@ class StateRegistry:
             try:
                 owner_addr = _norm_addr(new_acl.get("owner")) if new_acl else None
                 # On-chain, 0 means "no guard: preserve the stored nonce".
-                # Only a caller-supplied nonce is sent; the preserved value
-                # stays inside the blob for registries without nonce support.
                 self._send_commit(_key_hash(key), cid, current_version,
                                   owner_addr=owner_addr,
                                   nonce=(int(nonce) if nonce is not None else 0))
@@ -702,8 +709,8 @@ class StateRegistry:
                 # show once the node's relay lands (version increments by one).
                 # The ledger records the DATA -- the ACL never leaves in results.
                 _ledger_record(key, current_version + 1, cid, new_data)
-                if final_nonce:
-                    _task_nonces[key] = int(final_nonce)
+                if nonce is not None:
+                    _task_nonces[key] = int(nonce)
                 return new_acl, new_data
             except Exception as e:
                 # A version race means someone else committed first: re-read and
