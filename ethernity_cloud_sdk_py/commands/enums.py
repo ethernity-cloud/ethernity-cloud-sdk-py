@@ -287,11 +287,12 @@ ESR_CONTRACT_ADDRESSES = {
     # separated by different PROTOCOL contracts, so each keeps its own ESR.
     #
     # Nonce-aware enumerable registries (2026-08-15): the PUBLIC per-
-    # (enclave, key) idempotency nonce (getNonce view) is enforced strictly
-    # sequentially -- exactly stored + 1, no gaps, no reuse.
-    "BLOXBERG_MAINNET": "0xDaFa1e3CAF370765275d853cd86dDEd671Ce29Dd",
-    "BLOXBERG_TESTNET": "0xD7a7Cb9cbb0Ca1adFb2B8405382f299EA1c6132f",
-    "LITVM_LITEFORGE": "0x213aA794F29EA717B9226dF81F7317334Ac36169",
+    # (enclave, key) nonce (getNonce view) advances by exactly 1 on every
+    # commit -- omitted (wire 0) is auto-assigned by the registry itself,
+    # a pinned value must be exactly stored + 1 (no gaps, no reuse).
+    "BLOXBERG_MAINNET": "0x54e0dD4201F530703c7988427d3b7c70c1dCeC94",
+    "BLOXBERG_TESTNET": "0x421E216087eEc1e27b82188C23E490b0E2cA384d",
+    "LITVM_LITEFORGE": "0x5f427A78A0f2Bd7379b99A09C7D8fE51DD7E54D7",
     # Not deployed yet on these chains. ecld-build must refuse to build an
     # ESR-enabled enclave here rather than sealing in an empty address.
     "POLYGON_MAINNET": "",

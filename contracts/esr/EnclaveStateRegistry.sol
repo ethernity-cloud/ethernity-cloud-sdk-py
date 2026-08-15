@@ -45,12 +45,13 @@ contract EnclaveStateRegistry {
         string  cid;        // IPFS CID of the encrypted state blob
         uint256 version;    // monotonic; 0 = never committed, first commit => 1
         uint64  updatedAt;  // block timestamp of last commit
-        // Last accepted idempotency nonce for this (enclave, key); 0 = none yet.
-        // PUBLIC DATA: anyone can read it (getNonce), by design -- clients derive
-        // their next nonce from it with a free eth_call: next = getNonce() + 1.
-        // Enforced strictly sequential: a commit carrying nonce != 0 must be
-        // EXACTLY the stored value + 1 (no gaps, no reuse); nonce == 0 means
-        // "no idempotency guard on this commit" and PRESERVES the stored value.
+        // Per-key nonce; advances by EXACTLY 1 on every commit. PUBLIC DATA:
+        // anyone can read it (getNonce), by design -- clients derive their
+        // next nonce with a free eth_call: next = getNonce() + 1.
+        // A commit carrying nonce == 0 ("omitted") gets the next value
+        // assigned by the registry itself; a non-zero nonce is a client-
+        // pinned idempotency guard and must be EXACTLY the stored value + 1
+        // (no gaps, no reuse) or the commit reverts.
         uint256 nonce;
     }
 
@@ -107,9 +108,11 @@ contract EnclaveStateRegistry {
     /// @param newCID          IPFS CID of the new encrypted state blob.
     /// @param expectedVersion Version the caller based this update on (0 = first
     ///                        commit). Must equal the stored version or revert.
-    /// @param nonce           Idempotency nonce; must be EXACTLY the stored nonce
-    ///                        for this (enclave, key) + 1, or 0 to skip the guard
-    ///                        and preserve the stored value.
+    /// @param nonce           Idempotency nonce. 0 = omitted: the registry
+    ///                        assigns the next value in sequence itself. A
+    ///                        non-zero value is a client-pinned guard and must
+    ///                        be EXACTLY the stored nonce + 1 or the commit
+    ///                        reverts (NonceOutOfOrder).
     function commit(bytes32 key, string calldata newCID, uint256 expectedVersion, uint256 nonce) external {
         _commit(msg.sender, key, newCID, expectedVersion, nonce);
     }
@@ -129,10 +132,12 @@ contract EnclaveStateRegistry {
     /// @param relayNonce      Must equal the enclave's current relay nonce.
     /// @param signature       65-byte secp256k1 signature (r,s,v) over the digest
     ///                        from the enclave key.
-    /// @param nonce Idempotency nonce (signature-bound): EXACTLY the stored
-    ///               nonce for this (enclave, key) + 1, or 0 to skip the guard
-    ///               and preserve the stored value. Bound into the signed
-    ///               digest, so the relayer cannot alter it.
+    /// @param nonce Idempotency nonce (signature-bound). 0 = omitted: the
+    ///               registry assigns the next value in sequence itself. A
+    ///               non-zero value is a client-pinned guard and must be
+    ///               EXACTLY the stored nonce + 1 or the commit reverts.
+    ///               Bound into the signed digest, so the relayer cannot
+    ///               alter it.
     function commitFor(
         address enclave,
         bytes32 key,
@@ -286,11 +291,15 @@ contract EnclaveStateRegistry {
         if (bytes(newCID).length == 0) revert EmptyCID();
         StateEntry storage e = _state[enclave][key];
         if (e.version != expectedVersion) revert VersionMismatch(expectedVersion, e.version);
-        // Idempotency guard: for the same (enclave, key), nonces are accepted
-        // strictly sequentially -- exactly stored + 1, no gaps, no reuse.
-        // nonce == 0 opts out and preserves the stored value, so a plain
-        // commit can never reset the guard.
-        if (nonce != 0) {
+        // Per-key nonce: advances by EXACTLY 1 on every commit.
+        // nonce == 0 means "omitted" -- the registry assigns the next value
+        // in sequence itself (atomic, race-free). A non-zero nonce is a
+        // client-pinned idempotency guard: it must be exactly the stored
+        // value + 1 (no gaps, no reuse) or the commit reverts, so the same
+        // pinned operation can never apply twice.
+        if (nonce == 0) {
+            unchecked { e.nonce += 1; }
+        } else {
             if (nonce != e.nonce + 1) revert NonceOutOfOrder(e.nonce, nonce);
             e.nonce = nonce;
         }
@@ -309,7 +318,9 @@ contract EnclaveStateRegistry {
         // Advance the global sequence on every commit and stamp it into the
         // event, so a replicator can resume strictly after the last seq it saw.
         unchecked { commitSeq += 1; }
-        emit StateCommitted(enclave, key, newCID, e.version, commitSeq, nonce);
+        // Emit the EFFECTIVE nonce (auto-assigned or pinned), so logs always
+        // show the real per-key sequence.
+        emit StateCommitted(enclave, key, newCID, e.version, commitSeq, e.nonce);
     }
 
     /// @dev Recovers the signer of an eth_sign-style prefixed message hash. The

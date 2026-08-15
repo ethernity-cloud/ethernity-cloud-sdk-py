@@ -609,12 +609,18 @@ class StateRegistry:
         against the trustedzone-attested caller; the first write that carries
         a caller CLAIMS an unowned key (owner = caller).
 
-        `nonce` (optional int) is an idempotency guard the dApp controls: it
-        must be EXACTLY the last accepted nonce for the key + 1 (see
-        get_nonce; the sequence is 1, 2, 3, ... with no gaps and no reuse).
-        Anything else raises StateNonceError and the state is NOT changed --
-        so a resubmitted task cannot apply the same commit twice. Omit it to
-        keep today's behavior.
+        `nonce` (optional int): the per-key sequence advances by exactly 1 on
+        EVERY commit (1, 2, 3, ... -- no gaps, no reuse; see get_nonce).
+
+        - Omitted: the SDK takes the next value in sequence automatically.
+          The commit always succeeds (subject to permissions/versioning) but
+          carries NO exactly-once guarantee -- a resubmitted task simply
+          picks a fresh number.
+        - Explicit: it must be EXACTLY the last accepted nonce + 1, pinned by
+          the CLIENT before submitting (read it with a free eth_call and pass
+          +1). Anything else raises StateNonceError (task code 36) and the
+          state is NOT changed -- so a resubmitted task cannot apply the same
+          commit twice.
 
         Returns the new state.
         """
@@ -669,23 +675,33 @@ class StateRegistry:
                 # with this task's own accepted commits) so a duplicate fails
                 # in-enclave with task code 36 instead of as a failed relay.
                 # The contract re-enforces the same rule on-chain either way.
-                n = int(nonce)
-                stored_nonce = self.get_nonce(key)
-                if n != stored_nonce + 1:
-                    raise StateNonceError(
-                        f"nonce {n} is out of sequence for state key '{key}' "
-                        f"(last accepted: {stored_nonce}, expected: "
-                        f"{stored_nonce + 1}); commit suppressed, state "
-                        f"unchanged")
-            new_acl, new_data = transform(acl, data, current_version)
-            # The blob carries a REPORTING COPY of what the registry will
-            # store for this key after this commit: the supplied nonce, or the
-            # preserved current value for a nonce-less commit. Chain stays
-            # primary; reads verify the two match.
-            if nonce is not None:
                 final_nonce = int(nonce)
+                if final_nonce == 0:
+                    raise StateNonceError(
+                        f"nonce=0 is reserved for 'not set' (the registry "
+                        f"then assigns the next value itself) -- omit the "
+                        f"nonce on commit('{key}', ...) instead of passing 0. "
+                        f"Pinned nonces start at 1: use get_nonce() + 1.")
+                stored_nonce = self.get_nonce(key)
+                if final_nonce != stored_nonce + 1:
+                    raise StateNonceError(
+                        f"nonce {final_nonce} is out of sequence for state "
+                        f"key '{key}' (last accepted: {stored_nonce}, "
+                        f"expected: {stored_nonce + 1}); commit suppressed, "
+                        f"state unchanged")
             else:
-                final_nonce = self.get_nonce(key) or None
+                # No explicit nonce: the CONTRACT assigns the next value in
+                # sequence itself (wire nonce 0 = "omitted"); this predicted
+                # value feeds the blob's reporting copy and the task memo.
+                # The sequence advances on EVERY commit; only an EXPLICIT
+                # nonce carries the exactly-once guarantee (an omitted one is
+                # auto-assigned a fresh number, so it cannot deduplicate --
+                # by design).
+                final_nonce = self.get_nonce(key) + 1
+            new_acl, new_data = transform(acl, data, current_version)
+            # The blob carries a REPORTING COPY of the nonce the registry will
+            # store for this key after this commit. Chain stays primary;
+            # reads verify the two match.
             # Bind the authoring caller into the blob (hence the CID/signature)
             # for owned state.
             stored = _wrap(new_acl, new_data,
@@ -703,7 +719,8 @@ class StateRegistry:
 
             try:
                 owner_addr = _norm_addr(new_acl.get("owner")) if new_acl else None
-                # On-chain, 0 means "no guard: preserve the stored nonce".
+                # Wire value: the pinned nonce, or 0 = "omitted" -- the
+                # contract then assigns the next value atomically on-chain.
                 self._send_commit(_key_hash(key), cid, current_version,
                                   owner_addr=owner_addr,
                                   nonce=(int(nonce) if nonce is not None else 0))
@@ -711,8 +728,7 @@ class StateRegistry:
                 # show once the node's relay lands (version increments by one).
                 # The ledger records the DATA -- the ACL never leaves in results.
                 _ledger_record(key, current_version + 1, cid, new_data)
-                if nonce is not None:
-                    _task_nonces[key] = int(nonce)
+                _task_nonces[key] = final_nonce
                 return new_acl, new_data
             except Exception as e:
                 # A version race means someone else committed first: re-read and

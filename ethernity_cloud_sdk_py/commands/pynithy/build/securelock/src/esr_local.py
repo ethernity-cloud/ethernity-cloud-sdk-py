@@ -185,10 +185,11 @@ class MemRegistry:
         Raises 'VersionMismatch' (string in message) on a race, exactly like
         the contract, so StateRegistry.commit's retry loop behaves the same.
 
-        Idempotency nonces are enforced strictly sequentially per
-        (enclave, key), exactly like the contract: nonce != 0 must be EXACTLY
-        the stored value + 1 (no gaps, no reuse) or 'NonceOutOfOrder' is
-        raised; nonce == 0 preserves the stored value."""
+        The per-key nonce advances by EXACTLY 1 on every commit, like the
+        contract: nonce == 0 ("omitted") gets the next value assigned by the
+        registry itself; a non-zero nonce is a client-pinned guard and must
+        be EXACTLY the stored value + 1 (no gaps, no reuse) or
+        'NonceOutOfOrder' is raised."""
         k = self._k(enclave, key_hash)
         entry = self._entries.get(k, {})
         cur = int(entry.get("version", 0))
@@ -197,7 +198,9 @@ class MemRegistry:
                                % (expected_version, cur))
         stored_nonce = int(entry.get("nonce", 0))
         n = int(nonce or 0)
-        if n != 0:
+        if n == 0:
+            stored_nonce += 1
+        else:
             if n != stored_nonce + 1:
                 raise RuntimeError("NonceOutOfOrder: stored %s, given %s"
                                    % (stored_nonce, n))

@@ -243,7 +243,7 @@ def section_esr(w3, esr_addr, enclave_wallet, events_n):
                 "version": int(l["args"]["version"]),
                 "cid": l["args"]["cid"],
                 "seq": int(l["args"]["seq"]),
-                # PUBLIC idempotency nonce; 0 = the commit carried no guard.
+                # PUBLIC per-key nonce (advances by 1 on every commit).
                 "nonce": int(l["args"]["nonce"]),
                 "block": l["blockNumber"],
             } for l in logs]
@@ -288,11 +288,11 @@ def esr_query(args):
         n = int(c.functions.getNonce(Web3.to_checksum_address(args.enclave),
                                      _key_hash(args.key)).call())
         return {"enclave": args.enclave, "key": args.key, "nonce": n,
-                "note": ("last accepted idempotency nonce (PUBLIC data, free "
-                         "eth_call); 0 = no guarded commit yet. Pass EXACTLY "
-                         "nonce + 1 to commit() to guard against duplicates; "
-                         "the contract enforces the sequence strictly per "
-                         "key (no gaps, no reuse)")}
+                "note": ("per-key nonce, PUBLIC data (free eth_call); "
+                         "advances by 1 on every commit, 0 = key never "
+                         "committed. For exactly-once, pass EXACTLY nonce + 1 "
+                         "to commit(); an omitted nonce is auto-assigned the "
+                         "next value by the registry")}
     if sub == "state":
         enclave = Web3.to_checksum_address(args.enclave)
         kh = _key_hash(args.key)
@@ -301,7 +301,7 @@ def esr_query(args):
         return {
             "network": net_name, "enclave": args.enclave, "key": args.key,
             "key_hash": "0x" + kh.hex(), "exists": exists, "version": int(version),
-            # PUBLIC idempotency nonce; 0 = no guarded commit yet.
+            # PUBLIC per-key nonce; 0 = key never committed.
             "nonce": int(c.functions.getNonce(enclave, kh).call()),
             "cid": cid or None, "cid_valid": _looks_like_cid(cid),
             "updated_at": int(updated),
