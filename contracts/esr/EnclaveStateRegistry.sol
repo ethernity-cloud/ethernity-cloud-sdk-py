@@ -67,10 +67,16 @@ contract EnclaveStateRegistry {
     // enclave (author) => application key => entry
     mapping(address => mapping(bytes32 => StateEntry)) private _state;
 
-    // enclave (author) => next expected relay nonce. Only consumed by
+    // enclave (author) => key => next expected relay nonce. Only consumed by
     // commitFor; direct commit() is naturally ordered by the account nonce of
     // the enclave's own transaction and does not touch this.
-    mapping(address => uint256) private _relayNonce;
+    //
+    // Scoped PER (enclave, key), not per enclave: commits to the SAME key are
+    // hard-serialized network-wide (two concurrent tasks sign the same relay
+    // nonce; exactly one lands, the loser is detected and refunded), while
+    // commits to DIFFERENT keys are fully independent and can run in
+    // parallel on different nodes without killing each other.
+    mapping(address => mapping(bytes32 => uint256)) private _relayNonce;
 
     // --- enumeration + global sequence (replication support) ----------------
 
@@ -129,7 +135,10 @@ contract EnclaveStateRegistry {
     /// @param key             App-defined key.
     /// @param newCID          IPFS CID of the new encrypted state blob.
     /// @param expectedVersion Optimistic-concurrency version (see commit).
-    /// @param relayNonce      Must equal the enclave's current relay nonce.
+    /// @param relayNonce      Must equal the current relay nonce for this
+    ///                        (enclave, key) -- per-key, so same-key commits
+    ///                        are hard-serialized while different keys relay
+    ///                        in parallel.
     /// @param signature       65-byte secp256k1 signature (r,s,v) over the digest
     ///                        from the enclave key.
     /// @param nonce Idempotency nonce (signature-bound). 0 = omitted: the
@@ -147,14 +156,14 @@ contract EnclaveStateRegistry {
         uint256 nonce,
         bytes calldata signature
     ) external {
-        uint256 expectedNonce = _relayNonce[enclave];
+        uint256 expectedNonce = _relayNonce[enclave][key];
         if (relayNonce != expectedNonce) revert RelayNonceMismatch(expectedNonce, relayNonce);
 
         bytes32 digest = commitDigest(enclave, key, newCID, expectedVersion, relayNonce, nonce);
         address signer = _recover(digest, signature);
         if (signer == address(0) || signer != enclave) revert BadSignature();
 
-        unchecked { _relayNonce[enclave] = expectedNonce + 1; }
+        unchecked { _relayNonce[enclave][key] = expectedNonce + 1; }
         _commit(enclave, key, newCID, expectedVersion, nonce);
     }
 
@@ -188,10 +197,11 @@ contract EnclaveStateRegistry {
         );
     }
 
-    /// @notice Current relay nonce for an enclave (0 if it has never used
-    ///         commitFor). The SDK reads this to build the next signature.
-    function relayNonce(address enclave) external view returns (uint256) {
-        return _relayNonce[enclave];
+    /// @notice Current relay nonce for (enclave, key) (0 if that key has never
+    ///         been committed via commitFor). The SDK reads this to build the
+    ///         next signature.
+    function relayNonce(address enclave, bytes32 key) external view returns (uint256) {
+        return _relayNonce[enclave][key];
     }
 
     function getState(address enclave, bytes32 key)

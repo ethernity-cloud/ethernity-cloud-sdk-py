@@ -75,6 +75,10 @@ _task_ledger = {}
 # get_nonce() right after a commit in the SAME task returns the fresh value
 # even though the node's relay (and thus the chain) has not landed yet.
 _task_nonces = {}
+# Per-task memo of the NEXT relay nonce per key hash (hex), so multiple
+# commits to the same key within one task sign sequential relay nonces even
+# while the node is still relaying the earlier ones.
+_task_relay_nonces = {}
 
 
 def _ledger_record(key, version, cid, state):
@@ -294,7 +298,7 @@ def configure(identity_priv, swift_stream_service, bucket, contract_address,
     value from the client payload or the node's .env.
     """
     global _identity_priv, _swift, _bucket, _contract_address, _web3, _esr_evidence
-    global _task_ledger, _task_nonces, _task_caller
+    global _task_ledger, _task_nonces, _task_relay_nonces, _task_caller
     _identity_priv = identity_priv
     _swift = swift_stream_service
     _bucket = bucket
@@ -302,6 +306,7 @@ def configure(identity_priv, swift_stream_service, bucket, contract_address,
     _web3 = web3
     _task_ledger = {}
     _task_nonces = {}
+    _task_relay_nonces = {}
     _esr_evidence = []
     _task_caller = _norm_addr(caller)
 
@@ -330,6 +335,18 @@ _CONTAINER_MARK = "_ecld_state"
 
 class StatePermissionError(RuntimeError):
     """Raised when the task caller lacks permission for a state operation."""
+
+
+# Per-run cap on state commits: bounds the number of relayed transactions the
+# node must track/pay and the size of the adjudicated ledger bound into the
+# result transaction. 256 so the on-chain count fits ONE BYTE (bias-1:
+# 0x00 = 1 commit ... 0xFF = 256; an all-zero root means no commits at all).
+MAX_COMMITS_PER_TASK = 256
+
+
+class StateLimitError(RuntimeError):
+    """Raised when a task tries to make more than MAX_COMMITS_PER_TASK state
+    commits. The over-limit commit is NOT applied; earlier commits stand."""
 
 
 class StateNonceError(RuntimeError):
@@ -667,6 +684,12 @@ class StateRegistry:
         The nonce check re-runs on every retry against the freshly read state,
         so a racing commit that consumed the same nonce fails this one.
         """
+        if len(_esr_evidence) >= MAX_COMMITS_PER_TASK:
+            raise StateLimitError(
+                f"this task already made {len(_esr_evidence)} state commits -- "
+                f"the per-run limit is {MAX_COMMITS_PER_TASK}. Batch your "
+                f"writes (one commit can update a whole object) or split the "
+                f"work across tasks.")
         last_error = None
         for _attempt in range(attempts):
             acl, data, current_version, _cid = self._read_container(key)
@@ -793,8 +816,9 @@ class StateRegistry:
         and nothing it could write about cost would be trusted anyway.
 
         Two artifacts are staged, both carrying only signature-bound fields:
-          - esr.commit.<nonce>.json  -- the single authorization for the node to
-            relay in order;
+          - esr.commit.<key16>.<relayNonce>.json -- the single authorization
+            for the node to relay; per (enclave, key) the relay nonces are
+            strictly sequential, and different keys relay independently;
           - esr.authorizations.json  -- the append-only ledger of EVERY commit
             this order, which the trustedzone adjudicates over so no commit can
             escape the cumulative gas accounting by never being seen.
@@ -803,7 +827,14 @@ class StateRegistry:
         acct = self._signer()
         enclave = acct.address
 
-        relay_nonce = contract.functions.relayNonce(enclave).call()
+        # Relay nonce is PER (enclave, key): same-key commits are strictly
+        # serialized network-wide, different keys relay in parallel. Merge the
+        # chain value with this task's own staged commits so a second commit
+        # to the same key in ONE task signs the next number even before (or
+        # while) the node relays the first.
+        kh_hex = key_hash.hex()
+        chain_rn = int(contract.functions.relayNonce(enclave, key_hash).call())
+        relay_nonce = max(chain_rn, int(_task_relay_nonces.get(kh_hex, 0)))
         # The idempotency nonce is SIGNATURE-BOUND (part of the digest): the
         # relaying node can only broadcast, or not, exactly what was signed --
         # it cannot alter the nonce the registry will record. 0 = no guard,
@@ -842,10 +873,14 @@ class StateRegistry:
         _swift.put_file_content(
             _bucket, "esr.authorizations.json", "", io.BytesIO(ledger))
 
-        # Stage the individually-relayable authorization for the node.
+        # Stage the individually-relayable authorization for the node. The
+        # filename carries the key prefix so commits to different keys within
+        # one task never collide, and the per-key relay order stays explicit.
         blob = json.dumps(auth, separators=(",", ":")).encode("utf-8")
         _swift.put_file_content(
-            _bucket, f"esr.commit.{relay_nonce}.json", "", io.BytesIO(blob))
+            _bucket, f"esr.commit.{kh_hex[:16]}.{relay_nonce}.json", "",
+            io.BytesIO(blob))
+        _task_relay_nonces[kh_hex] = relay_nonce + 1
 
         # LOCAL TESTING: with no node to relay commitFor, apply the commit to the
         # local registry now so get()/get_version() reflect it. No-op in the real

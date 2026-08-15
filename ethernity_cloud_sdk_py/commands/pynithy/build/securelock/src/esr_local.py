@@ -99,8 +99,8 @@ class _Functions:
         _cid, version, _u = self._reg.state(enclave, key_hash)
         return _Callable(version)
 
-    def relayNonce(self, enclave):
-        return _Callable(self._reg.relay_nonce(enclave))
+    def relayNonce(self, enclave, key_hash):
+        return _Callable(self._reg.relay_nonce(enclave, key_hash))
 
     def commitDigest(self, enclave, key_hash, cid, expected_version, relay_nonce,
                      nonce=0):
@@ -174,8 +174,10 @@ class MemRegistry:
         e = self._entries.get(self._k(enclave, key_hash))
         return int(e.get("nonce", 0)) if e else 0
 
-    def relay_nonce(self, enclave):
-        return int(self._nonce.get(str(enclave).lower(), 0))
+    def relay_nonce(self, enclave, key_hash):
+        # Per (enclave, key), like the contract: same-key commits serialize,
+        # different keys are independent.
+        return int(self._nonce.get(self._k(enclave, key_hash), 0))
 
     def entry_count(self):
         return len(self._entries)
@@ -207,7 +209,7 @@ class MemRegistry:
             stored_nonce = n
         self._entries[k] = {"cid": cid, "version": cur + 1, "updatedAt": 0,
                             "nonce": stored_nonce}
-        self._nonce[str(enclave).lower()] = self.relay_nonce(enclave) + 1
+        self._nonce[k] = self.relay_nonce(enclave, key_hash) + 1
         self._persist()
 
 

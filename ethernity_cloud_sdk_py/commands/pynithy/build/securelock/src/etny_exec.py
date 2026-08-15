@@ -121,6 +121,12 @@ class TaskStatus:
     ESR_GAS_LIMIT_EXCEEDED = 34  # ESR state commits would exceed the per-order relayed-gas budget.
     ESR_NONCE_VIOLATION = 36     # A commit's idempotency nonce was already used -- duplicate
                                  # suppressed, state unchanged (StateNonceError).
+    ESR_RELAY_TIMEOUT = 37       # The enclave signed state commits but they did not land on
+                                 # the registry within 5 blocks -- the node did not relay them.
+                                 # The result is NOT trustworthy as persisted state; the
+                                 # validator refunds the order.
+    ESR_COMMIT_LIMIT_EXCEEDED = 38  # More than 100 state commits in one run -- the per-run cap
+                                 # that bounds relayed transactions and the result size.
     SECURITY_VIOLATION = 35      # A state commit was authorized under a caller other than the
                                  # task's submitter (the in-enclave ownership check was bypassed).
                                  # Set by the securelock when it detects a forged commit caller,
@@ -294,6 +300,11 @@ def Exec(payload_data, input_data, globals=None, locals=None):
         # Matched by name so non-ESR builds need no import.
         if type(e).__name__ == "StateNonceError":
             return TaskStatus.ESR_NONCE_VIOLATION, f"ESR_NONCE_VIOLATION: {e}"
+        # Over the per-run commit cap (100): the over-limit commit was NOT
+        # applied; the earlier commits stand and will be relayed.
+        if type(e).__name__ == "StateLimitError":
+            return (TaskStatus.ESR_COMMIT_LIMIT_EXCEEDED,
+                    f"ESR_COMMIT_LIMIT_EXCEEDED: {e}")
         # Deliver the traceback to the data owner as the result and never crash;
         # preserve the embedded-result SUCCESS path (code 0).
         try:
