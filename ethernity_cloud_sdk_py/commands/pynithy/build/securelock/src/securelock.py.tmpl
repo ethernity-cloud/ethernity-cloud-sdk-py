@@ -286,7 +286,18 @@ class EtnySecureLock:
 
         self.validate_trustedzone_data()
         self.configure_state_registry()
-        task_result = execute_task_v3(self.payload_data, self.input_data)
+        # Interactive session: the trustedzone stages session.config when the
+        # request asked for one; the executor keeps the payload context alive,
+        # streams inputs/outputs, and finalizes with a SUCCESS summary when
+        # the running period completes (see etny_session_exec).
+        status, _ = self.swift_stream_service.is_object_in_bucket(
+            self.etny_bucket, 'session.config.securelock')
+        if status:
+            from etny_session_exec import run_session
+            logging.info('Interactive session mode')
+            task_result = run_session(self)
+        else:
+            task_result = execute_task_v3(self.payload_data, self.input_data)
 
         self.task_code = str(task_result[0])
         self.task_result = task_result[1]
@@ -394,6 +405,18 @@ class EtnySecureLock:
             logging.info(
                 f"No attested task caller supplied "
                 f"({e.__class__.__name__}); treating task as anonymous")
+
+    def get_and_verify_trustedzone_object(self, object_name: str) -> str:
+        """Decrypt a trustedzone-pushed object and verify its signature --
+        the same trust checks the payload/input handoff gets. Raises on any
+        failure so the session never consumes unauthenticated data."""
+        data = self.__get_file_content_and_decrypt(object_name)
+        sig_hex = self.__get_file_content_and_decrypt(object_name + '.sig')
+        if not crypto.verify_signature(self.trustedzone_public_key,
+                                       data.encode('utf-8'),
+                                       bytes.fromhex(sig_hex)):
+            raise ValueError(f"trustedzone signature invalid for {object_name}")
+        return data
 
     def __get_file_content_and_decrypt(self, object_name: str) -> str:
         encrypted_base64 = self.__get_file_content(object_name)

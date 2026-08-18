@@ -166,6 +166,16 @@ def execute_task_v3(payload_data, input_data, extra_globals=None):
             + " import inside backend.py (the enclave loads it as the package"
             + " 'serverless.backend' - use relative imports for sibling modules).",
         )
+    base_globals = session_base_globals()
+    if extra_globals:
+        base_globals.update(extra_globals)
+    return Exec(payload_data, input_data, globals=base_globals)
+
+
+def session_base_globals():
+    """The exec globals every payload run receives. Public so the session
+    executor (etny_session_exec) builds ONE persistent dict and keeps payload
+    state alive across streamed inputs."""
     base_globals = {
         "___etny_result___": ___etny_result___,   # legacy alias (no ESR)
         "ecld_result": ecld_result,               # the result API
@@ -182,9 +192,7 @@ def execute_task_v3(payload_data, input_data, extra_globals=None):
             base_globals.setdefault(_name, getattr(_ecld_state, _name))
     except Exception:
         pass
-    if extra_globals:
-        base_globals.update(extra_globals)
-    return Exec(payload_data, input_data, globals=base_globals)
+    return base_globals
 
 def Exec(payload_data, input_data, globals=None, locals=None):
     try:
