@@ -123,7 +123,15 @@ class SecureLockSession:
     def _close_requested(self):
         status, _ = self.app.swift_stream_service.is_object_in_bucket(
             self.app.etny_bucket, "session.control.securelock")
-        return bool(status)
+        if not status:
+            return False
+        # An unauthenticated close signal is ignored: the node could place an
+        # object in the bucket, but only the trustedzone can SIGN one.
+        try:
+            control = self.app.get_and_verify_trustedzone_object("session.control.securelock")
+            return str(control).strip() == "close"
+        except Exception:
+            return False
 
     # --------------------------------------------------------------------- run
 
