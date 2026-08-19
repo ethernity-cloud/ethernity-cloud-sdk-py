@@ -131,6 +131,20 @@ class SecureLockSession:
         setup_failure = self._initial_run()
         if setup_failure is not None:
             return setup_failure
+        # READINESS HANDSHAKE: tell the trustedzone this securelock speaks the
+        # session protocol AND whether the payload defined an input handler.
+        # A pre-session securelock never writes this (the trustedzone answers
+        # every input with an explicit error), and a handler-less payload is
+        # announced by the trustedzone as a signed code-5 error row on the
+        # DP-request metadata side before any input is even sent.
+        try:
+            ready = json.dumps({
+                "ready": True,
+                "handler": callable(self.globals.get(HANDLER_NAME)),
+            })
+            self.app.encrypt_file_and_push_to_swifstream(ready, "session.ready")
+        except Exception as e:
+            logging.error(f"session: could not publish readiness: {e}")
         next_seq = 0
         while True:
             now = time.monotonic()
