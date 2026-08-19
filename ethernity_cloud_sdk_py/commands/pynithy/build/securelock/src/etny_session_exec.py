@@ -2,15 +2,15 @@
 
 Runs when the trustedzone staged 'session.config.securelock'. The payload
 context is created once and kept alive; every streamed input is delivered
-either to a handler the payload registered:
+to the handler the payload registered:
 
     def ___etny_on_input___(data):
         ...
         return "reply"
 
-or -- when no handler is defined -- by re-executing the payload against the
-SAME globals with ___etny_data_set___ bound to the new input, so module-level
-state persists across messages.
+A payload that defines no handler is not session-aware: each input is
+answered with an explicit error output (no silent re-execution fallback),
+so the dApp developer sees the problem on the first message.
 
 Objects (all trustedzone<->securelock traffic uses the existing
 encrypted+signed envelope in both directions):
@@ -88,16 +88,19 @@ class SecureLockSession:
         """Deliver one input; returns (code, output). Runs the handler on a
         worker thread so a hung payload cannot outlive the timeout guard."""
         handler = self.globals.get(HANDLER_NAME)
+        if not callable(handler):
+            # No silent fallback: a payload without a handler is not
+            # session-aware, so every input gets an explicit, acked error.
+            return (int(TaskStatus.PAYLOAD_NOT_DEFINED),
+                    "SESSION_HANDLER_NOT_DEFINED: this payload defines no "
+                    "___etny_on_input___ handler, so streamed inputs cannot "
+                    "be processed. Define ___etny_on_input___(data) in the "
+                    "payload and republish.")
         box = {}
 
         def work():
             try:
-                if callable(handler):
-                    box["out"] = (int(TaskStatus.SUCCESS), _render(handler(data)))
-                else:
-                    code, result = etny_exec.Exec(
-                        self.app.payload_data, data, globals=self.globals)
-                    box["out"] = (int(code), _render(result))
+                box["out"] = (int(TaskStatus.SUCCESS), _render(handler(data)))
             except Exception as e:
                 box["out"] = (int(TaskStatus.SYSTEM_ERROR), f"SESSION HANDLER ERROR: {e}")
 
@@ -161,7 +164,11 @@ class SecureLockSession:
             outcome = self._handle(next_seq, data)
             if outcome is not None:
                 code, out = outcome
-                self.processed += 1
+                # Only successful handling counts as processed; error outputs
+                # (handler missing / handler raised) are still emitted+acked
+                # so the dApp sees them, but the summary stays truthful.
+                if int(code) == int(TaskStatus.SUCCESS):
+                    self.processed += 1
                 self._emit(next_seq, code, out)
             next_seq += 1
         summary = {
