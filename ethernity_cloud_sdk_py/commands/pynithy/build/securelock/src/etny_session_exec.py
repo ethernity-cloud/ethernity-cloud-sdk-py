@@ -54,6 +54,19 @@ def _render(value):
     return value if isinstance(value, str) else json.dumps(value, default=str)
 
 
+def _resolve_handler(base_globals):
+    """The session input handler, from EITHER the namespaced `ecld.on_input`
+    or the legacy bare `___etny_on_input___`. `ecld.on_input` wins if both are
+    set; returns None if neither is a callable (handler-less payload)."""
+    ecld = base_globals.get("ecld")
+    if ecld is not None:
+        h = getattr(ecld, "on_input", None)
+        if callable(h):
+            return h
+    legacy = base_globals.get(HANDLER_NAME)
+    return legacy if callable(legacy) else None
+
+
 class SecureLockSession:
     def __init__(self, app):
         self.app = app
@@ -87,15 +100,16 @@ class SecureLockSession:
     def _handle(self, seq, data):
         """Deliver one input; returns (code, output). Runs the handler on a
         worker thread so a hung payload cannot outlive the timeout guard."""
-        handler = self.globals.get(HANDLER_NAME)
+        handler = _resolve_handler(self.globals)
         if not callable(handler):
             # No silent fallback: a payload without a handler is not
             # session-aware, so every input gets an explicit, acked error.
             return (int(TaskStatus.PAYLOAD_NOT_DEFINED),
                     "SESSION_HANDLER_NOT_DEFINED: this payload defines no "
-                    "___etny_on_input___ handler, so streamed inputs cannot "
-                    "be processed. Define ___etny_on_input___(data) in the "
-                    "payload and republish.")
+                    "session input handler, so streamed inputs cannot be "
+                    "processed. Set ecld.on_input = def handler(data): ... "
+                    "(or the legacy ___etny_on_input___) in the payload and "
+                    "republish.")
         box = {}
 
         def work():
@@ -148,7 +162,7 @@ class SecureLockSession:
         try:
             ready = json.dumps({
                 "ready": True,
-                "handler": callable(self.globals.get(HANDLER_NAME)),
+                "handler": callable(_resolve_handler(self.globals)),
             })
             self.app.encrypt_file_and_push_to_swifstream(ready, "session.ready")
         except Exception as e:

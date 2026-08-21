@@ -172,14 +172,55 @@ def execute_task_v3(payload_data, input_data, extra_globals=None):
     return Exec(payload_data, input_data, globals=base_globals)
 
 
+class _Ecld:
+    """The single dApp-facing handle injected into every payload as `ecld`.
+
+    A namespaced front door over the same primitives a payload used to reach
+    by bare magic names, chosen to read like a contract object to Web3 devs:
+
+        ecld.result(value)        # end the task with a result (+ESR state)
+        ecld.input                # the request payload (was ___etny_data_set___)
+        ecld.caller               # the data owner's wallet (msg.sender-style)
+        ecld.on_input = fn        # session input handler (was ___etny_on_input___)
+        ecld.state.get(k) / .commit(k, v) / .grant(...) / ...   # ESR
+        ecld.fetch("k1", "k2")    # standard state-fetch task body
+
+    Every legacy name (___etny_result___, ___etny_data_set___,
+    ___etny_on_input___, task_caller, esr_*, ...) still works unchanged; this
+    object adds a coherent surface without removing anything. `input` and the
+    session handler are populated per-run by the executor.
+    """
+
+    def __init__(self):
+        self.result = ecld_result
+        self.fetch = esr_fetch
+        self.input = None          # set by Exec() when input_data is present
+        self.on_input = None       # session handler slot; payload assigns it
+        self.state = None          # StateRegistry-style handle if ESR present
+        self._caller_fn = None     # bound to ecld_state.task_caller if present
+
+    @property
+    def caller(self):
+        """The verified wallet that submitted this task (msg.sender-style),
+        or None in a non-ESR build / local test. Live: reads the attested
+        caller at access time, not at scope-build time."""
+        fn = self._caller_fn
+        try:
+            return fn() if callable(fn) else None
+        except Exception:
+            return None
+
+
 def session_base_globals():
     """The exec globals every payload run receives. Public so the session
     executor (etny_session_exec) builds ONE persistent dict and keeps payload
     state alive across streamed inputs."""
+    ecld = _Ecld()
     base_globals = {
         "___etny_result___": ___etny_result___,   # legacy alias (no ESR)
-        "ecld_result": ecld_result,               # the result API
+        "ecld_result": ecld_result,               # the result API (bare)
         "esr_fetch": esr_fetch,                   # standard state-fetch task
+        "ecld": ecld,                             # the namespaced handle
         **sdkFunctions,
     }
     # State ownership / ACL API (present only in ESR-enabled builds). Enforced
@@ -190,6 +231,13 @@ def session_base_globals():
         for _name in ("esr_grant", "esr_revoke", "esr_set_public_read",
                       "esr_transfer", "esr_owner", "esr_acl", "esr_nonce"):
             base_globals.setdefault(_name, getattr(_ecld_state, _name))
+        # Mirror the ESR surface onto the namespaced handle. `caller` is a live
+        # property that calls task_caller() at access time (see _Ecld.caller).
+        ecld._caller_fn = _ecld_state.task_caller
+        try:
+            ecld.state = _ecld_state.StateRegistry()
+        except Exception:
+            ecld.state = None
     except Exception:
         pass
     return base_globals
@@ -208,7 +256,10 @@ def Exec(payload_data, input_data, globals=None, locals=None):
 
         if payload_data is not None:
             if input_data is not None:
-                globals["___etny_data_set___"] = input_data
+                globals["___etny_data_set___"] = input_data   # legacy name
+                _ecld = globals.get("ecld")
+                if _ecld is not None:
+                    _ecld.input = input_data                  # ecld.input
             module = ast.parse(payload_data)
             outputs = []
             for node in module.body:

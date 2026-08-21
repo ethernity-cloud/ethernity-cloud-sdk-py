@@ -18,8 +18,8 @@ depth on top of those, aimed at the accidental footgun.
 POLICY
 - HARD ERROR: a dynamic-exec call (eval / exec / compile-to-exec) whose
   argument is, syntactically in the same expression, the task input dataset
-  (`___etny_data_set___`) or a subscript/attr of it. This is the case that
-  actually opens the enclave to a submitter.
+  (`ecld.input`, or the legacy `___etny_data_set___`) or a subscript/attr of
+  it. This is the case that actually opens the enclave to a submitter.
 - WARNING: any other use of eval / exec / compile / __import__ / a dynamic
   `getattr(obj, <non-literal>)`. We cannot prove these are fed untrusted input
   (that would require sound taint analysis, which is undecidable), so we flag
@@ -33,7 +33,12 @@ OPT-OUT (this is a lint, never an unbypassable wall):
 
 import ast
 
+# The task input dataset, by any of its names: the legacy bare global
+# `___etny_data_set___` and the namespaced `ecld.input` attribute. Both are
+# taint sources -- executing either lets a submitter run code in the enclave.
 INPUT_NAMES = {"___etny_data_set___"}
+INPUT_ATTRS = {"input"}          # ecld.input  (attr `input` on a name `ecld`)
+INPUT_ATTR_ROOTS = {"ecld"}
 DYNAMIC_EXEC = {"eval", "exec", "compile", "__import__"}
 FILE_OPT_OUT = "ecld: allow-eval-file"
 LINE_OPT_OUT = "ecld: allow-eval"
@@ -57,9 +62,14 @@ def _root_name(node):
 
 
 def _mentions_input(node):
-    """True if `node` references the task input dataset anywhere within it."""
+    """True if `node` references the task input dataset anywhere within it --
+    either the legacy bare name `___etny_data_set___` or `ecld.input`."""
     for sub in ast.walk(node):
         if isinstance(sub, ast.Name) and sub.id in INPUT_NAMES:
+            return True
+        if (isinstance(sub, ast.Attribute) and sub.attr in INPUT_ATTRS
+                and isinstance(sub.value, ast.Name)
+                and sub.value.id in INPUT_ATTR_ROOTS):
             return True
     return False
 
@@ -81,7 +91,7 @@ class _Visitor(ast.NodeVisitor):
             if name in ("eval", "exec") and tainted:
                 self.findings.append(Finding(
                     "error", node.lineno, node.col_offset,
-                    f"{name}() is called on task input (___etny_data_set___). "
+                    f"{name}() is called on task input (ecld.input). "
                     "A submitter could run arbitrary code inside your enclave and "
                     "reach other users' state. Parse the input explicitly instead "
                     "of executing it. (Suppress with `# ecld: allow-eval` if you "
