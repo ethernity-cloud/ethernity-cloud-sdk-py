@@ -265,38 +265,32 @@ class EtnySecureLock:
         equal the registered certHash. Evicting a CAS on-chain therefore
         revokes it HERE on the next task, without redeploying enclaves.
 
-        Rollout is LOG-ONLY by default; ECAS_CAS_ATTEST_MODE=enforce (from
-        the session) flips failures into refusal. Debug-signed CAS quotes are
-        tolerated on testnet builds only. The quote's ECDSA/PCK signature
+        STRICT: a missing quote, an invalid one, and an unreachable
+        registry (after retries) are all the same terminal fault (refund);
+        there is no softening knob -- the session env comes from the CAS
+        itself. Debug-signed CAS quotes are tolerated on testnet builds
+        only. The quote's ECDSA/PCK signature
         chain is NOT yet verified in-enclave; what this binds is
         quote-contents <-> on-chain record, which is the revocation path.
         """
         registry = self.validator_registry_address
-        mode = os.environ.get('ECAS_CAS_ATTEST_MODE', 'log').lower()
         self.cas_attestation_fault = None
 
         def fault(reason):
-            # INVALID evidence: the operator provisioned this task through an
+            # TERMINAL: registry present -> a CAS quote is MANDATORY, so a
+            # MISSING quote is as damning as a wrong one. The operator provisioned this task through an
             # impostor CAS. Recorded here and adjudicated in execute() before
             # the payload runs -- the task then terminates with
             # CAS_ATTESTATION_FAULT and the order is refunded.
             logging.error(f'CAS ATTESTATION INVALID: {reason}')
             self.cas_attestation_fault = reason
 
-        def soft(reason):
-            # Absence or unreachability: a rollout gap or a chain outage, not
-            # proof of malice. Log-only, unless enforcement is on.
-            if mode == 'enforce':
-                fault(reason)
-            else:
-                logging.warning(f'CAS ATTESTATION (log-only) FAILED: {reason}')
-
         if not registry or registry.startswith('__'):
             logging.info('CAS attestation: no ValidatorRegistry for this network; skipping')
             return
         quote_b64 = os.environ.get('ECAS_CAS_QUOTE', '')
         if not quote_b64:
-            return soft('no ECAS_CAS_QUOTE in the session environment (unattested CAS)')
+            return fault('no ECAS_CAS_QUOTE in the session environment (unattested CAS)')
         try:
             quote = base64.b64decode(quote_b64)
         except Exception as e:
@@ -323,13 +317,24 @@ class EtnySecureLock:
                          {"name": "admittedBlock", "type": "uint64"},
                          {"name": "lastVoteBlock", "type": "uint64"}]},
         ]
-        try:
-            vr = self.w3.eth.contract(address=self.w3.to_checksum_address(registry),
-                                      abi=vr_abi)
-            active = vr.caller().isValidator(cas_address)
-            record = vr.caller().validators(cas_address)
-        except Exception as e:
-            return soft(f'ValidatorRegistry {registry} unreachable: {e}')
+        last_err = None
+        for _attempt in range(3):
+            try:
+                vr = self.w3.eth.contract(address=self.w3.to_checksum_address(registry),
+                                          abi=vr_abi)
+                active = vr.caller().isValidator(cas_address)
+                record = vr.caller().validators(cas_address)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(5)
+        if last_err is not None:
+            # The enclave already depends on this chain for its order
+            # metadata, so an unreachable registry is not a new fragility --
+            # and treating it softly would let an operator bypass the check
+            # by firewalling the RPC.
+            return fault(f'ValidatorRegistry {registry} unreachable after 3 attempts: {last_err}')
         if not active:
             return fault(f'CAS {cas_address} is NOT an active validator')
         registered_mr = record[0].hex()
