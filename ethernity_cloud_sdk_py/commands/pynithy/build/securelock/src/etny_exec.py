@@ -131,6 +131,12 @@ class TaskStatus:
                                  # task's submitter (the in-enclave ownership check was bypassed).
                                  # Set by the securelock when it detects a forged commit caller,
                                  # and independently by the trustedzone re-adjudication.
+    CAS_ATTESTATION_FAULT = 40   # The CAS that provisioned this enclave presented an
+                                 # INVALID self-attestation quote (ECAS_CAS_QUOTE failing
+                                 # the ValidatorRegistry checks). A missing quote is a
+                                 # rollout gap and only logs; an INCORRECT one means the
+                                 # operator provisioned the task through an impostor CAS.
+                                 # Operator fault; the order terminates and is refunded.
 
 
 def _empty_required_config():

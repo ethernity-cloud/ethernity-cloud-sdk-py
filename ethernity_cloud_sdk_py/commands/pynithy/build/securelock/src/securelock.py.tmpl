@@ -273,28 +273,39 @@ class EtnySecureLock:
         """
         registry = self.validator_registry_address
         mode = os.environ.get('ECAS_CAS_ATTEST_MODE', 'log').lower()
+        self.cas_attestation_fault = None
 
-        def fail(reason):
+        def fault(reason):
+            # INVALID evidence: the operator provisioned this task through an
+            # impostor CAS. Recorded here and adjudicated in execute() before
+            # the payload runs -- the task then terminates with
+            # CAS_ATTESTATION_FAULT and the order is refunded.
+            logging.error(f'CAS ATTESTATION INVALID: {reason}')
+            self.cas_attestation_fault = reason
+
+        def soft(reason):
+            # Absence or unreachability: a rollout gap or a chain outage, not
+            # proof of malice. Log-only, unless enforcement is on.
             if mode == 'enforce':
-                logging.error(f'CAS ATTESTATION FAILED: {reason}')
-                raise SystemExit(f'refusing to run: CAS attestation failed ({reason})')
-            logging.warning(f'CAS ATTESTATION (log-only) FAILED: {reason}')
+                fault(reason)
+            else:
+                logging.warning(f'CAS ATTESTATION (log-only) FAILED: {reason}')
 
         if not registry or registry.startswith('__'):
             logging.info('CAS attestation: no ValidatorRegistry for this network; skipping')
             return
         quote_b64 = os.environ.get('ECAS_CAS_QUOTE', '')
         if not quote_b64:
-            return fail('no ECAS_CAS_QUOTE in the session environment (unattested CAS)')
+            return soft('no ECAS_CAS_QUOTE in the session environment (unattested CAS)')
         try:
             quote = base64.b64decode(quote_b64)
         except Exception as e:
-            return fail(f'ECAS_CAS_QUOTE is not valid base64: {e}')
+            return fault(f'ECAS_CAS_QUOTE is not valid base64: {e}')
         # DCAP quote layout: 48-byte header, then the report body --
         # ATTRIBUTES at body+48 (16), MRENCLAVE at body+64 (32),
         # report_data at body+320 (64).
         if len(quote) < 48 + 384:
-            return fail(f'quote too short ({len(quote)} bytes)')
+            return fault(f'quote too short ({len(quote)} bytes)')
         attributes = quote[96:112]
         quote_mrenclave = quote[112:144].hex()
         report_data = quote[368:432]
@@ -318,19 +329,19 @@ class EtnySecureLock:
             active = vr.caller().isValidator(cas_address)
             record = vr.caller().validators(cas_address)
         except Exception as e:
-            return fail(f'ValidatorRegistry {registry} unreachable: {e}')
+            return soft(f'ValidatorRegistry {registry} unreachable: {e}')
         if not active:
-            return fail(f'CAS {cas_address} is NOT an active validator')
+            return fault(f'CAS {cas_address} is NOT an active validator')
         registered_mr = record[0].hex()
         if registered_mr != quote_mrenclave:
-            return fail(f'CAS quote MRENCLAVE {quote_mrenclave} != registered {registered_mr}')
+            return fault(f'CAS quote MRENCLAVE {quote_mrenclave} != registered {registered_mr}')
         registered_cert = record[1].hex()
         if registered_cert != '00' * 32 and registered_cert != bound_cert:
-            return fail(f'CAS quote cert hash {bound_cert} != registered {registered_cert}')
+            return fault(f'CAS quote cert hash {bound_cert} != registered {registered_cert}')
         # SGX ATTRIBUTES.FLAGS bit 1 = DEBUG. A debug CAS protects nothing;
         # testnet builds tolerate it (the whole testnet chain is debug).
         if (attributes[0] & 0x02) and '__NETWORK_TYPE__' != 'testnet':
-            return fail('CAS enclave runs in SGX DEBUG mode')
+            return fault('CAS enclave runs in SGX DEBUG mode')
         logging.info(f'CAS ATTESTATION VERIFIED: validator {cas_address}, '
                      f'MRENCLAVE {quote_mrenclave[:16]}..., certificate bound on-chain')
 
@@ -369,6 +380,17 @@ class EtnySecureLock:
                                                    self.transaction_file,
                                                    transaction)
     def execute(self):
+        # ADJUDICATE the CAS attestation verdict recorded at startup. An
+        # INVALID CAS quote terminates the task before the payload runs; the
+        # failure reporter writes the CAS_ATTESTATION_FAULT result the
+        # trustedzone forwards on-chain -- the refundable operator-fault path.
+        if getattr(self, 'cas_attestation_fault', None):
+            self.task_code = TaskStatus.CAS_ATTESTATION_FAULT
+            self.task_result = (
+                f'CAS_ATTESTATION_FAULT: {self.cas_attestation_fault} -- the '
+                f'operator provisioned this task through a CAS that failed '
+                f'self-attestation; order terminated for refund.')
+            raise ValueError(self.task_result)
         self.payload_data = self.__get_file_content_and_decrypt(self.payload)
         self.input_data = self.__get_file_content_and_decrypt(self.input)
         self.payload_signature = self.__get_file_content_and_decrypt(self.payload + ".sig")
