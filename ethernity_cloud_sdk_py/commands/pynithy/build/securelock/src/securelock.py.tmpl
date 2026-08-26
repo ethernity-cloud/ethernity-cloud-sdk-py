@@ -14,6 +14,7 @@ import ctypes
 import re
 import string
 import random
+import base64  # CAS self-attestation quote decoding
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import serialization, hashes
@@ -47,6 +48,7 @@ class EtnySecureLock:
         self.__load_env()
         self.read_contract_abi()
         self.init_web3()
+        self.verify_cas_attestation()
         self.print_env()
     def __set_initializers(self):
         self.is_valid_client_data = False
@@ -58,6 +60,10 @@ class EtnySecureLock:
         self.transaction_file = '/app/transaction.txt'
         self.smart_contract_address = '0x02882F03097fE8cD31afbdFbB5D72a498B41112c'
         self.image_registry_address = '0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31'
+        # ethernity-cas ValidatorRegistry, substituted at BUILD by pyfreeze.sh
+        # (never CAS- or session-supplied: a rogue CAS must not choose the
+        # registry that judges it). Empty = skip CAS self-attestation.
+        self.validator_registry_address = '__VALIDATOR_REGISTRY_ADDRESS__'
         self.chain_id = 8995
         self.web3_provider = 'https://bloxberg.ethernity.cloud'
         self.etny_bucket = "__BUCKET_NAME__"
@@ -244,6 +250,90 @@ class EtnySecureLock:
                                          abi=self.contract_abi)
         self.image_registry = self.w3.eth.contract(address=self.image_registry_address,
                                                    abi=self.image_registry_abi)
+
+    def verify_cas_attestation(self):
+        """
+        Verify the CAS that provisioned this enclave (the OUTBOUND half of
+        trust; the CAS attesting us is the inbound half).
+
+        The CAS injects ECAS_CAS_QUOTE into the session environment -- a DCAP
+        quote whose report_data binds its EGETKEY validator address (bytes
+        0:20) and the SHA-256 of its certificate (bytes 20:52). We check it
+        against the ValidatorRegistry baked into this build: the address must
+        be an ACTIVE validator, the quote MRENCLAVE must equal that
+        validator's registered measurement, and the bound cert hash must
+        equal the registered certHash. Evicting a CAS on-chain therefore
+        revokes it HERE on the next task, without redeploying enclaves.
+
+        Rollout is LOG-ONLY by default; ECAS_CAS_ATTEST_MODE=enforce (from
+        the session) flips failures into refusal. Debug-signed CAS quotes are
+        tolerated on testnet builds only. The quote's ECDSA/PCK signature
+        chain is NOT yet verified in-enclave; what this binds is
+        quote-contents <-> on-chain record, which is the revocation path.
+        """
+        registry = self.validator_registry_address
+        mode = os.environ.get('ECAS_CAS_ATTEST_MODE', 'log').lower()
+
+        def fail(reason):
+            if mode == 'enforce':
+                logging.error(f'CAS ATTESTATION FAILED: {reason}')
+                raise SystemExit(f'refusing to run: CAS attestation failed ({reason})')
+            logging.warning(f'CAS ATTESTATION (log-only) FAILED: {reason}')
+
+        if not registry or registry.startswith('__'):
+            logging.info('CAS attestation: no ValidatorRegistry for this network; skipping')
+            return
+        quote_b64 = os.environ.get('ECAS_CAS_QUOTE', '')
+        if not quote_b64:
+            return fail('no ECAS_CAS_QUOTE in the session environment (unattested CAS)')
+        try:
+            quote = base64.b64decode(quote_b64)
+        except Exception as e:
+            return fail(f'ECAS_CAS_QUOTE is not valid base64: {e}')
+        # DCAP quote layout: 48-byte header, then the report body --
+        # ATTRIBUTES at body+48 (16), MRENCLAVE at body+64 (32),
+        # report_data at body+320 (64).
+        if len(quote) < 48 + 384:
+            return fail(f'quote too short ({len(quote)} bytes)')
+        attributes = quote[96:112]
+        quote_mrenclave = quote[112:144].hex()
+        report_data = quote[368:432]
+        cas_address = self.w3.to_checksum_address('0x' + report_data[0:20].hex())
+        bound_cert = report_data[20:52].hex()
+
+        vr_abi = [
+            {"name": "isValidator", "type": "function", "stateMutability": "view",
+             "inputs": [{"type": "address"}], "outputs": [{"type": "bool"}]},
+            {"name": "validators", "type": "function", "stateMutability": "view",
+             "inputs": [{"type": "address"}],
+             "outputs": [{"name": "mrenclave", "type": "bytes32"},
+                         {"name": "certHash", "type": "bytes32"},
+                         {"name": "active", "type": "bool"},
+                         {"name": "admittedBlock", "type": "uint64"},
+                         {"name": "lastVoteBlock", "type": "uint64"}]},
+        ]
+        try:
+            vr = self.w3.eth.contract(address=self.w3.to_checksum_address(registry),
+                                      abi=vr_abi)
+            active = vr.caller().isValidator(cas_address)
+            record = vr.caller().validators(cas_address)
+        except Exception as e:
+            return fail(f'ValidatorRegistry {registry} unreachable: {e}')
+        if not active:
+            return fail(f'CAS {cas_address} is NOT an active validator')
+        registered_mr = record[0].hex()
+        if registered_mr != quote_mrenclave:
+            return fail(f'CAS quote MRENCLAVE {quote_mrenclave} != registered {registered_mr}')
+        registered_cert = record[1].hex()
+        if registered_cert != '00' * 32 and registered_cert != bound_cert:
+            return fail(f'CAS quote cert hash {bound_cert} != registered {registered_cert}')
+        # SGX ATTRIBUTES.FLAGS bit 1 = DEBUG. A debug CAS protects nothing;
+        # testnet builds tolerate it (the whole testnet chain is debug).
+        if (attributes[0] & 0x02) and '__NETWORK_TYPE__' != 'testnet':
+            return fail('CAS enclave runs in SGX DEBUG mode')
+        logging.info(f'CAS ATTESTATION VERIFIED: validator {cas_address}, '
+                     f'MRENCLAVE {quote_mrenclave[:16]}..., certificate bound on-chain')
+
     def read_contract_abi(self):
         self.contract_abi = self.__read_contract_abi('abi/etnyImplementationV2.abi')
         self.image_registry_abi = self.__read_contract_abi('abi/image_registry.abi')

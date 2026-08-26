@@ -269,6 +269,17 @@ class BlockchainNetworks(Enum):
         """
         return ESR_CONTRACT_ADDRESSES.get(enum_name, "")
 
+    @classmethod
+    def get_validator_registry_address(cls, enum_name):
+        """ethernity-cas ValidatorRegistry address for a network, or "".
+
+        Same side-map pattern as the ESR address above. "" = no registry on
+        that network; the built enclave then SKIPS CAS self-attestation
+        (log-only absence, never a refusal), so networks without a validator
+        fleet keep working unchanged.
+        """
+        return VALIDATOR_REGISTRY_ADDRESSES.get(enum_name, "")
+
 
 # Canonical ESR (Enclave State Registry) deployments, keyed by BlockchainNetworks
 # member name. See contracts/esr/ for the contract, its ABI and the design
@@ -299,4 +310,13 @@ ESR_CONTRACT_ADDRESSES = {
     "POLYGON_AMOY": "",
     "IOTEX_TESTNET": "",
     "ETHEREUM_SEPOLIA": "",
+}
+
+# ethernity-cas ValidatorRegistry deployments, keyed like the ESR map above
+# (same side-map rationale). Baked into the enclave at build time so it can
+# verify the CAS that provisions it (ECAS_CAS_QUOTE self-attestation) --
+# build-side on purpose: a rogue CAS must not choose the registry that judges
+# it. "" means no registry on that network; the enclave skips the check.
+VALIDATOR_REGISTRY_ADDRESSES = {
+    "BLOXBERG_TESTNET": "0xC4Fcd83743b76fB3081328cFe354De89995eaECD",
 }

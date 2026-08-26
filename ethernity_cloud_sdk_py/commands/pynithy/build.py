@@ -500,6 +500,11 @@ def main():
         .replace("__CHAIN_ID__", str(BLOCKCHAIN_CONFIG.chain_id))
         .replace("__TRUSTED_ZONE_IMAGE__", TRUSTED_ZONE_IMAGE)
         .replace("__NETWORK_TYPE__", BLOCKCHAIN_CONFIG.network_type)
+        # ethernity-cas ValidatorRegistry, baked so the enclave can verify the
+        # CAS that provisions it (ECAS_CAS_QUOTE). "" = no registry on this
+        # network -> the enclave skips the check.
+        .replace("__VALIDATOR_REGISTRY_ADDRESS__",
+                 BlockchainNetworks.get_validator_registry_address(BLOCKCHAIN_NETWORK) or "")
         .replace("__MEMORY_TO_ALLOCATE__", MEMORY_TO_ALLOCATE_FORMATED)
     )
 

@@ -56,6 +56,7 @@ ENV RPC_URL=__RPC_URL__
 ENV CHAIN_ID=__CHAIN_ID__
 ENV TRUSTED_ZONE_IMAGE=__TRUSTED_ZONE_IMAGE__
 ENV NETWORK_TYPE=__NETWORK_TYPE__
+ENV VALIDATOR_REGISTRY_ADDRESS=__VALIDATOR_REGISTRY_ADDRESS__
 RUN chmod +x /etny-securelock/pyfreeze.sh && /etny-securelock/pyfreeze.sh
 
 ########################################################################
