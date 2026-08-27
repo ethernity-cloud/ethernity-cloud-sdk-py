@@ -15,6 +15,9 @@ import re
 import string
 import random
 import base64  # CAS self-attestation quote decoding
+import json
+import secrets  # CAS attestation challenge nonce
+import urllib.request  # enclave-initiated CAS attestation endpoint
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import serialization, hashes
@@ -251,6 +254,107 @@ class EtnySecureLock:
         self.image_registry = self.w3.eth.contract(address=self.image_registry_address,
                                                    abi=self.image_registry_abi)
 
+    def _cas_endpoints_from_chain(self, cas_address):
+        """Endpoints for a CAS, read FROM CHAIN -- never from the environment.
+
+        The node operator controls the host and everything the enclave is
+        handed, so the address to dial must come from the ValidatorRegistry
+        itself. /onion3 is preferred, then the rest, matching the node-side
+        resolver. Returns REST base URLs.
+        """
+        vr_abi = [
+            {"name": "multiaddrsOf", "type": "function", "stateMutability": "view",
+             "inputs": [{"type": "address"}], "outputs": [{"type": "string[]"}]},
+        ]
+        vr = self.w3.eth.contract(
+            address=self.w3.to_checksum_address(self.validator_registry_address),
+            abi=vr_abi)
+        try:
+            mas = vr.caller().multiaddrsOf(self.w3.to_checksum_address(cas_address))
+        except Exception as e:
+            logging.warning(f'CAS attestation: multiaddrsOf failed: {e}')
+            return []
+        onion, rest = [], []
+        for ma in mas:
+            parts = [p for p in str(ma).split('/') if p]
+            if len(parts) != 4 or parts[2] != 'tcp':
+                continue
+            kind, host, port = parts[0], parts[1], parts[3]
+            try:
+                port = int(port)
+            except ValueError:
+                continue
+            # REST pairing convention: rest = 8081 + (enclave - 18765)
+            rest_port = 8081 + (port - 18765) if 18765 <= port < 18965 else 8081
+            if kind == 'onion3':
+                host = host if host.endswith('.onion') else host + '.onion'
+                onion.append(f'http://{host}:{rest_port}')
+            elif kind in ('dns4', 'dns6', 'dns', 'ip4', 'ip6'):
+                rest.append(f'http://{host}:{rest_port}')
+        return onion + rest
+
+    def challenge_cas(self, cas_address, registered_mrenclave, registered_cert):
+        """
+        ENCLAVE-INITIATED CAS attestation: prove the CAS is live NOW.
+
+        The CAS is remote and the operator sits on the path, so the injected
+        environment alone cannot prove liveness. The CAS minted a RANDOM
+        session id (ECAS_ATTEST_SESSION) it holds OPEN; we resolve its
+        endpoint FROM CHAIN, present that id with a nonce WE choose, and it
+        returns a FRESH quote binding
+        sha256(session || nonce || cas_addr || cert_hash). A captured
+        environment stops working when its session closes; a captured
+        RESPONSE cannot match a different nonce. Returns None on success,
+        else the failure reason.
+        """
+        session_id = os.environ.get('ECAS_ATTEST_SESSION', '')
+        if not session_id:
+            return 'no ECAS_ATTEST_SESSION in the environment (CAS cannot be challenged)'
+        nonce = secrets.token_bytes(32)
+        payload = json.dumps({'session': session_id, 'nonce': nonce.hex()}).encode()
+
+        endpoints = self._cas_endpoints_from_chain(cas_address)
+        if not endpoints:
+            return 'the CAS publishes no dialable endpoint on chain'
+        last = 'no endpoint answered'
+        for base in endpoints:
+            url = f'{base}/attest/session'
+            try:
+                req = urllib.request.Request(
+                    url, data=payload, headers={'Content-Type': 'application/json'})
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    doc = json.loads(r.read().decode('utf-8', 'replace'))
+            except Exception as e:
+                last = f'{url}: {e}'
+                continue
+            try:
+                quote = bytes.fromhex(doc.get('quote', ''))
+            except ValueError:
+                return f'{url}: challenge quote is not hex'
+            if len(quote) < 48 + 384:
+                return f'{url}: challenge quote too short ({len(quote)} bytes)'
+            rd = quote[368:432]
+            got_addr = '0x' + rd[32:52].hex()
+            if got_addr.lower() != cas_address.lower():
+                return (f'challenge quote names {got_addr}, not the CAS '
+                        f'{cas_address} we verified on chain')
+            expect = hashlib.sha256(
+                session_id.encode() + nonce
+                + bytes.fromhex(cas_address[2:]) + bytes.fromhex(registered_cert)
+            ).digest()
+            if rd[0:32] != expect:
+                return ('challenge commitment mismatch: the CAS did not sign '
+                        'our session+nonce (stale or replayed response)')
+            qmr = quote[112:144].hex()
+            if qmr.lower() != registered_mrenclave.lower():
+                return (f'challenge quote MRENCLAVE {qmr} != registered '
+                        f'{registered_mrenclave}')
+            logging.info(
+                f'CAS CHALLENGE PASSED: {base} signed our session+nonce with a '
+                f'fresh quote (MRENCLAVE {qmr[:16]}...)')
+            return None
+        return f'CAS challenge failed: {last}'
+
     def verify_cas_attestation(self):
         """
         Verify the CAS that provisioned this enclave (the OUTBOUND half of
@@ -303,8 +407,19 @@ class EtnySecureLock:
         attributes = quote[96:112]
         quote_mrenclave = quote[112:144].hex()
         report_data = quote[368:432]
-        cas_address = self.w3.to_checksum_address('0x' + report_data[0:20].hex())
-        bound_cert = report_data[20:52].hex()
+        # TWO report_data layouts, distinguished by which one names a
+        # REGISTERED validator (checked below):
+        #   fresh  (per-session): [0:32] freshness commitment, [32:52] address
+        #   legacy (boot quote):  [0:20] address,              [20:52] cert hash
+        # The fresh layout is what a current CAS injects; legacy remains only
+        # for a CAS that could not read this enclave's nonce. Reading the wrong
+        # one would parse commitment bytes as an address and fail every task,
+        # so both are resolved and the registry decides which is real.
+        cas_candidates = [
+            (self.w3.to_checksum_address('0x' + report_data[32:52].hex()), None),
+            (self.w3.to_checksum_address('0x' + report_data[0:20].hex()),
+             report_data[20:52].hex()),
+        ]
 
         vr_abi = [
             {"name": "isValidator", "type": "function", "stateMutability": "view",
@@ -318,12 +433,22 @@ class EtnySecureLock:
                          {"name": "lastVoteBlock", "type": "uint64"}]},
         ]
         last_err = None
+        cas_address, bound_cert, active, record = None, None, False, None
         for _attempt in range(3):
             try:
                 vr = self.w3.eth.contract(address=self.w3.to_checksum_address(registry),
                                           abi=vr_abi)
-                active = vr.caller().isValidator(cas_address)
-                record = vr.caller().validators(cas_address)
+                # Whichever layout names an ACTIVE validator is the real one.
+                for cand_addr, cand_cert in cas_candidates:
+                    if vr.caller().isValidator(cand_addr):
+                        cas_address, bound_cert = cand_addr, cand_cert
+                        active = True
+                        record = vr.caller().validators(cand_addr)
+                        break
+                if not active:
+                    # Both layouts resolved to non-validators: report the
+                    # fresh-layout address, which is what a current CAS sends.
+                    cas_address, bound_cert = cas_candidates[0]
                 last_err = None
                 break
             except Exception as e:
@@ -341,14 +466,73 @@ class EtnySecureLock:
         if registered_mr != quote_mrenclave:
             return fault(f'CAS quote MRENCLAVE {quote_mrenclave} != registered {registered_mr}')
         registered_cert = record[1].hex()
-        if registered_cert != '00' * 32 and registered_cert != bound_cert:
-            return fault(f'CAS quote cert hash {bound_cert} != registered {registered_cert}')
+        if bound_cert is not None:
+            # Legacy layout: the cert hash is a readable field, compare it.
+            if registered_cert != '00' * 32 and registered_cert != bound_cert:
+                return fault(f'CAS quote cert hash {bound_cert} != registered {registered_cert}')
+        else:
+            # FRESH layout: the cert hash is not a readable field -- it is
+            # folded into report_data[0:32] together with the attestation
+            # SESSION ID and this enclave's own nonce. Recomputing that
+            # commitment is what binds the injected ENVIRONMENT AS ONE UNIT:
+            # ECAS_ATTEST_SESSION, ECAS_ENCLAVE_NONCE and ECAS_CAS_QUOTE only
+            # agree if the CAS minted all three together for THIS session. An
+            # operator who strips the session id, swaps in another enclave's
+            # id, or pairs a captured quote with a fresh session breaks the
+            # hash -- and cannot repair it, because the commitment is inside
+            # an SGX signature.
+            #
+            # The nonce is echoed by the CAS because SCONE gives the enclave
+            # no way to read its own attestation report_data. Echoing costs
+            # nothing: a tampered nonce simply fails to reproduce [0:32].
+            if registered_cert == '00' * 32:
+                # Without a registered cert there is nothing to recompute
+                # against, so the binding cannot be proven. Tolerating that
+                # would hand every CAS an opt-out: leave certHash unset and
+                # the strongest check silently disappears.
+                return fault(f'CAS {cas_address} has no certHash registered; '
+                             'the fresh quote binding cannot be verified')
+            session_id = os.environ.get('ECAS_ATTEST_SESSION', '')
+            nonce_hex = os.environ.get('ECAS_ENCLAVE_NONCE', '')
+            if not session_id:
+                return fault('fresh CAS quote but no ECAS_ATTEST_SESSION '
+                             '(environment was tampered with)')
+            if not nonce_hex:
+                return fault('fresh CAS quote but no ECAS_ENCLAVE_NONCE '
+                             '(environment was tampered with)')
+            try:
+                nonce = bytes.fromhex(nonce_hex)
+            except ValueError as e:
+                return fault(f'ECAS_ENCLAVE_NONCE is not hex: {e}')
+            expected = hashlib.sha256(
+                session_id.encode()
+                + nonce
+                + bytes.fromhex(cas_address[2:])
+                + bytes.fromhex(registered_cert)).digest()
+            if expected != report_data[0:32]:
+                return fault(
+                    'CAS quote does not commit to the injected environment '
+                    f'(session {session_id[:16]}..., expected '
+                    f'{expected.hex()[:16]}..., quote carries '
+                    f'{report_data[0:32].hex()[:16]}...)')
+            logging.info('CAS environment binding OK: quote commits to '
+                         f'attestation session {session_id[:16]}...')
         # SGX ATTRIBUTES.FLAGS bit 1 = DEBUG. A debug CAS protects nothing;
         # testnet builds tolerate it (the whole testnet chain is debug).
         if (attributes[0] & 0x02) and '__NETWORK_TYPE__' != 'testnet':
             return fault('CAS enclave runs in SGX DEBUG mode')
         logging.info(f'CAS ATTESTATION VERIFIED: validator {cas_address}, '
                      f'MRENCLAVE {quote_mrenclave[:16]}..., certificate bound on-chain')
+
+        # LIVENESS. Everything above proves the injected quote matches an
+        # on-chain record -- but the environment was handed to us by the node.
+        # Challenge the CAS ourselves over an endpoint resolved FROM CHAIN,
+        # with a nonce we pick, so nothing replayed can pass. Same terminal
+        # fault (refund) as any other CAS-attestation failure.
+        challenge_error = self.challenge_cas(
+            cas_address, registered_mr, registered_cert)
+        if challenge_error is not None:
+            return fault(challenge_error)
 
     def read_contract_abi(self):
         self.contract_abi = self.__read_contract_abi('abi/etnyImplementationV2.abi')
