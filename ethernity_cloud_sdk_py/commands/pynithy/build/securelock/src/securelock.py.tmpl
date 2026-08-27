@@ -311,7 +311,15 @@ class EtnySecureLock:
         if not session_id:
             return 'no ECAS_ATTEST_SESSION in the environment (CAS cannot be challenged)'
         nonce = secrets.token_bytes(32)
-        payload = json.dumps({'session': session_id, 'nonce': nonce.hex()}).encode()
+        # Echo back the nonce the CAS injected, so the SAME fresh quote also
+        # re-attests the environment we were handed (report_data[52:64]). The
+        # CAS recomputes the injected commitment from its own address and cert
+        # -- we supply only the nonce -- so this cannot be steered.
+        env_nonce_hex = os.environ.get('ECAS_ENCLAVE_NONCE', '')
+        payload = json.dumps({'session': session_id, 'nonce': nonce.hex(),
+                              'env_nonce': env_nonce_hex}).encode()
+
+
 
         endpoints = self._cas_endpoints_from_chain(cas_address)
         if not endpoints:
@@ -345,6 +353,23 @@ class EtnySecureLock:
             if rd[0:32] != expect:
                 return ('challenge commitment mismatch: the CAS did not sign '
                         'our session+nonce (stale or replayed response)')
+            # ENVIRONMENT RE-ATTESTATION. When we sent env_nonce, the fresh
+            # quote must also carry the head of the commitment that went into
+            # ECAS_CAS_QUOTE. This is what ties the two quotes together: a live
+            # CAS confirming, under a NEW signature, that the environment we
+            # hold is the one it sent. Without it the challenge proved only
+            # that some CAS was alive.
+            if env_nonce_hex:
+                env_expect = hashlib.sha256(
+                    session_id.encode() + bytes.fromhex(env_nonce_hex)
+                    + bytes.fromhex(cas_address[2:])
+                    + bytes.fromhex(registered_cert)).digest()
+                if rd[52:64] != env_expect[0:12]:
+                    return ('the CAS did not confirm the environment it sent: '
+                            f'fresh quote carries {rd[52:64].hex()}, expected '
+                            f'{env_expect[0:12].hex()}')
+                logging.info('CAS re-attested the injected environment under a '
+                             'fresh signature')
             qmr = quote[112:144].hex()
             if qmr.lower() != registered_mrenclave.lower():
                 return (f'challenge quote MRENCLAVE {qmr} != registered '
