@@ -122,13 +122,27 @@ def configure_esr():
 
     address = env_str("ECLD_ESR_CONTRACT")
     if address is None:
-        if non_interactive():
+        # The SDK ships the canonical registry per network, and ecld-build
+        # already falls back to it, so asking here only invites a wrong answer
+        # on a network we know the address for. Ask (or fail) only where the
+        # ESR is not deployed yet.
+        canonical = (
+            BlockchainNetworks.get_esr_contract_address(
+                config.read("BLOCKCHAIN_NETWORK") or ""
+            )
+            or ""
+        ).strip()
+        if canonical:
+            address = canonical
+            print(f"ESR registry contract address: {address} (shipped with the SDK)")
+        elif non_interactive():
             die("ESR enabled but no contract address. Set ECLD_ESR_CONTRACT=0x...")
-        while True:
-            address = input("ESR registry contract address (0x...): ").strip()
-            if re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
-                break
-            print("Not a valid address. Enter a 0x-prefixed 40-hex-char address.")
+        else:
+            while True:
+                address = input("ESR registry contract address (0x...): ").strip()
+                if re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
+                    break
+                print("Not a valid address. Enter a 0x-prefixed 40-hex-char address.")
     if not re.fullmatch(r"0x[0-9a-fA-F]{40}", address):
         die(f"ECLD_ESR_CONTRACT={address!r} is not a valid address.")
 
