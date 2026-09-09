@@ -61,14 +61,19 @@ class EtnySecureLock:
         self.result_code = 'result_code.trustedzone'
         self.result_file = '/app/result.txt'
         self.transaction_file = '/app/transaction.txt'
-        self.smart_contract_address = '0x02882F03097fE8cD31afbdFbB5D72a498B41112c'
-        self.image_registry_address = '0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31'
+        # Chain identity, substituted at BUILD by pyfreeze.sh from the selected
+        # network. These were bloxberg literals, which the sed calls could not
+        # replace, so every enclave shipped pointing at bloxberg's protocol and
+        # image registry: on any other network the registry lookup reverted
+        # ("Could not transact with/call contract function").
+        self.smart_contract_address = '__SMART_CONTRACT_ADDRESS__'
+        self.image_registry_address = '__IMAGE_REGISTRY_ADDRESS__'
         # ethernity-cas ValidatorRegistry, substituted at BUILD by pyfreeze.sh
         # (never CAS- or session-supplied: a rogue CAS must not choose the
         # registry that judges it). Empty = skip CAS self-attestation.
         self.validator_registry_address = '__VALIDATOR_REGISTRY_ADDRESS__'
-        self.chain_id = 8995
-        self.web3_provider = 'https://bloxberg.ethernity.cloud'
+        self.chain_id = __CHAIN_ID__
+        self.web3_provider = '__RPC_URL__'
         self.etny_bucket = "__BUCKET_NAME__"
         self.trustedzone_public_key = ''
         self.trustedzone_public_key_pem = ''
@@ -573,6 +578,8 @@ class EtnySecureLock:
             self.smart_contract_address = os.getenv('ETNY_SMART_CONTRACT_ADDRESS').rstrip()
         if os.getenv('ETNY_WEB3_PROVIDER'):
             self.web3_provider = os.getenv('ETNY_WEB3_PROVIDER').rstrip()
+        if os.getenv('IMAGE_REGISTRY_ADDRESS'):
+            self.image_registry_address = os.getenv('IMAGE_REGISTRY_ADDRESS').rstrip()
         self.order_id = int(os.getenv('ETNY_ORDER_ID'))
 
     def save_result(self):
