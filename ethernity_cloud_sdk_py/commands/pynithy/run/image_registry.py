@@ -134,14 +134,19 @@ class ImageRegistry:
             return True
             
         try:
-            image_owner = self.get_image_details(image_hash).owner
+            # image_hash is the (ipfs_hash, cert, docker_compose_hash) tuple
+            # getLatestImageVersionPublicKey returns; imageDetails is keyed by
+            # the ipfs hash alone. Passing the tuple raises MismatchedABI, which
+            # was swallowed here and reported as an ownership failure, so every
+            # republish by the rightful owner was refused.
+            image_owner = self.get_image_details(image_hash[0]).owner
         except Exception as e:
-            print(f"Error recovering image owner for image hash {image_hash}: {e}")
+            print(f"Error recovering image owner for image hash {image_hash[0]}: {e}")
             return False
     
         if image_owner.lower() != self.acct.address.lower():
             print(
-                f"\t\u2718  Enclave '{project_name}' is owned by '{image_owner}'.\nYou are not the account holder of the image.\nPlease change the project name and try again.\n"
+                f"\t\u2718  Enclave '{self.project_name}' is owned by '{image_owner}'.\nYou are not the account holder of the image.\nPlease change the project name and try again.\n"
             )
             return False
             
