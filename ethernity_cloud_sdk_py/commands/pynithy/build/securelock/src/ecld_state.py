@@ -113,6 +113,20 @@ def ledger_snapshot(include_state=True, keys=None):
     return {"wallet": reg.wallet_address, "entries": entries}
 
 
+def ledger_attestation():
+    """The ledger this securelock staged, for the securelock to attest inside
+    the signed result envelope AFTER restamp_ledger_caller: the enclave's ESR
+    wallet plus the signed authorization records (the same objects written to
+    esr.authorizations.json). The trustedzone adjudicates from this copy,
+    which the node's storage cannot delete, truncate or edit. Never called
+    from payload code. wallet is None when the registry was never configured.
+    """
+    import esr_wallet
+
+    wallet = esr_wallet.derive_wallet_address(_identity_priv) if _identity_priv else None
+    return {"wallet": wallet, "commits": [dict(e) for e in _esr_evidence]}
+
+
 # The authenticated task caller: the wallet that placed the DO request, read
 # from the PoX contract by the TRUSTEDZONE and forwarded over its signed
 # handoff (caller.securelock + .sig, verified by securelock before configure).
