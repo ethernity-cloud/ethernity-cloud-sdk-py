@@ -583,8 +583,15 @@ class EtnySecureLock:
         self.order_id = int(os.getenv('ETNY_ORDER_ID'))
 
     def save_result(self):
-        self.encrypt_file_and_push_to_swifstream(str(self.task_result), self.result)
-        self.encrypt_file_and_push_to_swifstream(str(self.task_code), self.result_code)
+        # Signed over the task binding when the trustedzone supplied one
+        # ("<challenge>:<order_id>:" ahead of the data), so each signature
+        # attests this order and this run's challenge; the data itself is
+        # pushed unchanged. Without a binding (older trustedzone) the bare
+        # data is signed, which that trustedzone verifies.
+        binding = getattr(self, "task_binding", None)
+        prefix = f"{binding['challenge']}:{binding['order_id']}:" if binding else ""
+        self.encrypt_file_and_push_to_swifstream(str(self.task_result), self.result, signed_prefix=prefix)
+        self.encrypt_file_and_push_to_swifstream(str(self.task_code), self.result_code, signed_prefix=prefix)
     def save_pub_cert(self):
         self.swift_stream_service.create_bucket(self.etny_bucket)
         if self.cert_pem:
@@ -642,9 +649,10 @@ class EtnySecureLock:
         # truth, and -- if a forgery is detected -- fails the task locally too.
         # Defence in depth; the trustedzone (separate enclave) and the caller
         # bound into each commit's CID remain the authoritative layers. The
-        # re-stamped ledger is then attested inside the result envelope
-        # save_result signs, so the trustedzone reads it from the signature
-        # rather than from the node's storage.
+        # re-stamped ledger and the task binding are then attested inside the
+        # result envelope save_result signs, so the trustedzone reads them
+        # from the signature rather than from the node's storage.
+        attestation = None
         try:
             import ecld_state
             if ecld_state.restamp_ledger_caller(getattr(self, "task_caller", None)):
@@ -656,25 +664,28 @@ class EtnySecureLock:
                     "SECURITY_VIOLATION: the task attempted to forge the state "
                     "commit caller. The attested submitter was re-asserted and "
                     "the task was terminated.")
-            self.task_result = self._attach_ledger_attestation(
-                self.task_result, ecld_state.ledger_attestation())
+            attestation = ecld_state.ledger_attestation()
         except Exception as e:
             logging.error(f"ESR ledger re-stamp skipped: {e}")
+        self.task_result = self._attach_task_attestation(
+            self.task_result, attestation, getattr(self, "task_binding", None))
 
     @staticmethod
-    def _attach_ledger_attestation(task_result, attestation):
-        """Attest the ESR ledger this securelock staged inside the result
-        envelope the identity key signs (save_result), so the trustedzone
-        adjudicates from a copy the node's storage cannot delete, truncate or
-        edit: esr.wallet is the enclave's ESR address and esr.commits the
-        signed authorization records (the same objects staged to
-        esr.authorizations.json), taken AFTER restamp_ledger_caller so they
-        carry the attested caller. The payload's own entries are kept. Only an
-        ecld envelope can carry the attestation; any other result (legacy
-        plain text, or the SECURITY_VIOLATION text) is returned unchanged, as
-        is an envelope when the registry was never configured.
+    def _attach_task_attestation(task_result, attestation, binding):
+        """Attest this securelock's view of the task inside the result envelope
+        the identity key signs (save_result). esr.wallet is the enclave's ESR
+        address and esr.commits the signed authorization records it staged
+        (the same objects staged to esr.authorizations.json), taken AFTER
+        restamp_ledger_caller so they carry the attested caller; the payload's
+        own entries are kept. order_id and challenge are the task binding the
+        trustedzone forwarded, so a client can check the decrypted result
+        against the on-chain result record. Only an ecld envelope can carry
+        them; any other result (legacy plain text, or the SECURITY_VIOLATION
+        text) is returned unchanged, as is an envelope when there is nothing
+        to attest.
         """
-        if not attestation or not attestation.get("wallet"):
+        has_ledger = bool(attestation and attestation.get("wallet"))
+        if not has_ledger and not binding:
             return task_result
         try:
             envelope = json.loads(str(task_result))
@@ -682,13 +693,17 @@ class EtnySecureLock:
             return task_result
         if not isinstance(envelope, dict) or envelope.get("ecld") != 1:
             return task_result
-        esr = envelope.get("esr")
-        entries = esr.get("entries") if isinstance(esr, dict) and isinstance(esr.get("entries"), list) else []
-        envelope["esr"] = {
-            "wallet": attestation["wallet"],
-            "entries": entries,
-            "commits": attestation["commits"],
-        }
+        if has_ledger:
+            esr = envelope.get("esr")
+            entries = esr.get("entries") if isinstance(esr, dict) and isinstance(esr.get("entries"), list) else []
+            envelope["esr"] = {
+                "wallet": attestation["wallet"],
+                "entries": entries,
+                "commits": attestation["commits"],
+            }
+        if binding:
+            envelope["order_id"] = binding["order_id"]
+            envelope["challenge"] = binding["challenge"]
         return json.dumps(envelope, default=str)
 
     def configure_state_registry(self):
@@ -774,6 +789,26 @@ class EtnySecureLock:
                 f"No attested task caller supplied "
                 f"({e.__class__.__name__}); treating task as anonymous")
 
+        # Task binding: the order id and enclave challenge the trustedzone
+        # generated for this task, forwarded as task.securelock + .sig. When
+        # present (and only with a valid trustedzone signature) the result and
+        # the code are signed over "<challenge>:<order_id>:" and the envelope
+        # carries both, so the trustedzone can refuse a result captured from
+        # any other run. Absent with an older trustedzone, which then verifies
+        # the bare result as before.
+        self.task_binding = None
+        try:
+            task = json.loads(self.get_and_verify_trustedzone_object('task.securelock'))
+            order_id = int(task["order_id"])
+            challenge = str(task["challenge"])
+            if challenge:
+                self.task_binding = {"order_id": order_id, "challenge": challenge}
+                logging.info(f"Task binding attested by trustedzone: order {order_id}")
+        except Exception as e:
+            logging.info(
+                f"No task binding supplied ({e.__class__.__name__}); "
+                f"result will not be bound")
+
     def get_and_verify_trustedzone_object(self, object_name: str) -> str:
         """Decrypt a trustedzone-pushed object and verify its signature --
         the same trust checks the payload/input handoff gets. Raises on any
@@ -798,18 +833,21 @@ class EtnySecureLock:
         if not status:
             raise ValueError(f'Failed to get {object_name} file')
         return content
-    def encrypt_file_and_push_to_swifstream(self, file_data: str, file_name: str):
+    def encrypt_file_and_push_to_swifstream(self, file_data: str, file_name: str, signed_prefix: str = ''):
         """
-        Encrypts data with trustedzone pubkey, signs the original data with our private key,
-        encrypts the signature, and uploads both to storage in separate files.
+        Encrypts data with trustedzone pubkey, signs signed_prefix + the original
+        data with our private key, encrypts the signature, and uploads both to
+        storage in separate files. The prefix binds the signature to a context
+        (the task binding, for the result and code) without changing the
+        uploaded data.
         """
         # Encrypt the data
         encrypted_input = crypto.encrypt_with_pub_key(self.trustedzone_public_key_pem, file_data.encode('utf-8'))
         encrypted_input_base64 = crypto.encrypted_data_to_base64_json(encrypted_input)
         data_file_name = file_name
 
-        # Sign the original data
-        sig_der = crypto.sign_data(self.private_key_pem, file_data.encode('utf-8'))
+        # Sign the original data, with the binding prefix when given
+        sig_der = crypto.sign_data(self.private_key_pem, (signed_prefix + file_data).encode('utf-8'))
         sig_hex = sig_der.hex()
 
         # Encrypt the signature
