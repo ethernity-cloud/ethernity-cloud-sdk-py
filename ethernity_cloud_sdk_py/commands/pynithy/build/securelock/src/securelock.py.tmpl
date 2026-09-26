@@ -167,7 +167,7 @@ class EtnySecureLock:
                 break
             except Exception as e:
                 if attempt == max_retries - 1:
-                    self.task_code = TaskStatus.METADATA_FETCH_ERROR
+                    self.task_code = TaskStatus.SYSTEM_ERROR
                     self.task_result = f'Failed to fetch metadata after {max_retries} attempts: {str(e)}'
                     self.is_valid_client_data = False
                     return
