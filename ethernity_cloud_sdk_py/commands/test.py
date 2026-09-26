@@ -28,6 +28,7 @@ Exit code 0 on TaskStatus SUCCESS, 1 otherwise.
 
 import argparse
 import importlib.util
+import json
 import os
 import sys
 
@@ -192,7 +193,8 @@ def main(argv=None):
     parser.add_argument("--file", "-f", help="read the payload from a file instead")
     parser.add_argument("--input", "-i", dest="input_file", help="file whose content becomes ___etny_data_set___")
     parser.add_argument("--input-text", dest="input_text", help="literal string for ___etny_data_set___")
-    parser.add_argument("--expect", help="exact expected result; exit non-zero on mismatch (ECLD_TEST_EXPECT)")
+    parser.add_argument("--expect", help="expected result: the value the task returned (the envelope's data), "
+                                         "or the full result string; exit non-zero on mismatch (ECLD_TEST_EXPECT)")
     parser.add_argument("--src", default="src", help="project source dir containing serverless/backend.py (default: src)")
     parser.add_argument("--host", default="127.0.0.1", help="serve: bind address (default 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8745, help="serve: port (default 8745)")
@@ -270,11 +272,28 @@ def main(argv=None):
         return 1
     if expected is not None:
         actual = result if isinstance(result, str) else repr(result)
-        if actual != expected:
+        if actual != expected and _envelope_data(actual) != expected:
             print(f"\nEXPECT MISMATCH:\n  expected: {expected!r}\n  actual  : {actual!r}")
             return 1
         print("expect   : matched")
     return 0
+
+
+def _envelope_data(result):
+    """The value the task returned, as a string, when `result` is an ecld
+    result envelope ({"ecld": 1, "type": ..., "data": ...}); None otherwise.
+    text and base64 data are the string as encoded, json data is compact JSON.
+    """
+    try:
+        envelope = json.loads(result)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(envelope, dict) or envelope.get("ecld") != 1:
+        return None
+    data = envelope.get("data")
+    if envelope.get("type") == "json":
+        return json.dumps(data, separators=(",", ":"))
+    return data if isinstance(data, str) else str(data)
 
 
 if __name__ == "__main__":
