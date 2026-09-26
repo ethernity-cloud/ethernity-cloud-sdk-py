@@ -128,10 +128,24 @@ class SecureLockSession:
             return None
         return box.get("out", (int(TaskStatus.SYSTEM_ERROR), "SESSION HANDLER LOST"))
 
+    def _session_binding(self, base_name):
+        """The prefix each session object's signature covers ahead of the
+        data: "<challenge>:<order_id>:<object>:", the task binding the
+        trustedzone forwarded in task.securelock extended with the object's
+        own name, so the trustedzone can refuse an object captured from
+        another order, another run, or another sequence position. Empty
+        without a binding (older trustedzone), which then verifies the bare
+        data."""
+        binding = getattr(self.app, "task_binding", None)
+        if not binding:
+            return ""
+        return f"{binding['challenge']}:{binding['order_id']}:{base_name}:"
+
     def _emit(self, ack_seq, code, data):
         envelope = json.dumps({"ack": ack_seq, "code": int(code), "data": data})
+        name = f"session.output.{self.emitted}"
         self.app.encrypt_file_and_push_to_swifstream(
-            envelope, f"session.output.{self.emitted}")
+            envelope, name, signed_prefix=self._session_binding(name))
         self.emitted += 1
 
     def _close_requested(self):
@@ -164,7 +178,9 @@ class SecureLockSession:
                 "ready": True,
                 "handler": callable(_resolve_handler(self.globals)),
             })
-            self.app.encrypt_file_and_push_to_swifstream(ready, "session.ready")
+            self.app.encrypt_file_and_push_to_swifstream(
+                ready, "session.ready",
+                signed_prefix=self._session_binding("session.ready"))
         except Exception as e:
             logging.error(f"session: could not publish readiness: {e}")
         next_seq = 0
