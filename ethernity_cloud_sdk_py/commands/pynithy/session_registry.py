@@ -103,7 +103,8 @@ def pin_body(ipfs_api_url, body):
 
 
 def _web3(provider_url):
-    w3 = Web3(Web3.HTTPProvider(provider_url))
+    # Bounded: a stalled RPC must fail the step, not hang the publish.
+    w3 = Web3(Web3.HTTPProvider(provider_url, request_kwargs={"timeout": 30}))
     try:
         w3.middleware_onion.inject(_poa_middleware, layer=0)
     except Exception:

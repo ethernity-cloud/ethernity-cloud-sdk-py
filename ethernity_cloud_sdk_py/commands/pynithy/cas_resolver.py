@@ -85,7 +85,8 @@ def resolve_cas(provider_url, registry_address, probe_timeout=10, start_at=None)
     """`host:port` (the ENCLAVE port) of the first active validator whose REST
     port answers, sweeping from a rotating offset so publishes spread across
     the set. None when no validator answered."""
-    w3 = Web3(Web3.HTTPProvider(provider_url))
+    # Bounded: a stalled RPC must fail the resolution, not hang the publish.
+    w3 = Web3(Web3.HTTPProvider(provider_url, request_kwargs={"timeout": 30}))
     reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=REGISTRY_ABI)
     total = reg.functions.validatorCount().call()
     if total == 0:

@@ -47,7 +47,10 @@ class BlockchainNetworks(Enum):
         "testnet", # Network type
         "0x02882F03097fE8cD31afbdFbB5D72a498B41112c", # protocol contract address
         "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31", # Image Registry Contract Address
-        "https://core.bloxberg.org",
+        # The endpoint the runner, the node and the CAS validators use. The
+        # public core.bloxberg.org lagged thousands of blocks and stalled
+        # requests indefinitely on 2026-09-27, hanging a publish mid-way.
+        "https://bloxberg.ethernity.cloud",
         8995,  # Example Chain ID
         False, # EIP 1559 SUPPORT
         0.002,  # Example Gas Price in Gwei
