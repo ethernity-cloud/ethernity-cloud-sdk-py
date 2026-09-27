@@ -71,21 +71,17 @@ def clean_up_registry():
     # Remove the 'registry' directory if it exists
     shutil.rmtree("./build/registry", ignore_errors=True)
 
-    # Stop and remove any running Docker containers or images that might conflict
-    dockerPS = get_command_output("docker ps --filter name=registry -a -q")
-    if dockerPS:
-        run_command(f'docker stop {dockerPS}', True)
-        run_command(f"docker rm {dockerPS} -f", True)
-
-    remainingContainers = get_command_output("docker ps --filter 'name=*etny*' -a -q")
-    if remainingContainers:
-        run_command(f"docker stop {remainingContainers}", True)
-        run_command(f"docker rm {remainingContainers} -f", True)
-
-    remainingContainers = get_command_output("docker ps --filter 'name=las' -a -q")
-    if remainingContainers:
-        run_command(f"docker stop {remainingContainers}", True)
-        run_command(f"docker rm {remainingContainers} -f", True)
+    # Stop and remove the containers THIS build and publish create: the local
+    # registry, and the compose services `las`, `etny-securelock` and
+    # `etny-trustedzone`. Matched by exact name -- `--filter name=` is a
+    # substring regex, and the unanchored `name=las` it used to pass removed
+    # an unrelated `ecas-las2`, the quoting service of a CAS validator set
+    # running on the same host.
+    for name in ("registry", "las", "etny-securelock", "etny-trustedzone", "etny-swift-stream"):
+        containers = get_command_output(f"docker ps --filter 'name=^/{name}$' -a -q")
+        if containers:
+            run_command(f"docker stop {containers}", True)
+            run_command(f"docker rm {containers} -f", True)
 
     dockerImgReg = get_command_output(
         'docker images --filter reference="*registry*" -q'
