@@ -6,7 +6,7 @@
 #
 # What it proves, in order:
 #   1. ecld-init / ecld-build produce a production-signed securelock for
-#      BLOXBERG_TESTNET (network type testnet_cas).
+#      BLOXBERG_TESTNET, the CAS-attested testnet.
 #   2. ecld-publish registers its session in the SessionRegistry, the
 #      validator set serves it, the enclave's certificate comes out of a CAS
 #      session and is registered in the ImageRegistry.

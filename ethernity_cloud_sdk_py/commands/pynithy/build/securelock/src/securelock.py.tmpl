@@ -931,17 +931,22 @@ if __name__ == '__main__':
     key_file = "/private/__SECURELOCK_SESSION__/key.pem"
     cert_file = "/app/__SECURELOCK_SESSION__/cert.pem"
     pub_cert_file = "/app/__SECURELOCK_SESSION__/enclave_pub_cert.pem"
-    # A CAS-provisioned build (mainnet: Scontain CAS; testnet_cas:
-    # ethernity-cas) loads the key and cert the CAS injected from the session;
-    # a testnet build self-signs from MR_ENCLAVE.
-    if network_type in ('mainnet', 'testnet_cas') and os.path.exists(key_file) and os.path.exists(cert_file):
+    # A CAS-provisioned build loads the key and cert the CAS injected from the
+    # session: mainnet (Scontain CAS), and a testnet with a ValidatorRegistry
+    # baked in (ethernity-cas -- the same registry verify_cas_attestation
+    # checks the CAS against). A testnet build with no registry self-signs
+    # from MR_ENCLAVE.
+    validator_registry = '__VALIDATOR_REGISTRY_ADDRESS__'
+    cas_provisioned = network_type == 'mainnet' or (
+        bool(validator_registry) and not validator_registry.startswith('__'))
+    if cas_provisioned and os.path.exists(key_file) and os.path.exists(cert_file):
         logging.info("Loading key and cert from session")
         with open(key_file, 'r+b') as f:
             private_key_pem = f.read()
             f.truncate(0)
         with open(cert_file, 'rb') as f:
             cert_pem = f.read()
-    elif network_type == 'testnet':
+    elif network_type == 'testnet' and not cas_provisioned:
         logging.info("No existing key/cert files found")
         private_key_pem, cert_pem = EtnySecureLock.generate_cert_from_mrenclave()
     else:
@@ -970,7 +975,7 @@ if __name__ == '__main__':
         try:
             esr_address = esr_wallet.derive_wallet_address(private_key_pem)
             logging.info(f"ESR_WALLET_ADDRESS: {esr_address}")
-            if not esr_wallet.is_secret_identity(network_type):
+            if not esr_wallet.is_secret_identity(network_type, attested=cas_provisioned):
                 logging.warning(esr_wallet.INSECURE_IDENTITY_WARNING)
         except Exception as e:
             # Never let ESR derivation break a task: report it the way every

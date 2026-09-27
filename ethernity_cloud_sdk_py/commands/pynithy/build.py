@@ -533,10 +533,10 @@ def main():
         f"--key=/enclave-key.pem --env --heap={MEMORY_TO_ALLOCATE_FORMATED} "
         f"--stack=4M --dlopen=1 --extensions=/lib/libbinary-fs.so"
     )
-    # A CAS-provisioned securelock (mainnet, testnet_cas) is signed
-    # --production: the CAS session admits production enclaves only, and a
-    # debug-signed one is refused at attestation. A self-signing testnet
-    # securelock is signed debug.
+    # A CAS-provisioned securelock (mainnet, or a testnet with a
+    # SessionRegistry) is signed --production: the CAS session admits
+    # production enclaves only, and a debug-signed one is refused at
+    # attestation. A self-signing testnet securelock is signed debug.
     if BLOCKCHAIN_CONFIG.cas_provisioned:
         dockerfile_secure_content_final_signed = dockerfile_secure_content.replace(
             "__SCONE_SIGN__", f"RUN scone-signer sign {sign_flags} --production /usr/local/bin/python"

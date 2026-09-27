@@ -22,13 +22,26 @@ services:
 
 
 def test_bloxberg_testnet_is_cas_provisioned():
+    """The plain "testnet" type; CAS provisioning follows the SessionRegistry
+    being configured, not a special type name."""
     net = BlockchainNetworks.BLOXBERG_TESTNET
-    assert net.network_type == "testnet_cas"
+    assert net.network_type == "testnet"
     assert net.cas_provisioned
     assert BlockchainNetworks.get_session_registry_address("BLOXBERG_TESTNET").startswith("0x")
     assert BlockchainNetworks.get_validator_registry_address("BLOXBERG_TESTNET").startswith("0x")
-    assert not BlockchainNetworks.POLYGON_MAINNET.cas_provisioned or \
-        BlockchainNetworks.POLYGON_MAINNET.network_type == "mainnet"
+
+
+def test_a_testnet_without_a_session_registry_self_signs():
+    for name in ("POLYGON_AMOY", "IOTEX_TESTNET", "ETHEREUM_SEPOLIA"):
+        net = BlockchainNetworks[name]
+        assert net.network_type == "testnet"
+        assert not net.cas_provisioned
+        assert BlockchainNetworks.get_session_registry_address(name) == ""
+
+
+def test_mainnets_are_cas_provisioned():
+    assert BlockchainNetworks.BLOXBERG_MAINNET.cas_provisioned
+    assert BlockchainNetworks.POLYGON_MAINNET.cas_provisioned
 
 
 def test_session_rules_follow_the_body():

@@ -1,6 +1,7 @@
 """Which CAS a CAS-attested network's enclaves are provisioned from.
 
-On a `testnet_cas` network the securelock takes its certificate from an
+On a CAS-attested testnet (one with a SessionRegistry configured -- the
+bloxberg testnet) the securelock takes its certificate from an
 ethernity-cas validator, so `ecld-publish` must name one in the compose it
 ships (`SCONE_CAS_ADDR`) and dial one itself to harvest the public key. The
 validators are enumerated from the ValidatorRegistry and their enclave

@@ -92,8 +92,12 @@ def derive_wallet_address(identity_priv_der: bytes) -> str:
         return Account.from_key(priv).address
 
 
-def is_secret_identity(network_type: str) -> bool:
+def is_secret_identity(network_type: str, attested: bool = False) -> bool:
     """True only when the identity key is genuinely unpredictable to outsiders.
+
+    `attested` is whether this build is provisioned by a CAS (its key comes
+    from the CAS session): true on mainnet and on a testnet whose enclaves are
+    attested by the ethernity-cas validator set.
 
     This is NOT "is the enclave genuine" — SGX protects enclave memory on every
     network. It is the narrower question the ESR wallet depends on: could
@@ -129,9 +133,9 @@ def is_secret_identity(network_type: str) -> bool:
         return True
     if override in ("0", "false", "no"):
         return False
-    # Secrecy tracks attestation, not the network name: mainnet and testnet_cas
-    # are attested (the key comes from a CAS session), testnet is not.
-    return str(network_type).strip().lower() in ("mainnet", "testnet_cas")
+    # Secrecy tracks attestation, not the network name: mainnet is attested,
+    # and so is a testnet whose securelock is provisioned by a CAS.
+    return attested or str(network_type).strip().lower() == "mainnet"
 
 
 INSECURE_IDENTITY_WARNING = (

@@ -1,7 +1,8 @@
 """Register a securelock session ON-CHAIN, in the ethernity-cas SessionRegistry.
 
-On a `testnet_cas` network the CAS is a validator set that reads its sessions
-from the chain and never accepts a POST: the publisher pins the session body
+On a CAS-attested testnet (the bloxberg testnet) the CAS is a validator set
+that reads its sessions from the chain and never accepts a POST: the
+publisher pins the session body
 to IPFS and submits `SessionRegistry.register` itself, with the same wallet
 that owns the ImageRegistry entry. The first registration of a name fixes its
 creator; later versions of the same name must come from that wallet.

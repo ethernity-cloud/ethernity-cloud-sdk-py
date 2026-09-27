@@ -316,9 +316,10 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
             network_type = BLOCKCHAIN_CONFIG.network_type
             if BLOCKCHAIN_CONFIG.cas_provisioned:
                 # The CAS both enclaves are provisioned from. Mainnet: the
-                # Scontain CAS. testnet_cas: an ethernity-cas validator
-                # resolved from the ValidatorRegistry (or ECLD_CAS_ADDR); the
-                # node re-resolves it from chain before each task.
+                # Scontain CAS. A CAS-attested testnet: an ethernity-cas
+                # validator resolved from the ValidatorRegistry (or
+                # ECLD_CAS_ADDR); the node re-resolves it from chain before
+                # each task.
                 if network_type == 'mainnet':
                     cas_addr = 'scone-cas.cf'
                 else:
@@ -803,12 +804,12 @@ def main(private_key):
         )
         
         # Where the session goes depends on who provisions the securelock.
-        # mainnet: POSTed to the Scontain CAS. testnet_cas: registered ON-CHAIN
-        # in the ethernity-cas SessionRegistry, which the validator set reads;
-        # the publish then waits until the validators serve it, because the
-        # public-key harvest below provisions the enclave from them. testnet:
-        # no session at all -- the enclave self-signs from MR_ENCLAVE, and a
-        # CAS-issued SERVER_CERT would not match the key it generates.
+        # mainnet: POSTed to the Scontain CAS. A testnet with a SessionRegistry:
+        # registered ON-CHAIN there, which the validator set reads; the publish
+        # then waits until the validators serve it, because the public-key
+        # harvest below provisions the enclave from them. A testnet without
+        # one: no session at all -- the enclave self-signs from MR_ENCLAVE, and
+        # a CAS-issued SERVER_CERT would not match the key it generates.
         if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
             # Generate certificates if needed
             key_pem_path = certs_dir / "key.pem"
@@ -821,11 +822,8 @@ def main(private_key):
                 spinner.spin_till_done("Generating certificate for session registration", generate_certificates)
 
             spinner.spin_till_done("Registering session into CAS", update_cas_session)
-        elif BLOCKCHAIN_CONFIG.network_type == 'testnet_cas':
+        elif BLOCKCHAIN_CONFIG.cas_provisioned:
             registry_address = BlockchainNetworks.get_session_registry_address(BLOCKCHAIN_NETWORK)
-            if not registry_address:
-                print(f"\t✖  {BLOCKCHAIN_NETWORK} is CAS-attested but names no SessionRegistry")
-                exit(1)
             with open("etny-securelock-test.yaml", "rb") as f:
                 session_body = f.read()
             name, session_hash_hex, body_cid, registered = session_registry.register(
@@ -1007,7 +1005,7 @@ def main(private_key):
 
     # The on-chain session points at the image it admits, so a validator can
     # pin the image beside the body it serves.
-    if BLOCKCHAIN_CONFIG.network_type == 'testnet_cas':
+    if BLOCKCHAIN_CONFIG.cas_provisioned and BLOCKCHAIN_CONFIG.network_type != 'mainnet':
         session_registry.link_image(
             BLOCKCHAIN_CONFIG.rpc_url, BLOCKCHAIN_CONFIG.chain_id,
             BlockchainNetworks.get_session_registry_address(BLOCKCHAIN_NETWORK),
