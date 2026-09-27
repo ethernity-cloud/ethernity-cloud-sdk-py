@@ -28,6 +28,9 @@
 #                         derived from it; the first publish of a name fixes
 #                         its creator wallet)
 #   E2E_WORKDIR           where the project is scaffolded, default ./cas-e2e-work
+#   E2E_SKIP_BUILD        set to 1 to reuse the securelock image a previous run
+#                         built in E2E_WORKDIR (publish then skips the session
+#                         registration too, since the MRENCLAVE is unchanged)
 #   E2E_TASK_PRICE        tETNY offered per task, default 3
 #   E2E_VERDICT_TIMEOUT   seconds to wait for the CAS verdict, default 1200
 #   VALIDATOR_REGISTRY    default 0xC40102c0b3f87663C925083861F38e2498C2038F
@@ -66,7 +69,11 @@ print("project", c["PROJECT_NAME"], "on", c["BLOCKCHAIN_NETWORK"])
 PY
 
 step "2. build the securelock (production-signed, CAS-provisioned)"
-ECLD_MEMORY_TO_ALLOCATE="${ECLD_MEMORY_TO_ALLOCATE:-1GB}" ecld-build < /dev/null
+if [ "${E2E_SKIP_BUILD:-0}" = "1" ] && docker image inspect localhost:5000/etny-securelock:latest >/dev/null 2>&1; then
+  echo "reusing the securelock image built by a previous run (E2E_SKIP_BUILD=1)"
+else
+  ECLD_MEMORY_TO_ALLOCATE="${ECLD_MEMORY_TO_ALLOCATE:-1GB}" ecld-build < /dev/null
+fi
 
 step "3. publish: on-chain session, CAS-provisioned certificate, ImageRegistry"
 ECLD_REMOTE_CERT_EXTRACTION=never ecld-publish < /dev/null

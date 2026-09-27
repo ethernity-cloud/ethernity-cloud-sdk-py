@@ -103,8 +103,23 @@ class IPFSClient:
             )
             sys.stdout.flush()
 
-    @retry_on_failure()
-    def upload_dir(self, dir_path):
+    def upload_dir(self, dir_path, attempts=3):
+        """Add a directory tree and return its root CID.
+
+        The enclave image is ~1.2 GB and the gateway processes the upload
+        only after the last byte, so a failure (a gateway-side timeout, a
+        dropped connection) shows up as a non-200 response after minutes of
+        transfer. Each attempt re-sends the whole tree; `attempts` bounds it.
+        """
+        for attempt in range(1, attempts + 1):
+            ipfs_hash = self._upload_dir_once(dir_path)
+            if ipfs_hash:
+                return ipfs_hash
+            if attempt < attempts:
+                print(f"\tretrying the upload ({attempt}/{attempts} failed)")
+        return False
+
+    def _upload_dir_once(self, dir_path):
 
         self._last_shown_mb = -1
         self.frame_index = 0
@@ -135,8 +150,11 @@ class IPFSClient:
         encoder = MultipartEncoder(fields=fields)
         monitor = MultipartEncoderMonitor(encoder, self.update_progress)
 
+        # `timeout` is the IPFS API's own bound on the request; 5m was shorter
+        # than a 1.2 GB upload over an ordinary uplink, and the gateway aborted
+        # the add after every byte had been sent.
         response = requests.post(
-            self.add_url + "?quieter=true&stream-channels=true&wrap-with-directory=true&progress=false&timeout=5m",
+            self.add_url + "?quieter=true&stream-channels=true&wrap-with-directory=true&progress=false&timeout=60m",
             data=monitor,
             stream=True,
             headers={
@@ -161,6 +179,13 @@ class IPFSClient:
                         ipfs_hash = file_info["Hash"]
                         sys.stdout.write("\r" + f"\t{self.CHECK}Uploading and pinning enclave to IPFS")
                         return ipfs_hash
+                # A 200 with no root entry: the gateway closed the add before
+                # the wrapping directory was written (its own request timeout,
+                # reached after the last byte arrived).
+                sys.stdout.write("\r" + f"\t{self.FAIL}Uploading and pinning enclave to IPFS")
+                print(f"Failed to upload to IPFS: the gateway returned no root hash "
+                      f"({len(response.text)} bytes of response)")
+                return False
             except Exception as e:
                 sys.stdout.write("\r" + f"\t{self.FAIL}Uploading and pinning enclave to IPFS")
                 print(f"Failed to upload to IPFS. Error: {e}")
