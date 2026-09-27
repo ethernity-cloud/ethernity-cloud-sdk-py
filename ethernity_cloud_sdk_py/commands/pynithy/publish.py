@@ -20,6 +20,7 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from requests.packages.urllib3 import disable_warnings
 
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
+from ethernity_cloud_sdk_py.commands.pynithy import cas_resolver, session_registry
 import ethernity_cloud_sdk_py.commands.pynithy.run.public_key_service as public_key_service
 from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
 from ethernity_cloud_sdk_py.commands.pynithy.ipfs_client import IPFSClient
@@ -313,9 +314,20 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
 
             # Determine environments based on network_type
             network_type = BLOCKCHAIN_CONFIG.network_type
-            if network_type == 'mainnet':
+            if BLOCKCHAIN_CONFIG.cas_provisioned:
+                # The CAS both enclaves are provisioned from. Mainnet: the
+                # Scontain CAS. testnet_cas: an ethernity-cas validator
+                # resolved from the ValidatorRegistry (or ECLD_CAS_ADDR); the
+                # node re-resolves it from chain before each task.
+                if network_type == 'mainnet':
+                    cas_addr = 'scone-cas.cf'
+                else:
+                    cas_addr = cas_resolver.cas_address_for(
+                        BLOCKCHAIN_CONFIG.rpc_url,
+                        BlockchainNetworks.get_validator_registry_address(BLOCKCHAIN_NETWORK))
+                    print(f"\t✔  CAS for this network: {cas_addr}")
                 securelock_env = {
-                    'SCONE_CAS_ADDR': 'scone-cas.cf',
+                    'SCONE_CAS_ADDR': cas_addr,
                     'SCONE_LAS_ADDR': 'las',
                     'SCONE_CONFIG_ID': f"{securelock}/application",
                     'SCONE_HEAP': memory,
@@ -325,7 +337,7 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
                     'SCONE_EXTENSIONS_PATH': '/lib/libbinary-fs.so'
                 }
                 trustedzone_env = {
-                    'SCONE_CAS_ADDR': 'scone-cas.cf',
+                    'SCONE_CAS_ADDR': cas_addr,
                     'SCONE_LAS_ADDR': 'las',
                     'SCONE_CONFIG_ID': f"{trustedzone}/application",
                     'SCONE_HEAP': '256M',
@@ -770,7 +782,7 @@ def main(private_key):
     # runtime recompute produces a DEBUG enclave that CAS rejects ("Debug mode is
     # enabled"). Refuse to publish such an image instead of failing opaquely
     # later (or registering an untrusted identity on-chain).
-    if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
+    if BLOCKCHAIN_CONFIG.cas_provisioned:
         signed_mrenclave = extract_signed_mrenclave("etny-securelock")
         if not signed_mrenclave or signed_mrenclave != mrenclave_securelock:
             print(f"Error: securelock runtime MRENCLAVE ({mrenclave_securelock}) != signed MRENCLAVE ({signed_mrenclave}).")
@@ -790,12 +802,13 @@ def main(private_key):
             "etny-securelock-test.yaml",
         )
         
-        # CAS session registration is mainnet-only. On testnet the enclaves run
-        # in non-CAS mode: they generate their certificate in-enclave from the
-        # MR_ENCLAVE (self-signed, "no CAS available"). Registering a CAS session
-        # for testnet would publish a CAS-issued SERVER_CERT identity that does
-        # NOT match the enclave's self-generated key, so the trustedzone can't
-        # decrypt its session data and fails with "MAC check failed". Skip it.
+        # Where the session goes depends on who provisions the securelock.
+        # mainnet: POSTed to the Scontain CAS. testnet_cas: registered ON-CHAIN
+        # in the ethernity-cas SessionRegistry, which the validator set reads;
+        # the publish then waits until the validators serve it, because the
+        # public-key harvest below provisions the enclave from them. testnet:
+        # no session at all -- the enclave self-signs from MR_ENCLAVE, and a
+        # CAS-issued SERVER_CERT would not match the key it generates.
         if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
             # Generate certificates if needed
             key_pem_path = certs_dir / "key.pem"
@@ -808,6 +821,22 @@ def main(private_key):
                 spinner.spin_till_done("Generating certificate for session registration", generate_certificates)
 
             spinner.spin_till_done("Registering session into CAS", update_cas_session)
+        elif BLOCKCHAIN_CONFIG.network_type == 'testnet_cas':
+            registry_address = BlockchainNetworks.get_session_registry_address(BLOCKCHAIN_NETWORK)
+            if not registry_address:
+                print(f"\t✖  {BLOCKCHAIN_NETWORK} is CAS-attested but names no SessionRegistry")
+                exit(1)
+            with open("etny-securelock-test.yaml", "rb") as f:
+                session_body = f.read()
+            name, session_hash_hex, body_cid, registered = session_registry.register(
+                BLOCKCHAIN_CONFIG.rpc_url, BLOCKCHAIN_CONFIG.chain_id, registry_address,
+                private_key, session_body, ipfs_client.api_url)
+            if registered:
+                print(f"\t✔  Session {name} registered on-chain (body {body_cid})")
+                session_registry.wait_visible(
+                    BLOCKCHAIN_CONFIG.rpc_url, registry_address, name, session_hash_hex)
+            else:
+                print(f"\t✔  Session {name} already registered on-chain with this body (0x{session_hash_hex})")
         else:
             print("\t✔  Testnet: skipping CAS session registration (enclave self-signs from MR_ENCLAVE)")
 
@@ -975,6 +1004,15 @@ def main(private_key):
     except Exception as e:
         print(e)
         exit()
+
+    # The on-chain session points at the image it admits, so a validator can
+    # pin the image beside the body it serves.
+    if BLOCKCHAIN_CONFIG.network_type == 'testnet_cas':
+        session_registry.link_image(
+            BLOCKCHAIN_CONFIG.rpc_url, BLOCKCHAIN_CONFIG.chain_id,
+            BlockchainNetworks.get_session_registry_address(BLOCKCHAIN_NETWORK),
+            private_key, config.read("SECURELOCK_SESSION"), IPFS_HASH)
+        print(f"\t✔  Session {config.read('SECURELOCK_SESSION')} linked to image {IPFS_HASH}")
 
     # The LAST thing a publish prints: the ESR identity address, where it
     # cannot scroll away. State commits are relayed and paid by the node, so

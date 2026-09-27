@@ -267,17 +267,25 @@ class EtnySecureLock:
         itself. /onion3 is preferred, then the rest, matching the node-side
         resolver. Returns REST base URLs.
         """
-        vr_abi = [
+        # Endpoints live in the CasKeyStore the registry names via keyStore();
+        # the registry's own forwarders were removed when it reached the
+        # EIP-170 size limit.
+        registry_abi = [
+            {"name": "keyStore", "type": "function", "stateMutability": "view",
+             "inputs": [], "outputs": [{"type": "address"}]},
+        ]
+        store_abi = [
             {"name": "multiaddrsOf", "type": "function", "stateMutability": "view",
              "inputs": [{"type": "address"}], "outputs": [{"type": "string[]"}]},
         ]
-        vr = self.w3.eth.contract(
-            address=self.w3.to_checksum_address(self.validator_registry_address),
-            abi=vr_abi)
         try:
-            mas = vr.caller().multiaddrsOf(self.w3.to_checksum_address(cas_address))
+            vr = self.w3.eth.contract(
+                address=self.w3.to_checksum_address(self.validator_registry_address),
+                abi=registry_abi)
+            store = self.w3.eth.contract(address=vr.caller().keyStore(), abi=store_abi)
+            mas = store.caller().multiaddrsOf(self.w3.to_checksum_address(cas_address))
         except Exception as e:
-            logging.warning(f'CAS attestation: multiaddrsOf failed: {e}')
+            logging.warning(f'CAS attestation: reading the CAS endpoints from chain failed: {e}')
             return []
         onion, rest = [], []
         for ma in mas:
@@ -454,13 +462,17 @@ class EtnySecureLock:
         vr_abi = [
             {"name": "isValidator", "type": "function", "stateMutability": "view",
              "inputs": [{"type": "address"}], "outputs": [{"type": "bool"}]},
+            # The registry's Validator struct: the measurement is `bytes` at
+            # its platform width (32 for SGX MRENCLAVE), not bytes32.
             {"name": "validators", "type": "function", "stateMutability": "view",
              "inputs": [{"type": "address"}],
-             "outputs": [{"name": "mrenclave", "type": "bytes32"},
+             "outputs": [{"name": "measurement", "type": "bytes"},
                          {"name": "certHash", "type": "bytes32"},
                          {"name": "active", "type": "bool"},
                          {"name": "admittedBlock", "type": "uint64"},
-                         {"name": "lastVoteBlock", "type": "uint64"}]},
+                         {"name": "lastVoteBlock", "type": "uint64"},
+                         {"name": "teeType", "type": "uint16"},
+                         {"name": "operator", "type": "address"}]},
         ]
         last_err = None
         cas_address, bound_cert, active, record = None, None, False, None
@@ -919,8 +931,10 @@ if __name__ == '__main__':
     key_file = "/private/__SECURELOCK_SESSION__/key.pem"
     cert_file = "/app/__SECURELOCK_SESSION__/cert.pem"
     pub_cert_file = "/app/__SECURELOCK_SESSION__/enclave_pub_cert.pem"
-    # Load if files exist, otherwise generate
-    if network_type == 'mainnet' and os.path.exists(key_file) and os.path.exists(cert_file):
+    # A CAS-provisioned build (mainnet: Scontain CAS; testnet_cas:
+    # ethernity-cas) loads the key and cert the CAS injected from the session;
+    # a testnet build self-signs from MR_ENCLAVE.
+    if network_type in ('mainnet', 'testnet_cas') and os.path.exists(key_file) and os.path.exists(cert_file):
         logging.info("Loading key and cert from session")
         with open(key_file, 'r+b') as f:
             private_key_pem = f.read()

@@ -1,5 +1,18 @@
 # Tests
 
+## `e2e_testnet_cas.sh` — the CAS-attested testnet, end to end
+
+Builds a securelock with this SDK, publishes it against the ethernity-cas
+validator set (session registered on-chain, certificate from a CAS session),
+runs one task on the network and waits for a CAS validator's verdict on the
+order. Needs an SGX host with docker, a `registry.scontain.com` login, the
+SDK and `ethernity-cloud-runner-py` installed, and a funded testnet wallet in
+`ECLD_PRIVATE_KEY`. Spends testnet gas and tETNY.
+
+```bash
+ECLD_PRIVATE_KEY=0x... bash tests/e2e_testnet_cas.sh
+```
+
 ## `unattended_acceptance.sh` — release gate
 
 Proves the CLI is fully drivable without a terminal: every command either

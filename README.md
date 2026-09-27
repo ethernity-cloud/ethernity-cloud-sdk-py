@@ -56,7 +56,17 @@ The sdk has been tested on the following operating systems:
 
 ## Blockchain compatibility
 - Bloxberg:
-    - Testnet - tested and working
+    - Testnet - tested and working. CAS-attested (`testnet_cas`): the
+      securelock is provisioned by the ethernity-cas validator set exactly as
+      on mainnet. `ecld-publish` registers the securelock session on-chain in
+      the SessionRegistry (`0xcb1F389b...`), resolves a CAS from the
+      ValidatorRegistry (`0xC40102c0...`, or `ECLD_CAS_ADDR=host:port`) for
+      the compose and the certificate harvest, and links the session to the
+      published image. `ecld-build` signs the securelock `--production`.
+      Harvesting the certificate needs SGX; the remote extraction service
+      does not reach this CAS. `tests/e2e_testnet_cas.sh` runs the whole
+      path -- init, build, publish, one task, and the CAS validators'
+      verdict on it.
     - Mainnet - to be provided during the following updates
 - Polyhon:
     - Amoy Testnet - to be provided during the following updates

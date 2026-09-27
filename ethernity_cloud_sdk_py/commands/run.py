@@ -282,6 +282,11 @@ def main(argv=None):
     status = state.get("status")
     if status == "SUCCESS":
         result = runner.get_result() or {}
+        # The order this result came from, so the run can be followed on
+        # chain: the CAS validators' verdict is keyed by order id.
+        if isinstance(result, dict):
+            result["order_id"] = runner.order_id
+            result["do_request_id"] = runner.do_request_id
         if args.json:
             print(json.dumps(result, indent=2, default=str))
         else:
@@ -289,6 +294,7 @@ def main(argv=None):
             code_str = result.get("task_code_string") if isinstance(result, dict) else None
             if code_str and code_str != "SUCCESS":
                 print(f"task code : {result.get('task_code_int')} ({code_str})")
+            print(f"order     : {runner.order_id} (DO request {runner.do_request_id})")
             print("result    :")
             print(value)
         # A non-SUCCESS enclave task code is a failed run even though the order

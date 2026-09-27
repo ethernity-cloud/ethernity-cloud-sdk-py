@@ -129,9 +129,9 @@ def is_secret_identity(network_type: str) -> bool:
         return True
     if override in ("0", "false", "no"):
         return False
-    # Secrecy tracks attestation, not the network name: mainnet is attested,
-    # testnet is not. The override exists for a future attested-testnet build.
-    return str(network_type).strip().lower() == "mainnet"
+    # Secrecy tracks attestation, not the network name: mainnet and testnet_cas
+    # are attested (the key comes from a CAS session), testnet is not.
+    return str(network_type).strip().lower() in ("mainnet", "testnet_cas")
 
 
 INSECURE_IDENTITY_WARNING = (

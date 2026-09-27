@@ -41,7 +41,12 @@ class BlockchainNetworks(Enum):
     BLOXBERG_TESTNET = (
         "Bloxberg Testnet", # Network display name
         "bloxberg", # Network short name
-        "testnet", # Network type
+        # CAS-attested: the securelock is provisioned by the ethernity-cas
+        # validator set exactly as on mainnet (session registered ON-CHAIN in
+        # the SessionRegistry below, certificate from the CAS session, CAS
+        # verified against the ValidatorRegistry). "testnet" would self-sign
+        # from MR_ENCLAVE and contact no CAS.
+        "testnet_cas", # Network type
         "0x02882F03097fE8cD31afbdFbB5D72a498B41112c", # protocol contract address
         "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31", # Image Registry Contract Address
         "https://core.bloxberg.org",
@@ -280,6 +285,23 @@ class BlockchainNetworks(Enum):
         """
         return VALIDATOR_REGISTRY_ADDRESSES.get(enum_name, "")
 
+    @classmethod
+    def get_session_registry_address(cls, enum_name):
+        """ethernity-cas SessionRegistry address for a network, or "".
+
+        Set for every `testnet_cas` network: the securelock session is
+        registered there by `ecld-publish`. "" on the other networks, whose
+        sessions go to the Scontain CAS (mainnet) or nowhere (testnet).
+        """
+        return SESSION_REGISTRY_ADDRESSES.get(enum_name, "")
+
+    @property
+    def cas_provisioned(self):
+        """Whether the securelock takes its certificate from a CAS session:
+        mainnet (Scontain CAS) and testnet_cas (ethernity-cas). A "testnet"
+        securelock self-signs from MR_ENCLAVE instead."""
+        return self.network_type in ("mainnet", "testnet_cas")
+
 
 # Canonical ESR (Enclave State Registry) deployments, keyed by BlockchainNetworks
 # member name. See contracts/esr/ for the contract, its ABI and the design
@@ -318,5 +340,13 @@ ESR_CONTRACT_ADDRESSES = {
 # build-side on purpose: a rogue CAS must not choose the registry that judges
 # it. "" means no registry on that network; the enclave skips the check.
 VALIDATOR_REGISTRY_ADDRESSES = {
-    "BLOXBERG_TESTNET": "0xC4Fcd83743b76fB3081328cFe354De89995eaECD",
+    "BLOXBERG_TESTNET": "0xC40102c0b3f87663C925083861F38e2498C2038F",
+}
+
+# ethernity-cas SessionRegistry deployments, keyed like the maps above. On a
+# `testnet_cas` network `ecld-publish` registers the securelock session here
+# (body pinned to IPFS as CIDv1/raw/sha2-256) instead of posting it to a CAS:
+# the validator set reads its sessions from the chain and accepts no POST.
+SESSION_REGISTRY_ADDRESSES = {
+    "BLOXBERG_TESTNET": "0xcb1F389bF4524d1D61EDcbC24eC1F1F9C3FF4Fa6",
 }
