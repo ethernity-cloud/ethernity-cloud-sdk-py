@@ -5,7 +5,10 @@ __PREDECESSOR__
 security:
   attestation:
     tolerate: [hyperthreading, outdated-tcb, software-hardening-needed]
-    ignore_advisories: ["INTEL-SA-00615"]
+    # Substituted per network by publish.py: mainnet lists the advisories it
+    # accepts, a testnet takes the wildcard ["*"] so an operator's platform is
+    # not refused for a TCB level that has no bearing on a test network.
+    ignore_advisories: __IGNORE_ADVISORIES__
 
 services:
    - name: application

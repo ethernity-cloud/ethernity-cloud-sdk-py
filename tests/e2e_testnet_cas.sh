@@ -31,6 +31,9 @@
 #   E2E_SKIP_BUILD        set to 1 to reuse the securelock image a previous run
 #                         built in E2E_WORKDIR (publish then skips the session
 #                         registration too, since the MRENCLAVE is unchanged)
+#   E2E_NODE              node operator address to pin the order to; unset lets
+#                         any node on the network take it, including one whose
+#                         platform the CAS refuses
 #   E2E_TASK_PRICE        tETNY offered per task, default 3
 #   E2E_VERDICT_TIMEOUT   seconds to wait for the CAS verdict, default 1200
 #   VALIDATOR_REGISTRY    default 0xC40102c0b3f87663C925083861F38e2498C2038F
@@ -85,8 +88,8 @@ for k in ("IPFS_HASH", "MRENCLAVE_SECURELOCK", "SECURELOCK_SESSION"):
 print("securelock", c["SECURELOCK_SESSION"], "image", c["IPFS_HASH"], "mrenclave", c["MRENCLAVE_SECURELOCK"])
 PY
 
-step "4. run one task on the network"
-ecld-run --json --task-price "$TASK_PRICE" 'hello("CAS")' > run.json < /dev/null
+step "4. run one task on the network${E2E_NODE:+ (node $E2E_NODE)}"
+ecld-run --json --task-price "$TASK_PRICE" ${E2E_NODE:+--node "$E2E_NODE"} 'hello("CAS")' > run.json < /dev/null
 ORDER_ID="$("$PY" -c 'import json; r=json.load(open("run.json")); print(r["order_id"])')"
 "$PY" - <<'PY'
 import json

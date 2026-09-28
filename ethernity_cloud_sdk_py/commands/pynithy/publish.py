@@ -181,6 +181,17 @@ def process_yaml_template(template_file, output_file):
 
     PREDECESSOR_HASH_SECURELOCK = config.read("PREDECESSOR_HASH_SECURELOCK")
 
+    # Which Intel advisories the session accepts a platform to be behind on.
+    # MAINNET lists them explicitly: each entry is a decision that a known
+    # advisory does not disqualify a production platform, and a future one
+    # must be reviewed rather than inherited. A TESTNET takes the wildcard --
+    # an operator's box refused for its TCB level teaches nothing about the
+    # dApp under test, and the microcode/BIOS level of volunteer testnet
+    # hardware is not something a developer can drive.
+    network_type = BlockchainNetworks.get_details_by_enum_name(
+        config.read("BLOCKCHAIN_NETWORK")).network_type
+    ignore_advisories = '["INTEL-SA-00615"]' if network_type == "mainnet" else '["*"]'
+
     replacements = {
         "__PREDECESSOR__": (
             f""
@@ -189,6 +200,7 @@ def process_yaml_template(template_file, output_file):
         ),
         "__MRENCLAVE__": MRENCLAVE_SECURELOCK,
         "__ENCLAVE_NAME__": SECURELOCK_SESSION,
+        "__IGNORE_ADVISORIES__": ignore_advisories,
     }
 
     if not os.path.exists(template_file):
