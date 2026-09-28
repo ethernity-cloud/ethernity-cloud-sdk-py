@@ -314,7 +314,11 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
 
 
             # las command and entrypoint differences
-            las_command = "bash -c '/las_entrypoint.sh && /usr/local/bin/las | tee /var/log/las.log'"
+            # -a 0.0.0.0: without it the LAS binds dual-stack (:::18766) and
+            # cannot allocate the socket on a host booted with ipv6.disable=1,
+            # so it crash-loops and every task on that node times out with no
+            # attestation. The enclaves reach it over IPv4 either way.
+            las_command = "bash -c '/las_entrypoint.sh && /usr/local/bin/las -a 0.0.0.0 | tee /var/log/las.log'"
             data['services']['las']['entrypoint'] = "/las_entrypoint.sh"
             data['services']['las']['command'] = las_command
 
