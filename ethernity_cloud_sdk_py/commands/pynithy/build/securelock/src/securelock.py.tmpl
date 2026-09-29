@@ -297,8 +297,12 @@ class EtnySecureLock:
                 port = int(port)
             except ValueError:
                 continue
-            # REST pairing convention: rest = 8081 + (enclave - 18765)
-            rest_port = 8081 + (port - 18765) if 18765 <= port < 18965 else 8081
+            # REST pairing convention: a CAS publishes its enclave port only,
+            # and its REST port sits at the same offset from the in-container
+            # pair 18765/8081 (19768 -> 9084).
+            rest_port = 8081 + (port - 18765)
+            if not 1 <= rest_port <= 65535:
+                continue
             if kind == 'onion3':
                 host = host if host.endswith('.onion') else host + '.onion'
                 onion.append(f'http://{host}:{rest_port}')
