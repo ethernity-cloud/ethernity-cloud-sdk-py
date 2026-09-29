@@ -1,3 +1,6 @@
+# setuptools reads this file by the exact name MANIFEST.in. A case-insensitive
+# filesystem also matches MANIFEST.IN; a case-sensitive one does not, and the
+# build then ships no ABI, template or script files at all.
 include README.md
 include LICENSE
 recursive-include ethernity_cloud_sdk_py/templates *
