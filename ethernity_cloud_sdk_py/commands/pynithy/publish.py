@@ -459,14 +459,34 @@ def extract_public_key_local():
             result = _extract_certificate_pem(output)
             if result and "-----BEGIN CERTIFICATE-----" not in result:
                 result = ""
+            if not result:
+                # The enclave ran but printed no certificate. Show what it
+                # printed instead: the caller's message assumes SGX is
+                # missing, and that is only one of the ways this fails.
+                _print_extraction_output(output)
             # ESR (RFC §5.2): the enclave prints its wallet address on the same
             # channel as the cert. Capture it here — on mainnet this is the only
             # place it can come from, since the identity key never leaves.
             _capture_esr_wallet_address(output)
         except subprocess.CalledProcessError as e:
+            # docker-compose exited non-zero. Its output names the actual
+            # cause -- a LAS that never bound, a CAS that refused the quote,
+            # a missing image -- none of which is "SGX is not configured".
+            _print_extraction_output((e.output or b"").decode(errors="replace"))
             return False
 
         return result
+
+
+def _print_extraction_output(output, lines=15):
+        """Print the tail of the enclave's output when no certificate came out."""
+        tail = [l for l in (output or "").strip().splitlines() if l.strip()][-lines:]
+        if not tail:
+            print("\t   (the enclave produced no output)")
+            return
+        print(f"\t   last {len(tail)} line(s) from the enclave:")
+        for l in tail:
+            print(f"\t   | {l}")
 
 
 def _capture_esr_wallet_address(output):
