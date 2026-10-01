@@ -48,6 +48,10 @@ import time
 SECURELOCK_PROTOCOL_VERSION = "v3"
 
 DEFAULT_IPFS = "https://ipfs.ethernity.cloud/api/v0"
+# `--ipfs intake`: no IPFS API of our own; artefact CIDs are computed locally
+# and the bytes are delivered to the bootnode's payload intake once the DO
+# request is on chain (runner set_public_intake).
+INTAKE_KEYWORD = "intake"
 
 
 def _load_config():
@@ -173,7 +177,9 @@ def main(argv=None):
     parser.add_argument("--node", default="", help="target a specific node operator address")
     parser.add_argument("--securelock", help="securelock enclave name (default: PROJECT_NAME)")
     parser.add_argument("--trustedzone", help="trustedzone enclave name (default: TRUSTED_ZONE_IMAGE)")
-    parser.add_argument("--ipfs", default=DEFAULT_IPFS, help=f"IPFS API endpoint (default: {DEFAULT_IPFS})")
+    parser.add_argument("--ipfs", default=DEFAULT_IPFS,
+                        help=f"IPFS API endpoint for uploads and reads (default: {DEFAULT_IPFS}); "
+                             f"'{INTAKE_KEYWORD}' uses the bootnode's payload intake instead")
     parser.add_argument("--timeout", type=int, default=600,
                         help="seconds to wait for a result before giving up (default: 600)")
     parser.add_argument("--log-level", default="ERROR",
@@ -258,7 +264,10 @@ def main(argv=None):
         except Exception:
             pass
         runner.set_private_key(private_key)
-        runner.set_storage_ipfs(args.ipfs)
+        if args.ipfs == INTAKE_KEYWORD:
+            runner.set_public_intake()
+        else:
+            runner.set_storage_ipfs(args.ipfs)
         runner.connect()
 
         resources = _build_resources(args)
