@@ -24,7 +24,10 @@ class ImageRegistry:
 
             self.blockchain_network = config.read("BLOCKCHAIN_NETWORK")
             self.project_name = config.read("PROJECT_NAME")
-            self.enclave_name_securelock = self.project_name
+            # The name the securelock is registered under: the project name,
+            # <project>-unsafe on an -unsafe network (enums.securelock_name).
+            self.enclave_name_securelock = BlockchainNetworks.get_details_by_enum_name(
+                self.blockchain_network).securelock_name(self.project_name)
             self.securelock_session = config.read("SECURELOCK_SESSION")
             # This is the PROTOCOL version used as the Image Registry key (what
             # the runner queries with getLatestImageVersionPublicKey(name, "v3")),
@@ -122,11 +125,11 @@ class ImageRegistry:
     def check_image_permissions(self):
         try:
             image_hash = self._get_latest_image_version_public_key(
-                self.project_name, self.securelock_version
+                self.enclave_name_securelock, self.securelock_version
             )
 
         except Exception as e:
-            print(f"Error recovering public key for enclave {self.project_name} version {self.securelock_version}: {e}")
+            print(f"Error recovering public key for enclave {self.enclave_name_securelock} version {self.securelock_version}: {e}")
             return False
 
         if not image_hash[0] or image_hash[0] == "":
@@ -146,7 +149,7 @@ class ImageRegistry:
     
         if image_owner.lower() != self.acct.address.lower():
             print(
-                f"\t\u2718  Enclave '{self.project_name}' is owned by '{image_owner}'.\nYou are not the account holder of the image.\nPlease change the project name and try again.\n"
+                f"\t\u2718  Enclave '{self.enclave_name_securelock}' is owned by '{image_owner}'.\nYou are not the account holder of the image.\nPlease change the project name and try again.\n"
             )
             return False
             

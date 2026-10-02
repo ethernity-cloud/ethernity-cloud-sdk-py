@@ -5,6 +5,7 @@ import getpass
 from dotenv import load_dotenv
 from pathlib import Path
 from ethernity_cloud_sdk_py.commands.config import Config, config
+from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.private_key import PrivateKeyManager
 from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
 from ethernity_cloud_sdk_py.commands.spinner import Spinner
@@ -108,7 +109,11 @@ def main():
 
     PROJECT_NAME = config.read("PROJECT_NAME")
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
-    [ NETWORK_NAME, NETWORK_TYPE ] = BLOCKCHAIN_NETWORK.split("_")
+    # From the member, not from its name: BLOXBERG_TESTNET_UNSAFE is the
+    # bloxberg testnet as far as the runner's network tables go.
+    NETWORK_CONFIG = BlockchainNetworks.get_details_by_enum_name(BLOCKCHAIN_NETWORK)
+    NETWORK_NAME = NETWORK_CONFIG.network.upper()
+    NETWORK_TYPE = NETWORK_CONFIG.network_type.upper()
     ENC_PRIVATE_KEY = config.read("ENC_PRIVATE_KEY")
     DEVELOPER_FEE = config.read("DEVELOPER_FEE")
     DAPP_TYPE = config.read("DAPP_TYPE")
@@ -314,7 +319,9 @@ def main():
         else:
             exit(0)
 
-        write_env("PROJECT_NAME", PROJECT_NAME)
+        # The securelock the dApp's runtime runs (templates/src/ethernity_task.py
+        # reads it as PROJECT_NAME): the name it was registered under here.
+        write_env("PROJECT_NAME", NETWORK_CONFIG.securelock_name(PROJECT_NAME))
         write_env("VERSION", VERSION)
         write_env("NETWORK_NAME", NETWORK_NAME)
         write_env("NETWORK_TYPE", NETWORK_TYPE)

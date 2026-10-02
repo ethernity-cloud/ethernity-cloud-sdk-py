@@ -46,7 +46,7 @@ class BlockchainNetworks(Enum):
         # validator set exactly as on mainnet (see `cas_provisioned`).
         "testnet", # Network type
         "0x02882F03097fE8cD31afbdFbB5D72a498B41112c", # protocol contract address
-        "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31", # Image Registry Contract Address
+        "0x99A84C624C028bdf0a855A1E9E3f2fcf7275B3D8", # Image Registry Contract Address (ECImageRegistryV2)
         # The endpoint the runner, the node and the CAS validators use. The
         # public core.bloxberg.org lagged thousands of blocks and stalled
         # requests indefinitely on 2026-09-27, hanging a publish mid-way.
@@ -64,7 +64,35 @@ class BlockchainNetworks(Enum):
                 docker_password="",
                 base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
             ),
-        }    
+        }
+    )
+    BLOXBERG_TESTNET_UNSAFE = (
+        "Bloxberg Testnet unsafe (no CAS)", # Network display name
+        "bloxberg", # Network short name
+        # The same chain and contracts as BLOXBERG_TESTNET, for hardware SGX
+        # platforms the CAS cannot attest (EPID-only, SGX1 with or without
+        # FLC). No CAS: the securelock and the -unsafe trustedzone are
+        # debug-signed and self-sign from MR_ENCLAVE, so a result proves which
+        # image ran, not that an enclave ran it. The securelock is registered
+        # as <project>-unsafe (UNSAFE_NETWORKS).
+        "testnet", # Network type
+        "0x02882F03097fE8cD31afbdFbB5D72a498B41112c", # protocol contract address
+        "0x99A84C624C028bdf0a855A1E9E3f2fcf7275B3D8", # Image Registry Contract Address (ECImageRegistryV2)
+        "https://bloxberg.ethernity.cloud",
+        8995,  # Example Chain ID
+        False, # EIP 1559 SUPPORT
+        0.002,  # Example Gas Price in Gwei
+        0.002,  # maxFeePerGas in Gwei
+        0.0001,    # maxPriorityFeePerGas in Gwei
+        {  # template_images
+            dAppTypes.PYNITHY.value: TemplateConfig(
+                trusted_zone_image="etny-pynithy-testnet-unsafe",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
+                docker_login="",
+                docker_password="",
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
+            ),
+        }
     )
     POLYGON_MAINNET = (
         "Polygon Mainnet", # Network display name
@@ -265,7 +293,7 @@ class BlockchainNetworks(Enum):
 
         Kept as a side map rather than another positional field in the tuples
         above: those entries are unlabelled, so inserting a value would mean
-        editing all seven and risking a silent shift that assigns, say, an RPC
+        editing every one and risking a silent shift that assigns, say, an RPC
         URL to a contract address.
 
         Empty string = ESR is not deployed on that network yet. Callers must
@@ -303,6 +331,29 @@ class BlockchainNetworks(Enum):
         (ethernity-cas). A testnet without one self-signs from MR_ENCLAVE."""
         return self.network_type == "mainnet" or bool(SESSION_REGISTRY_ADDRESSES.get(self.name, ""))
 
+    @property
+    def is_unsafe(self):
+        """Whether this is an -unsafe variant (UNSAFE_NETWORKS): no CAS, the
+        securelock registered as <project>-unsafe, and no LAS in its compose."""
+        return self.name in UNSAFE_NETWORKS
+
+    def securelock_name(self, project_name):
+        """The Image Registry name the project's securelock is published and
+        run under on this network: <project>-unsafe on an -unsafe variant, so
+        one dApp holds both variants under names of its own. A name that
+        already carries the suffix (the runtime .env holds the registered
+        name) is returned as it is."""
+        if not self.is_unsafe or project_name.endswith("-unsafe"):
+            return project_name
+        return f"{project_name}-unsafe"
+
+    @property
+    def session_tag(self):
+        """The network part of the securelock session name: the network type,
+        and the variant on an -unsafe network, so the two testnet variants of
+        one project never share a session name."""
+        return f"{self.network_type}_unsafe" if self.is_unsafe else self.network_type
+
 
 # Canonical ESR (Enclave State Registry) deployments, keyed by BlockchainNetworks
 # member name. See contracts/esr/ for the contract, its ABI and the design
@@ -326,6 +377,7 @@ ESR_CONTRACT_ADDRESSES = {
     # a pinned value must be exactly stored + 1 (no gaps, no reuse).
     "BLOXBERG_MAINNET": "0x4Bf5cDE3BFD73dd10B707f8B123Ba631D2EBEAD2",
     "BLOXBERG_TESTNET": "0x0Ea1728EAE108FD3B9340ae91451348E2Cc6b4E4",
+    "BLOXBERG_TESTNET_UNSAFE": "0x0Ea1728EAE108FD3B9340ae91451348E2Cc6b4E4",
     "LITVM_LITEFORGE": "0x709052Fe77Af543d3d9FE2Ac06a15c635c8D4Be5",
     # Not deployed yet on these chains. ecld-build must refuse to build an
     # ESR-enabled enclave here rather than sealing in an empty address.
@@ -341,7 +393,7 @@ ESR_CONTRACT_ADDRESSES = {
 # build-side on purpose: a rogue CAS must not choose the registry that judges
 # it. "" means no registry on that network; the enclave skips the check.
 VALIDATOR_REGISTRY_ADDRESSES = {
-    "BLOXBERG_TESTNET": "0xC40102c0b3f87663C925083861F38e2498C2038F",
+    "BLOXBERG_TESTNET": "0xa821b36F378F76c793c436F5f9c9CC36c684eBE5",
 }
 
 # ethernity-cas SessionRegistry deployments, keyed like the maps above. A
@@ -353,4 +405,10 @@ VALIDATOR_REGISTRY_ADDRESSES = {
 # from MR_ENCLAVE.
 SESSION_REGISTRY_ADDRESSES = {
     "BLOXBERG_TESTNET": "0xcb1F389bF4524d1D61EDcbC24eC1F1F9C3FF4Fa6",
+}
+
+# The -unsafe variants: networks whose enclaves run without a CAS on platforms
+# the CAS cannot attest. Listed by member name; see BLOXBERG_TESTNET_UNSAFE.
+UNSAFE_NETWORKS = {
+    "BLOXBERG_TESTNET_UNSAFE",
 }

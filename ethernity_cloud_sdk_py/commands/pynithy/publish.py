@@ -254,10 +254,15 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
 
         # --- load placeholder values ---
         securelock = config.read("SECURELOCK_SESSION")
-        trustedzone_hash = image_registry.get_trusted_zone_hash(
-            config.read("TRUSTED_ZONE_IMAGE"), "v3"
-        )
-        trustedzone = image_registry.get_trustezone_image_session(trustedzone_hash)
+        # The trustedzone's CAS session names its SCONE_CONFIG_ID, so only a
+        # CAS-provisioned network has one to look up; a self-signing
+        # trustedzone is registered without a session.
+        trustedzone = None
+        if BLOCKCHAIN_CONFIG.cas_provisioned:
+            trustedzone_hash = image_registry.get_trusted_zone_hash(
+                config.read("TRUSTED_ZONE_IMAGE"), "v3"
+            )
+            trustedzone = image_registry.get_trustezone_image_session(trustedzone_hash)
         memory = config.read("MEMORY_TO_ALLOCATE")
 
         # Assuming variables like memory, securelock, trustedzone, BLOCKCHAIN_CONFIG, dest_dir are defined elsewhere
@@ -394,6 +399,14 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
             # Set environments as list of "KEY=VALUE"
             data['services']['etny-securelock']['environment'] = [f"{k}={v}" for k, v in securelock_env.items()]
             data['services']['etny-trustedzone']['environment'] = [f"{k}={v}" for k, v in trustedzone_env.items()]
+
+            # An -unsafe variant runs on platforms the CAS cannot attest, where
+            # the LAS cannot load a quoting enclave; its enclaves self-sign and
+            # never ask for a quote, so its compose carries no LAS.
+            if BLOCKCHAIN_CONFIG.is_unsafe:
+                del data['services']['las']
+                for service in ('etny-securelock', 'etny-trustedzone'):
+                    data['services'][service].pop('depends_on', None)
 
             return data
 
@@ -982,7 +995,7 @@ def main(private_key):
         # before extraction), so IPFS_HASH / IPFS_DOCKER_COMPOSE_HASH already
         # point at THIS build. Hand them to the remote extraction service.
         ENCLAVE_PUBLIC_KEY = public_key_service.main(
-            enclave_name=config.read("PROJECT_NAME"),
+            enclave_name=BLOCKCHAIN_CONFIG.securelock_name(config.read("PROJECT_NAME")),
             protocol_version="v3",
             network=config.read("BLOCKCHAIN_NETWORK"),
             template_version=config.read("VERSION"),

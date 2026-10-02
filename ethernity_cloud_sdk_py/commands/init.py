@@ -229,7 +229,7 @@ def main():
     print()
 
     print(
-        f"Checking if the project named {project_name} is available on the {BLOCKCHAIN_CONFIG.display_name} network and ownership..."
+        f"Checking if the project named {BLOCKCHAIN_CONFIG.securelock_name(project_name)} is available on the {BLOCKCHAIN_CONFIG.display_name} network and ownership..."
     )
 
 

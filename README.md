@@ -128,6 +128,18 @@ The sdk has been tested on the following operating systems:
   `--task-price`/`--cpu`/`--memory`/`--storage`/`--bandwidth`/`--duration`/`--validators`.
   Exit code 0 on a `SUCCESS` task result, 1 otherwise. (`python src/ethernity_task.py`
   remains available as a scriptable template if you prefer driving the runner yourself.)
+  `--unsafe` runs the network's `-unsafe` variant (see below).
+
+- **The two Bloxberg testnets**: `Bloxberg Testnet` (`BLOXBERG_TESTNET`) runs
+  your securelock in an enclave attested through the Ethernity CAS validator
+  set, on nodes whose platform the CAS can attest (DCAP). `Bloxberg Testnet
+  unsafe (no CAS)` (`BLOXBERG_TESTNET_UNSAFE`) is the same chain and contracts
+  for hardware SGX platforms the CAS cannot attest (EPID-only, SGX1): no CAS,
+  enclaves debug-signed and self-signed from their measurement, so a result
+  proves which image ran but not that an enclave ran it. A dApp publishes one
+  securelock per variant from two project directories with the same project
+  name: the unsafe one is registered as `<project>-unsafe` and runs on the
+  `etny-pynithy-testnet-unsafe` trustedzone. Mainnet has no unsafe variant.
 
 - **Inspect (read-only)**: To read enclave and on-chain diagnostics — network,
   trustedzone/securelock registration, and ESR state — without spending gas, run:

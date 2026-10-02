@@ -74,9 +74,41 @@ def _cfg_or_env(cfg, key, env_key=None):
     return os.environ.get(env_key or key)
 
 
-def _resolve_network(explicit, cfg):
-    """(network_name, network_type) from --network, else BLOCKCHAIN_NETWORK,
-    else NETWORK_NAME/NETWORK_TYPE in the env, else the Bloxberg testnet."""
+def _network_member(explicit, cfg, unsafe=False):
+    """The BlockchainNetworks member named by --network, else by
+    BLOCKCHAIN_NETWORK, or None when neither names one. With `unsafe`, its
+    -unsafe variant (<NAME>_UNSAFE); a network without one raises ValueError."""
+    from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
+    raw = (explicit or _cfg_or_env(cfg, "BLOCKCHAIN_NETWORK") or "").strip().upper()
+    if unsafe and raw and not raw.endswith("_UNSAFE"):
+        raw = f"{raw}_UNSAFE"
+        if raw not in BlockchainNetworks.__members__:
+            raise ValueError(f"{raw[:-len('_UNSAFE')]} has no -unsafe variant")
+    if raw in BlockchainNetworks.__members__:
+        return BlockchainNetworks[raw]
+    return None
+
+
+def _trustedzone_for(member, cfg):
+    """The trustedzone image of `member` for the project's dApp type, or None."""
+    if member is None:
+        return None
+    template = member.template_image.get(_cfg_or_env(cfg, "DAPP_TYPE") or "Pynithy")
+    return template.trusted_zone_image if template else None
+
+
+def _resolve_network(explicit, cfg, member=None):
+    """(network_name, network_type) from the network member when one is known
+    (--network, else BLOCKCHAIN_NETWORK), else NETWORK_NAME/NETWORK_TYPE in the
+    env, else the Bloxberg testnet.
+
+    Read from the member rather than split out of its name:
+    BLOXBERG_TESTNET_UNSAFE is the bloxberg testnet as far as the runner's
+    network tables go."""
+    if member is None:
+        member = _network_member(explicit, cfg)
+    if member is not None:
+        return member.network.upper(), member.network_type.upper()
     raw = explicit or _cfg_or_env(cfg, "BLOCKCHAIN_NETWORK")
     if raw and "_" in raw:
         name, _, ntype = raw.partition("_")
@@ -175,8 +207,15 @@ def main(argv=None):
                         help="override the network, e.g. BLOXBERG_TESTNET "
                              "(default: BLOCKCHAIN_NETWORK from .config.json)")
     parser.add_argument("--node", default="", help="target a specific node operator address")
-    parser.add_argument("--securelock", help="securelock enclave name (default: PROJECT_NAME)")
-    parser.add_argument("--trustedzone", help="trustedzone enclave name (default: TRUSTED_ZONE_IMAGE)")
+    parser.add_argument("--unsafe", action="store_true",
+                        help="run the -unsafe variant of the network: <PROJECT_NAME>-unsafe "
+                             "on its -unsafe trustedzone, without a CAS")
+    parser.add_argument("--securelock",
+                        help="securelock enclave name (default: PROJECT_NAME, "
+                             "<PROJECT_NAME>-unsafe on an -unsafe network)")
+    parser.add_argument("--trustedzone",
+                        help="trustedzone enclave name (default: the network's, "
+                             "else TRUSTED_ZONE_IMAGE)")
     parser.add_argument("--ipfs", default=DEFAULT_IPFS,
                         help=f"IPFS API endpoint for uploads and reads (default: {DEFAULT_IPFS}); "
                              f"'{INTAKE_KEYWORD}' uses the bootnode's payload intake instead")
@@ -225,9 +264,16 @@ def main(argv=None):
 
     # ---- config / network / enclaves / key ----
     cfg = _load_config()
-    network_name, network_type = _resolve_network(args.network, cfg)
-    securelock = args.securelock or _cfg_or_env(cfg, "PROJECT_NAME")
-    trustedzone = args.trustedzone or _cfg_or_env(cfg, "TRUSTED_ZONE_IMAGE")
+    try:
+        member = _network_member(args.network, cfg, unsafe=args.unsafe)
+    except ValueError as e:
+        parser.error(str(e))
+    network_name, network_type = _resolve_network(args.network, cfg, member)
+    project = _cfg_or_env(cfg, "PROJECT_NAME")
+    securelock = args.securelock or (
+        member.securelock_name(project) if (member is not None and project) else project)
+    trustedzone = (args.trustedzone or _trustedzone_for(member, cfg)
+                   or _cfg_or_env(cfg, "TRUSTED_ZONE_IMAGE"))
 
     if not securelock:
         parser.error("no securelock enclave: set PROJECT_NAME in .config.json "

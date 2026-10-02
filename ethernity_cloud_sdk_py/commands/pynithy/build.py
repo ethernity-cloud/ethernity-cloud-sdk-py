@@ -223,8 +223,11 @@ def update_dockerfile():
     DOCKER_REPO_URL = config.read("DOCKER_REPO_URL")
     BASE_IMAGE_TAG = config.read("BASE_IMAGE_TAG")
 
-    # Generate the enclave name for securelock
-    SECURELOCK_SESSION = f"{PROJECT_NAME}-SECURELOCK-V3-{BLOCKCHAIN_NETWORK.split('_')[1].lower()}-{VERSION}".replace(
+    # Generate the enclave name for securelock. The network part is the
+    # member's session_tag, so the -unsafe variant of a testnet never shares
+    # the CAS variant's session name.
+    SESSION_TAG = BlockchainNetworks.get_details_by_enum_name(BLOCKCHAIN_NETWORK).session_tag
+    SECURELOCK_SESSION = f"{PROJECT_NAME}-SECURELOCK-V3-{SESSION_TAG}-{VERSION}".replace(
         "/", "_"
     ).replace(
         "-", "_"
