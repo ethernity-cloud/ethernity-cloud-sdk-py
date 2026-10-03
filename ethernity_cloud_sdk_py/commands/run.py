@@ -102,13 +102,13 @@ def _resolve_network(explicit, cfg, member=None):
     (--network, else BLOCKCHAIN_NETWORK), else NETWORK_NAME/NETWORK_TYPE in the
     env, else the Bloxberg testnet.
 
-    Read from the member rather than split out of its name:
-    BLOXBERG_TESTNET_UNSAFE is the bloxberg testnet as far as the runner's
-    network tables go."""
+    A member is the runner's network it maps to (RUNNER_NETWORKS):
+    BLOXBERG_TESTNET_UNSAFE is the runner's BLOXBERG TESTNET_UNSAFE, which runs
+    only -unsafe trustedzones."""
     if member is None:
         member = _network_member(explicit, cfg)
     if member is not None:
-        return member.network.upper(), member.network_type.upper()
+        return member.runner_network
     raw = explicit or _cfg_or_env(cfg, "BLOCKCHAIN_NETWORK")
     if raw and "_" in raw:
         name, _, ntype = raw.partition("_")

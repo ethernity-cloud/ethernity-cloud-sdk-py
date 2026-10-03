@@ -109,11 +109,11 @@ def main():
 
     PROJECT_NAME = config.read("PROJECT_NAME")
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
-    # From the member, not from its name: BLOXBERG_TESTNET_UNSAFE is the
-    # bloxberg testnet as far as the runner's network tables go.
+    # The runner's network for the member (RUNNER_NETWORKS), which the dApp's
+    # runtime builds its runner from: BLOXBERG_TESTNET_UNSAFE is the runner's
+    # BLOXBERG TESTNET_UNSAFE, which runs only -unsafe trustedzones.
     NETWORK_CONFIG = BlockchainNetworks.get_details_by_enum_name(BLOCKCHAIN_NETWORK)
-    NETWORK_NAME = NETWORK_CONFIG.network.upper()
-    NETWORK_TYPE = NETWORK_CONFIG.network_type.upper()
+    NETWORK_NAME, NETWORK_TYPE = NETWORK_CONFIG.runner_network
     ENC_PRIVATE_KEY = config.read("ENC_PRIVATE_KEY")
     DEVELOPER_FEE = config.read("DEVELOPER_FEE")
     DAPP_TYPE = config.read("DAPP_TYPE")

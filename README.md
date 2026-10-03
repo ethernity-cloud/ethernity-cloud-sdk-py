@@ -130,16 +130,22 @@ The sdk has been tested on the following operating systems:
   remains available as a scriptable template if you prefer driving the runner yourself.)
   `--unsafe` runs the network's `-unsafe` variant (see below).
 
-- **The two Bloxberg testnets**: `Bloxberg Testnet` (`BLOXBERG_TESTNET`) runs
-  your securelock in an enclave attested through the Ethernity CAS validator
-  set, on nodes whose platform the CAS can attest (DCAP). `Bloxberg Testnet
-  unsafe (no CAS)` (`BLOXBERG_TESTNET_UNSAFE`) is the same chain and contracts
-  for hardware SGX platforms the CAS cannot attest (EPID-only, SGX1): no CAS,
-  enclaves debug-signed and self-signed from their measurement, so a result
-  proves which image ran but not that an enclave ran it. A dApp publishes one
-  securelock per variant from two project directories with the same project
-  name: the unsafe one is registered as `<project>-unsafe` and runs on the
-  `etny-pynithy-testnet-unsafe` trustedzone. Mainnet has no unsafe variant.
+- **The testnets and their unsafe networks**: `Bloxberg Testnet` (`BLOXBERG_TESTNET`) and
+  `LitVM LiteForge` (`LITVM_LITEFORGE`) run your securelock in an enclave
+  attested through that chain's Ethernity CAS validator set, on nodes whose
+  platform the CAS can attest (DCAP). Each has an unsafe network beside it,
+  `Bloxberg Testnet unsafe (no CAS)` (`BLOXBERG_TESTNET_UNSAFE`) and `LitVM
+  LiteForge unsafe (no CAS)` (`LITVM_LITEFORGE_UNSAFE`): the same chain and
+  contracts, for hardware SGX platforms the CAS cannot attest (EPID-only,
+  SGX1). No CAS: enclaves are debug-signed and self-signed from their
+  measurement, so a result proves which image ran but not that an enclave ran
+  it. You choose an unsafe network by name, and the runner runs an `-unsafe`
+  trustedzone on nothing else, so a dApp that runs without a CAS always says
+  so in the network it names. A dApp publishes one securelock per network from
+  two project directories with the same project name: the unsafe one is
+  registered as `<project>-unsafe` and runs on the `etny-pynithy-testnet-unsafe`
+  (`ecld-pynithy-litvm-testnet-unsafe`) trustedzone. Mainnet has no unsafe
+  network.
 
 - **Inspect (read-only)**: To read enclave and on-chain diagnostics — network,
   trustedzone/securelock registration, and ESR state — without spending gas, run:

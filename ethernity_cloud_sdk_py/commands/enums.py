@@ -192,7 +192,8 @@ class BlockchainNetworks(Enum):
         # gas token zkLTC. The PoX/registry addresses match Ethereum Sepolia
         # because the same deployer deployed the same contracts in the same order
         # (deterministic CREATE); they are distinct on-chain deployments keyed by
-        # chain_id/RPC.
+        # chain_id/RPC. CAS-attested by LitVM's own ethernity-cas set:
+        # SESSION_REGISTRY_ADDRESSES names its SessionRegistry (`cas_provisioned`).
         "0x29D3eC870565B6A1510232bd950A8Bc8336f0EB2", # protocol contract address
         "0x55e0ad455Be85162b71a790f00Fc305680E3CE53", # Image Registry Contract Address
         "https://liteforge.rpc.caldera.xyz/infra-partner-http",
@@ -205,6 +206,33 @@ class BlockchainNetworks(Enum):
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
                 trusted_zone_image="ecld-pynithy-litvm-testnet",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
+                docker_login="",
+                docker_password="",
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
+            ),
+        }
+    )
+
+    LITVM_LITEFORGE_UNSAFE = (
+        "LitVM LiteForge unsafe (no CAS)", # Network display name
+        "litvm", # Network short name
+        # The same chain and contracts as LITVM_LITEFORGE, for hardware SGX
+        # platforms the CAS cannot attest. No CAS: the securelock and the
+        # -unsafe trustedzone are debug-signed and self-sign from MR_ENCLAVE.
+        # The securelock is registered as <project>-unsafe (UNSAFE_NETWORKS).
+        "testnet", # Network type
+        "0x29D3eC870565B6A1510232bd950A8Bc8336f0EB2", # protocol contract address
+        "0x55e0ad455Be85162b71a790f00Fc305680E3CE53", # Image Registry Contract Address
+        "https://liteforge.rpc.caldera.xyz/infra-partner-http",
+        4441,  # Chain ID for LitVM LiteForge
+        True, # EIP 1559 SUPPORT
+        2,   # Gas Price in Gwei
+        2,  # maxFeePerGas in Gwei
+        0,    # maxPriorityFeePerGas in Gwei
+        {  # template_images
+            dAppTypes.PYNITHY.value: TemplateConfig(
+                trusted_zone_image="ecld-pynithy-litvm-testnet-unsafe",
                 docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
@@ -354,6 +382,12 @@ class BlockchainNetworks(Enum):
         one project never share a session name."""
         return f"{self.network_type}_unsafe" if self.is_unsafe else self.network_type
 
+    @property
+    def runner_network(self):
+        """(network name, network type) the runner knows this network by
+        (RUNNER_NETWORKS): an -unsafe network is the runner's -unsafe type."""
+        return RUNNER_NETWORKS[self.name]
+
 
 # Canonical ESR (Enclave State Registry) deployments, keyed by BlockchainNetworks
 # member name. See contracts/esr/ for the contract, its ABI and the design
@@ -379,6 +413,7 @@ ESR_CONTRACT_ADDRESSES = {
     "BLOXBERG_TESTNET": "0x0Ea1728EAE108FD3B9340ae91451348E2Cc6b4E4",
     "BLOXBERG_TESTNET_UNSAFE": "0x0Ea1728EAE108FD3B9340ae91451348E2Cc6b4E4",
     "LITVM_LITEFORGE": "0x709052Fe77Af543d3d9FE2Ac06a15c635c8D4Be5",
+    "LITVM_LITEFORGE_UNSAFE": "0x709052Fe77Af543d3d9FE2Ac06a15c635c8D4Be5",
     # Not deployed yet on these chains. ecld-build must refuse to build an
     # ESR-enabled enclave here rather than sealing in an empty address.
     "POLYGON_MAINNET": "",
@@ -394,6 +429,7 @@ ESR_CONTRACT_ADDRESSES = {
 # it. "" means no registry on that network; the enclave skips the check.
 VALIDATOR_REGISTRY_ADDRESSES = {
     "BLOXBERG_TESTNET": "0xa821b36F378F76c793c436F5f9c9CC36c684eBE5",
+    "LITVM_LITEFORGE": "0x2E27677fb67531eb09134fE331C27899f87ADe10",
 }
 
 # ethernity-cas SessionRegistry deployments, keyed like the maps above. A
@@ -405,10 +441,27 @@ VALIDATOR_REGISTRY_ADDRESSES = {
 # from MR_ENCLAVE.
 SESSION_REGISTRY_ADDRESSES = {
     "BLOXBERG_TESTNET": "0xcb1F389bF4524d1D61EDcbC24eC1F1F9C3FF4Fa6",
+    "LITVM_LITEFORGE": "0x8ad24b3F406A41a0F8D3440021792EB203957F43",
 }
 
 # The -unsafe variants: networks whose enclaves run without a CAS on platforms
 # the CAS cannot attest. Listed by member name; see BLOXBERG_TESTNET_UNSAFE.
 UNSAFE_NETWORKS = {
     "BLOXBERG_TESTNET_UNSAFE",
+    "LITVM_LITEFORGE_UNSAFE",
+}
+
+# The (network name, network type) each member is in the runner's network
+# tables (ethernity_cloud_runner_py ECNetwork). An -unsafe member is the
+# runner's -unsafe type, which runs only -unsafe trustedzones.
+RUNNER_NETWORKS = {
+    "BLOXBERG_MAINNET": ("BLOXBERG", "MAINNET"),
+    "BLOXBERG_TESTNET": ("BLOXBERG", "TESTNET"),
+    "BLOXBERG_TESTNET_UNSAFE": ("BLOXBERG", "TESTNET_UNSAFE"),
+    "POLYGON_MAINNET": ("POLYGON", "MAINNET"),
+    "POLYGON_AMOY": ("POLYGON", "AMOY"),
+    "IOTEX_TESTNET": ("IOTEX", "TESTNET"),
+    "ETHEREUM_SEPOLIA": ("ETHEREUM", "SEPOLIA"),
+    "LITVM_LITEFORGE": ("LITVM", "LITEFORGE"),
+    "LITVM_LITEFORGE_UNSAFE": ("LITVM", "LITEFORGE_UNSAFE"),
 }
