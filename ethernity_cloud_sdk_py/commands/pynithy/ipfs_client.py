@@ -107,12 +107,19 @@ class IPFSClient:
         """Add a directory tree and return its root CID.
 
         The enclave image is ~1.2 GB and the gateway processes the upload
-        only after the last byte, so a failure (a gateway-side timeout, a
-        dropped connection) shows up as a non-200 response after minutes of
-        transfer. Each attempt re-sends the whole tree; `attempts` bounds it.
+        only after the last byte, so a failure shows up after minutes of
+        transfer: as a non-200 response (a gateway-side timeout), or as the
+        RequestException requests raises for a connection dropped mid-upload
+        (SSLError, ConnectionError). Each attempt re-sends the whole tree;
+        `attempts` bounds it.
         """
         for attempt in range(1, attempts + 1):
-            ipfs_hash = self._upload_dir_once(dir_path)
+            try:
+                ipfs_hash = self._upload_dir_once(dir_path)
+            except RequestException as e:
+                sys.stdout.write("\r" + f"\t{self.FAIL}Uploading and pinning enclave to IPFS\n")
+                print(f"\tthe upload connection failed: {type(e).__name__}: {e}")
+                ipfs_hash = False
             if ipfs_hash:
                 return ipfs_hash
             if attempt < attempts:
@@ -139,31 +146,36 @@ class IPFSClient:
 
         # Create the MultipartEncoder fields
         # Use relative paths as keys and values as per IPFS HTTP API expectations
-        fields = {
-            os.path.relpath(filepath, dir_path).replace("\\", "/"): (
-                os.path.relpath(filepath, dir_path).replace("\\", "/"),
-                open(filepath, "rb")
+        handles = [open(filepath, "rb") for filepath in self.files]
+        try:
+            fields = {
+                os.path.relpath(filepath, dir_path).replace("\\", "/"): (
+                    os.path.relpath(filepath, dir_path).replace("\\", "/"),
+                    handle
+                )
+                for filepath, handle in zip(self.files, handles)
+            }
+
+            encoder = MultipartEncoder(fields=fields)
+            monitor = MultipartEncoderMonitor(encoder, self.update_progress)
+
+            # `timeout` is the IPFS API's own bound on the request; 5m was shorter
+            # than a 1.2 GB upload over an ordinary uplink, and the gateway aborted
+            # the add after every byte had been sent.
+            response = requests.post(
+                self.add_url + "?quieter=true&stream-channels=true&wrap-with-directory=true&progress=false&timeout=60m",
+                data=monitor,
+                stream=True,
+                headers={
+                    **self.headers,
+                    "Content-Type": monitor.content_type,
+                    "Content-Length": str(self.total_size),
+                    "Expect": "100-continue",
+                },
             )
-            for filepath in self.files
-        }
-
-        encoder = MultipartEncoder(fields=fields)
-        monitor = MultipartEncoderMonitor(encoder, self.update_progress)
-
-        # `timeout` is the IPFS API's own bound on the request; 5m was shorter
-        # than a 1.2 GB upload over an ordinary uplink, and the gateway aborted
-        # the add after every byte had been sent.
-        response = requests.post(
-            self.add_url + "?quieter=true&stream-channels=true&wrap-with-directory=true&progress=false&timeout=60m",
-            data=monitor,
-            stream=True,
-            headers={
-                **self.headers,
-                "Content-Type": monitor.content_type,
-                "Content-Length": str(self.total_size),
-                "Expect": "100-continue",
-            },
-        )
+        finally:
+            for handle in handles:
+                handle.close()
 
         # Once done, move to the next line to avoid overwriting the last spinner line
         #sys.stdout.write("\n")
