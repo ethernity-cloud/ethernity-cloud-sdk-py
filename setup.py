@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 setup(
     name="ethernity-cloud-sdk-py",
-    version="0.8.39",
+    version="0.8.40",
     url="https://github.com/ethernity-cloud/ethernity-cloud-sdk-py",
     author="Ethernity Cloud Team",
     author_email="contact@ethernity.cloud",
@@ -25,7 +25,9 @@ setup(
         "requests_toolbelt",
         "cryptography",
         "typing-extensions",
-        "ethernity-cloud-runner-py",
+        # 0.4.29: reads the bloxberg testnet's ImageRegistryV2 and runs the
+        # trustedzone ecld-run names (--unsafe).
+        "ethernity-cloud-runner-py>=0.4.29",
         "pyyaml",
         # Add other dependencies here
     ],
