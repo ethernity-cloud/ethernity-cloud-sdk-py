@@ -60,7 +60,7 @@ The sdk has been tested on the following operating systems:
       provisioned by the ethernity-cas validator set exactly as on mainnet.
       `ecld-publish` registers the securelock session on-chain in the
       SessionRegistry (`0xcb1F389b...`), resolves a CAS from the
-      ValidatorRegistry (`0xC40102c0...`, or `ECLD_CAS_ADDR=host:port`) for
+      ValidatorRegistry (`0xa821b36F...`, or `ECLD_CAS_ADDR=host:port`) for
       the compose and the certificate harvest, and links the session to the
       published image. `ecld-build` signs the securelock `--production`.
       Harvesting the certificate needs SGX; the remote extraction service
