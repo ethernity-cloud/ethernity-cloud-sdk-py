@@ -52,7 +52,7 @@ def test_litvm_is_cas_attested_by_its_own_set_and_its_unsafe_variant_is_not():
     unsafe = BlockchainNetworks.LITVM_LITEFORGE_UNSAFE
     assert safe.cas_provisioned
     assert (BlockchainNetworks.get_validator_registry_address("LITVM_LITEFORGE")
-            == "0x2E27677fb67531eb09134fE331C27899f87ADe10")
+            == "0xbE3759f327e8643fC5A1717fb2072A0dAcBAD29E")
     assert (BlockchainNetworks.get_session_registry_address("LITVM_LITEFORGE")
             == "0x8ad24b3F406A41a0F8D3440021792EB203957F43")
     assert not unsafe.cas_provisioned

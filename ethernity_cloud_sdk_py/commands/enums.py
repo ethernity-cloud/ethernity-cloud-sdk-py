@@ -428,8 +428,8 @@ ESR_CONTRACT_ADDRESSES = {
 # build-side on purpose: a rogue CAS must not choose the registry that judges
 # it. "" means no registry on that network; the enclave skips the check.
 VALIDATOR_REGISTRY_ADDRESSES = {
-    "BLOXBERG_TESTNET": "0xa821b36F378F76c793c436F5f9c9CC36c684eBE5",
-    "LITVM_LITEFORGE": "0x2E27677fb67531eb09134fE331C27899f87ADe10",
+    "BLOXBERG_TESTNET": "0x0014aB102FEa6b02e3D793FF4b9a0Af309fB4E14",
+    "LITVM_LITEFORGE": "0xbE3759f327e8643fC5A1717fb2072A0dAcBAD29E",
 }
 
 # ethernity-cas SessionRegistry deployments, keyed like the maps above. A
