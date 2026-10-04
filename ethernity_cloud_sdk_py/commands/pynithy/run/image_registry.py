@@ -386,8 +386,11 @@ class ImageRegistry:
         ipfs_hash = config.read("IPFS_HASH")
         ipfs_docker_compose_hash = config.read("IPFS_DOCKER_COMPOSE_HASH")
         self.securelock_session = config.read("SECURELOCK_SESSION")
-        #fee = config.read("DEVELOPER_FEE")
-        fee = 10
+        # The publisher's fee, in percent of each task's base price, which PoX
+        # adds to what the dApp user pays and pays to the image's reward
+        # address; 0 unless .config.json sets DEVELOPER_FEE (the registry
+        # accepts up to 15).
+        fee = int(config.read("DEVELOPER_FEE") or 0)
 
         # Register the SAME build under two registry version keys:
         #   "v3"           -> the moving "latest" pointer. The runner resolves
