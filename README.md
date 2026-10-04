@@ -92,6 +92,10 @@ The sdk has been tested on the following operating systems:
   ecld-publish
   ```
   Required after build, to build and integrate the secure certificates that will be used during executions and to register the project to the Ethernity Cloud Image Register.
+  The developer fee the network pays for each task run with the image goes to
+  the image's reward address: the publishing wallet, unless `REWARD_ADDRESS`
+  in `.config.json` names another one. The image's owner can change it later
+  with the registry's `changeImageRewardAddress`.
 
 - **Test (local, no chain)**: To run your backend locally with the enclave's own
   executor — no SGX, no gas, instant — run:

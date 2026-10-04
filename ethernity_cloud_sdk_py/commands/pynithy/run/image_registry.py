@@ -214,6 +214,37 @@ class ImageRegistry:
         except Exception as e:
             print(f"An error occurred while sending transaction: {e}")
 
+    def _transaction_options(self, gas_limit):
+        """The options of a transaction from the publishing wallet: its pending
+        nonce and the network's fee model, with `gas_limit` named where fees are
+        not quoted."""
+        nonce = self.provider.eth.get_transaction_count(
+            self.acct.address, "pending"
+        )
+        if self.blockchain_config.is_eip1559:
+            latest_block = self.provider.eth.get_block("latest")
+
+            max_fee_per_gas = int(latest_block.baseFeePerGas * 1.1) + self.provider.to_wei(self.blockchain_config.max_priority_fee_per_gas, 'gwei') # 10% increase in previous block gas price + priority fee
+
+            if max_fee_per_gas > self.provider.to_wei(self.blockchain_config.max_fee_per_gas, 'gwei'):
+                raise Exception("Network fee per gas is too high!")
+
+            return {
+                "type": 2,
+                "nonce": nonce,
+                "chainId": self.blockchain_config.chain_id,
+                "from": self.acct.address,
+                'maxFeePerGas': max_fee_per_gas,
+                'maxPriorityFeePerGas': self.provider.to_wei(self.blockchain_config.max_priority_fee_per_gas, 'gwei'),
+            }
+        return {
+            "nonce": nonce,
+            "chainId": self.blockchain_config.chain_id,
+            "from": self.acct.address,
+            "gasPrice": self.provider.to_wei(self.blockchain_config.gas_price, 'gwei'),
+            "gas": gas_limit,
+        }
+
     def build_transaction_add_image(
         self,
         cert_content,
@@ -230,33 +261,7 @@ class ImageRegistry:
             gasLimit = 1200000
 
         try:
-            nonce = self.provider.eth.get_transaction_count(
-                self.acct.address, "pending"
-            )
-            if self.blockchain_config.is_eip1559:
-                latest_block = self.provider.eth.get_block("latest")
-
-                max_fee_per_gas = int(latest_block.baseFeePerGas * 1.1) + self.provider.to_wei(self.blockchain_config.max_priority_fee_per_gas, 'gwei') # 10% increase in previous block gas price + priority fee
-
-                if max_fee_per_gas > self.provider.to_wei(self.blockchain_config.max_fee_per_gas, 'gwei'):
-                    raise Exception("Network fee per gas is too high!")
-                
-                transaction_options = {
-                    "type": 2,
-                    "nonce": nonce,
-                    "chainId": self.blockchain_config.chain_id,
-                    "from": self.acct.address,
-                    'maxFeePerGas': max_fee_per_gas,
-                    'maxPriorityFeePerGas': self.provider.to_wei(self.blockchain_config.max_priority_fee_per_gas, 'gwei'),
-                }
-            else:
-                transaction_options = {
-                    "nonce": nonce,
-                    "chainId": self.blockchain_config.chain_id,
-                    "from": self.acct.address,
-                    "gasPrice": self.provider.to_wei(self.blockchain_config.gas_price, 'gwei'),
-                    "gas": gasLimit,
-                }
+            transaction_options = self._transaction_options(gasLimit)
 
             txn = self.image_registry_contract.functions.addImage(
             ipfs_hash,
@@ -446,5 +451,29 @@ class ImageRegistry:
                     if attempt >= max_retries:
                         raise
 
+        # REWARD_ADDRESS: where the image's developer fee is paid, when not the
+        # publishing wallet.
+        reward_address = config.read("REWARD_ADDRESS")
+        if reward_address:
+            self.set_reward_address(ipfs_hash, reward_address)
+
         return last_result
-        
+
+    def set_reward_address(self, ipfs_hash, reward_address):
+        """Name where the image's developer fee is paid. The registry records
+        the publishing wallet at registration; only the image's owner, the
+        publisher, changes it."""
+        reward_address = self.provider.to_checksum_address(reward_address)
+        current = self.image_registry_contract.functions.getRewardAddress(ipfs_hash).call()
+        if current == reward_address:
+            print(f"\t✔  reward address is already {reward_address}")
+            return
+        txn = self.image_registry_contract.functions.changeImageRewardAddress(
+            ipfs_hash, reward_address
+        ).build_transaction(self._transaction_options(200000))
+        signed_txn = self.provider.eth.account.sign_transaction(txn, private_key=self.private_key)
+        Spinner().spin_till_done(
+            f"Setting the reward address to {reward_address}",
+            self.process_transaction,
+            signed_txn,
+        )
