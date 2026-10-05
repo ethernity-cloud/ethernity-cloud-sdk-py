@@ -25,9 +25,9 @@ setup(
         "requests_toolbelt",
         "cryptography",
         "typing-extensions",
-        # 0.5.0: the -unsafe networks (BLOXBERG TESTNET_UNSAFE, LITVM
-        # LITEFORGE_UNSAFE), on which alone it runs an -unsafe trustedzone.
-        "ethernity-cloud-runner-py>=0.5.0",
+        # 0.5.2: the bloxberg testnet image registry 0xDf8cBCb1, where the
+        # dApps this SDK publishes are registered.
+        "ethernity-cloud-runner-py>=0.5.2",
         "pyyaml",
         # Add other dependencies here
     ],
