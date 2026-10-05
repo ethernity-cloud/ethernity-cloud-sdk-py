@@ -5,7 +5,7 @@ import pytest
 from ethernity_cloud_sdk_py.commands import run
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 
-V2_IMAGE_REGISTRY = "0x99A84C624C028bdf0a855A1E9E3f2fcf7275B3D8"
+V2_IMAGE_REGISTRY = "0xDf8cBCb1B57Fa34e7eA6b0f6B104B1aC8EF1dc53"
 
 
 def test_the_unsafe_testnet_shares_the_testnet_chain_and_contracts():

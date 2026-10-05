@@ -149,6 +149,16 @@ class EtnySecureLock:
         logging.info("Generated key and cert in memory based on MR_ENCLAVE")
         return private_key_pem, cert_pem
 
+    # The node-supplied bucket .env may only contribute the per-task order id.
+    # Everything else the securelock trusts is a per-network build constant
+    # (chain id, PoX contract, Image Registry, Web3 provider, ValidatorRegistry,
+    # bucket) set in __set_initializers, or a variable the CAS injects into the
+    # enclave process environment (ECAS_*, SCONE_*). Any key outside this set,
+    # and any key already present in the environment, is ignored.
+    NODE_ENV_ALLOWLIST = frozenset({
+        'ETNY_ORDER_ID',
+    })
+
     @staticmethod
     def read_env_str(env_str: str):
         with io.StringIO(env_str) as f:
@@ -156,7 +166,13 @@ class EtnySecureLock:
                 if '=' not in line:
                     continue
                 key, value = line.split('=', 1)
-                os.environ[key.strip()] = re.sub(r'\n', '', value.strip())
+                key = key.strip()
+                if key not in EtnySecureLock.NODE_ENV_ALLOWLIST:
+                    logging.info(f"Ignoring non-allowlisted .env key from the node bucket: {key}")
+                    continue
+                if key in os.environ:
+                    continue
+                os.environ[key] = re.sub(r'\n', '', value.strip())
     def validate_client_payload(self):
         payload_data = self.__get_file_content_and_decrypt(self.payload)
         input_data = self.__get_file_content_and_decrypt(self.input)
@@ -588,14 +604,10 @@ class EtnySecureLock:
         with open(path, 'r') as f:
             return f.read()
     def __load_env(self):
-        if os.getenv('ETNY_CHAIN_ID'):
-            self.chain_id = int(os.getenv('ETNY_CHAIN_ID'))
-        if os.getenv('ETNY_SMART_CONTRACT_ADDRESS'):
-            self.smart_contract_address = os.getenv('ETNY_SMART_CONTRACT_ADDRESS').rstrip()
-        if os.getenv('ETNY_WEB3_PROVIDER'):
-            self.web3_provider = os.getenv('ETNY_WEB3_PROVIDER').rstrip()
-        if os.getenv('IMAGE_REGISTRY_ADDRESS'):
-            self.image_registry_address = os.getenv('IMAGE_REGISTRY_ADDRESS').rstrip()
+        # The chain id, PoX contract, Image Registry and Web3 provider are the
+        # build constants of __set_initializers and are never read from the
+        # environment: the node supplies the environment, and an override would
+        # let it choose the registry the trustedzone's certificate comes from.
         self.order_id = int(os.getenv('ETNY_ORDER_ID'))
 
     def save_result(self):

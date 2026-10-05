@@ -46,7 +46,7 @@ class BlockchainNetworks(Enum):
         # validator set exactly as on mainnet (see `cas_provisioned`).
         "testnet", # Network type
         "0x02882F03097fE8cD31afbdFbB5D72a498B41112c", # protocol contract address
-        "0x99A84C624C028bdf0a855A1E9E3f2fcf7275B3D8", # Image Registry Contract Address (ECImageRegistryV2)
+        "0xDf8cBCb1B57Fa34e7eA6b0f6B104B1aC8EF1dc53", # Image Registry Contract Address (ECImageRegistryV2, deployed 2026-10-05)
         # The endpoint the runner, the node and the CAS validators use. The
         # public core.bloxberg.org lagged thousands of blocks and stalled
         # requests indefinitely on 2026-09-27, hanging a publish mid-way.
@@ -77,7 +77,7 @@ class BlockchainNetworks(Enum):
         # as <project>-unsafe (UNSAFE_NETWORKS).
         "testnet", # Network type
         "0x02882F03097fE8cD31afbdFbB5D72a498B41112c", # protocol contract address
-        "0x99A84C624C028bdf0a855A1E9E3f2fcf7275B3D8", # Image Registry Contract Address (ECImageRegistryV2)
+        "0xDf8cBCb1B57Fa34e7eA6b0f6B104B1aC8EF1dc53", # Image Registry Contract Address (ECImageRegistryV2, deployed 2026-10-05)
         "https://bloxberg.ethernity.cloud",
         8995,  # Example Chain ID
         False, # EIP 1559 SUPPORT
