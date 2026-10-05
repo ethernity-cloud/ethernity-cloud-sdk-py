@@ -95,27 +95,29 @@ def main(
 
     _progress(f"\t{SPINNER_FRAMES[frame_index]}  {message}")
 
-    # Check IPFS Hash Status
+    # The service answers publicKey 0 while the image is queued or running
+    # (with status, percent and queuePosition), -1 when the extraction failed
+    # (with reason) and the certificate when done.
     while True:
         check_response = check_ipfs_hash_status(ipfs_hash)
         if "publicKey" in check_response:
             if check_response["publicKey"] == 0:
                 frame_index = (frame_index + 1) % len(SPINNER_FRAMES)
-                if check_response.get('queuePosition') == "Running":
-                    message = f"Public key extraction is running now. Waiting for completion..."
+                if check_response.get("status") == "running" or check_response.get('queuePosition') == "Running":
+                    message = f"Public key extraction is running, {check_response.get('percent', 0)}% done..."
                 else:
                     message = f"Waiting for public key extraction to start. Queue position: {check_response.get('queuePosition', 'Unknown')}"
 
                 _progress(f"\t{SPINNER_FRAMES[frame_index]}  {message}")
-                time.sleep(1)
-            elif check_response["publicKey"] == "-1":
+                time.sleep(5)
+            elif check_response["publicKey"] in (-1, "-1"):
                 _progress(f"\t{FAIL}Public key extraction", transient=False)
-                print("\t\tThe certificate extraction process failed.")
+                print("\t\tThe certificate extraction failed.")
+                print(f"\t\tReason:      {check_response.get('reason', 'not reported by the service')}")
                 print(f"\t\tIPFS hash:   {ipfs_hash}")
                 print(f"\t\tEnclave:     {enclave_name}  (network: {network}, protocol: {protocol_version}, template: {template_version})")
-                print( "\t\tMake sure the enclave is built using the latest version of the SDK.")
-                print(f"\t\tIf it is, the extraction service log for this hash holds the reason;")
-                print(f"\t\tre-run the build or contact support with the IPFS hash above.")
+                print( "\t\tFix the cause (keep the image pinned, build with the current SDK) and publish again:")
+                print( "\t\ta new submission of the same hash runs the extraction again.")
                 print()
                 exit(1)
             else:
