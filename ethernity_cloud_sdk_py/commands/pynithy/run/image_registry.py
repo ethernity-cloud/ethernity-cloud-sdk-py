@@ -462,6 +462,67 @@ class ImageRegistry:
 
         return last_result
 
+    def is_v2(self):
+        """Whether the network's registry is an ECImageRegistryV2, which
+        records an image before its certificate exists (registerImage, then
+        setImageCert). A V1 registry has no pendingImages() and reverts."""
+        try:
+            self.image_registry_contract.functions.pendingImages().call()
+            return True
+        except Exception:
+            return False
+
+    def _send(self, txn_builder, gas_limit, label):
+        """Sign and send a transaction built by `txn_builder` from the
+        publishing wallet, waiting for its receipt."""
+        txn = txn_builder.build_transaction(self._transaction_options(gas_limit))
+        signed = self.provider.eth.account.sign_transaction(txn, private_key=self.private_key)
+        return Spinner().spin_till_done(label, self.process_transaction, signed)
+
+    def register_image(self, ipfs_hash, docker_compose_hash, ipfs_peer):
+        """Record the securelock on a V2 registry before its certificate
+        exists: name, protocol version v3, compose, session, the publisher's
+        fee and the IPFS node that holds the image (`ipfs_peer`, a multiaddr
+        or an empty string). A hash the registry already has is left as it
+        is; a hash another wallet registered is refused."""
+        details = self.get_image_details(ipfs_hash)
+        if details is not None and details.owner != "0x0000000000000000000000000000000000000000":
+            if details.owner.lower() != self.acct.address.lower():
+                raise Exception(f"{ipfs_hash} is registered by {details.owner}, not by this wallet")
+            print(f"\t✔  {ipfs_hash} is already registered")
+            return False
+        fee = int(config.read("DEVELOPER_FEE") or 0)
+        session = config.read("SECURELOCK_SESSION") or ""
+        gas_limit = 9000000 if self.blockchain_config.network == "bloxberg" else 1200000
+        self._send(
+            self.image_registry_contract.functions.registerImage(
+                ipfs_hash, self.securelock_version, self.enclave_name_securelock,
+                docker_compose_hash, session, fee, ipfs_peer or ""),
+            gas_limit,
+            f"Registering {self.enclave_name_securelock} {self.securelock_version} as {ipfs_hash}")
+        reward_address = config.read("REWARD_ADDRESS")
+        if reward_address:
+            self.set_reward_address(ipfs_hash, reward_address)
+        return True
+
+    def set_image_cert(self, ipfs_hash, cert):
+        """Write the certificate of a registered image, once, from the wallet
+        that registered it. A certificate already there is left as it is."""
+        details = self.get_image_details(ipfs_hash)
+        if details is None or details.owner == "0x0000000000000000000000000000000000000000":
+            raise Exception(f"{ipfs_hash} is not registered")
+        if details.public_key:
+            if details.public_key.strip() == cert.strip():
+                print(f"\t✔  the certificate of {ipfs_hash} is already registered")
+                return False
+            raise Exception(f"{ipfs_hash} already has a certificate, and it differs from the extracted one")
+        gas_limit = 9000000 if self.blockchain_config.network == "bloxberg" else 1200000
+        self._send(
+            self.image_registry_contract.functions.setImageCert(ipfs_hash, cert),
+            gas_limit,
+            f"Registering the certificate of {ipfs_hash}")
+        return True
+
     def set_reward_address(self, ipfs_hash, reward_address):
         """Name where the image's developer fee is paid. The registry records
         the publishing wallet at registration; only the image's owner, the

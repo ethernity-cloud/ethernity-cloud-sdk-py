@@ -19,15 +19,15 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from requests.packages.urllib3 import disable_warnings
 
+from urllib.parse import urlparse
+
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.pynithy import cas_resolver, session_registry
 import ethernity_cloud_sdk_py.commands.pynithy.run.public_key_service as public_key_service
 from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
 from ethernity_cloud_sdk_py.commands.pynithy.ipfs_client import IPFSClient
+from ethernity_cloud_sdk_py.commands.pynithy.local_kubo import LocalKubo
 from ethernity_cloud_sdk_py.commands.spinner import Spinner
-
-import time
-
 
 from pathlib import Path
 from ethernity_cloud_sdk_py.commands.config import Config, config
@@ -36,6 +36,10 @@ config = Config(Path(".config.json").resolve())
 config.load()
 
 image_registry = ImageRegistry()
+
+# The public IPFS API: an IPFS_ENDPOINT naming it is not an endpoint of the
+# application's own, so the publish runs its own Kubo instead.
+PUBLIC_IPFS_HOST = "ipfs.ethernity.cloud"
 
 
 def _local_build_fingerprint(registry_path, compose_file):
@@ -777,10 +781,32 @@ def update_cas_session():
 def main(private_key):
     spinner = Spinner()
     image_registry.set_private_key(private_key)
-    # ECLD_IPFS_ENDPOINT / ECLD_IPFS_TOKEN override the stored choice (RFC §9).
-    ipfs_endpoint = os.environ.get("ECLD_IPFS_ENDPOINT", "").strip() or config.read("IPFS_ENDPOINT")
+    # Where the image goes. An IPFS API of the application's own
+    # (ECLD_IPFS_ENDPOINT / ECLD_IPFS_TOKEN, else the stored IPFS_ENDPOINT)
+    # takes precedence. Otherwise, the publish runs its own Kubo: the public
+    # write API of ipfs.ethernity.cloud is closing, and the image is held by
+    # this Kubo, peered with the bootnode, until its certificate is on chain.
+    ipfs_endpoint = os.environ.get("ECLD_IPFS_ENDPOINT", "").strip() or (config.read("IPFS_ENDPOINT") or "")
     ipfs_token = os.environ.get("ECLD_IPFS_TOKEN", "").strip() or (config.read("IPFS_TOKEN") or "")
-    ipfs_client = IPFSClient(ipfs_endpoint, ipfs_token or None)
+    local_kubo = None
+    if not ipfs_endpoint or urlparse(ipfs_endpoint).hostname == PUBLIC_IPFS_HOST:
+        local_kubo = LocalKubo(config.read("PROJECT_NAME") or "publish")
+        try:
+            spinner.spin_till_done("Starting the publish's IPFS node", local_kubo.start)
+        except Exception as e:
+            print(f"\t✖  {e}")
+            exit(1)
+        ipfs_client = IPFSClient(local_kubo.api_url, None)
+    else:
+        ipfs_client = IPFSClient(ipfs_endpoint, ipfs_token or None)
+    try:
+        _publish(private_key, spinner, ipfs_client, local_kubo)
+    finally:
+        if local_kubo is not None:
+            local_kubo.stop()
+
+
+def _publish(private_key, spinner, ipfs_client, local_kubo):
 
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
     DAPP_TYPE = config.read("DAPP_TYPE")
@@ -948,6 +974,24 @@ def main(private_key):
         # reuse them while the on-disk build is byte-identical.
         config.write("IPFS_UPLOAD_FINGERPRINT", build_fingerprint)
 
+    # On a V2 registry the image is recorded before its certificate exists,
+    # from the publishing wallet, with the IPFS node that holds it: the
+    # bootnode's mirror pins it and the extraction service queues it from
+    # that record, and the same wallet writes the certificate below. A V1
+    # registry takes the record and the certificate in one addImage call.
+    registry_v2 = image_registry.is_v2()
+    if registry_v2:
+        ipfs_peer = ""
+        if local_kubo is not None:
+            local_kubo.provide(IPFS_HASH)
+            local_kubo.provide(IPFS_DOCKER_COMPOSE_HASH)
+            ipfs_peer = local_kubo.peer_multiaddr()
+        try:
+            image_registry.register_image(IPFS_HASH, IPFS_DOCKER_COMPOSE_HASH, ipfs_peer)
+        except Exception as e:
+            print(f"\t\u2716  {e}")
+            exit(1)
+
     print('\n\u276f\u276f Extracting public key from enclave')
 
     if os.path.exists("certificate.securelock.crt"):
@@ -1047,10 +1091,13 @@ def main(private_key):
     print(f'\n\u276f\u276f Registering enclave on {BLOCKCHAIN_NETWORK}')
 
     try:
-        image_registry.register_securelock_image(ENCLAVE_PUBLIC_KEY)
+        if registry_v2:
+            image_registry.set_image_cert(IPFS_HASH, ENCLAVE_PUBLIC_KEY)
+        else:
+            image_registry.register_securelock_image(ENCLAVE_PUBLIC_KEY)
     except Exception as e:
-        print(e)
-        exit()
+        print(f"\t\u2716  {e}")
+        exit(1)
 
     # The on-chain session points at the image it admits, so a validator can
     # pin the image beside the body it serves.
