@@ -76,12 +76,13 @@ def clean_up_registry():
     # `etny-trustedzone`. Matched by exact name -- `--filter name=` is a
     # substring regex, and the unanchored `name=las` it used to pass removed
     # an unrelated `ecas-las2`, the quoting service of a CAS validator set
-    # running on the same host.
+    # running on the same host. `-v` removes their anonymous volumes too:
+    # registry:2 keeps its pushed images in one, about 1.3 GB per build.
     for name in ("registry", "las", "etny-securelock", "etny-trustedzone", "etny-swift-stream"):
         containers = get_command_output(f"docker ps --filter 'name=^/{name}$' -a -q")
         if containers:
             run_command(f"docker stop {containers}", True)
-            run_command(f"docker rm {containers} -f", True)
+            run_command(f"docker rm -f -v {containers}", True)
 
     dockerImgReg = get_command_output(
         'docker images --filter reference="*registry*" -q'
