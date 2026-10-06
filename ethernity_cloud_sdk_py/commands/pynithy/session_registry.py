@@ -214,13 +214,20 @@ def register(provider_url, chain_id, registry_address, key, body, ipfs_api_url, 
     return name, digest.hex(), cid, True
 
 
-def link_image(provider_url, chain_id, registry_address, key, name, image_cid):
-    """Point the name's latest version at the published image CID."""
+def link_image(provider_url, chain_id, registry_address, key, name, image_cid, wait_secs=600):
+    """Point the name's latest version at the published image CID. A node
+    behind the chain can answer that a name registered minutes earlier has no
+    record, so the name is read again every 15 seconds for `wait_secs` before
+    it is called unregistered."""
     w3 = _web3(provider_url)
     reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=ABI)
+    deadline = time.time() + wait_secs
     latest = latest_record(reg, name)
-    if latest is None:
-        raise SystemExit(f"no registered session named {name!r}")
+    while latest is None:
+        if time.time() >= deadline:
+            raise SystemExit(f"no registered session named {name!r}")
+        time.sleep(15)
+        latest = latest_record(reg, name)
     txh, rcpt = _send(w3, chain_id, key, reg.functions.linkImage(latest[0], image_cid),
                       label=f"the link of {name}")
     if rcpt.status != 1:

@@ -558,23 +558,37 @@ class ImageRegistry:
             self.set_reward_address(ipfs_hash, reward_address)
         return True
 
-    def set_image_cert(self, ipfs_hash, cert):
+    def set_image_cert(self, ipfs_hash, cert, wait_secs=600):
         """Write the certificate of a registered image, once, from the wallet
-        that registered it. A certificate already there is left as it is."""
-        details = self.get_image_details(ipfs_hash)
-        if details is None or details.owner == "0x0000000000000000000000000000000000000000":
-            raise Exception(f"{ipfs_hash} is not registered")
-        if details.public_key:
-            if details.public_key.strip() == cert.strip():
-                print(f"\t✔  the certificate of {ipfs_hash} is already registered")
-                return False
-            raise Exception(f"{ipfs_hash} already has a certificate, and it differs from the extracted one")
+        that registered it. A certificate already there is left as it is.
+
+        The RPC endpoint balances requests over nodes that can lag the chain
+        by several blocks, and a read can fail outright, so an image this
+        publish registered minutes earlier can read as missing, or be refused
+        as "Image not found" by the simulation: both are tried again every 15
+        seconds for `wait_secs` before the image is called missing."""
         gas_limit = 9000000 if self.blockchain_config.network == "bloxberg" else 1200000
-        self._send(
-            self.image_registry_contract.functions.setImageCert(ipfs_hash, cert),
-            gas_limit,
-            f"Registering the certificate of {ipfs_hash}")
-        return True
+        deadline = time.time() + wait_secs
+        while True:
+            details = self.get_image_details(ipfs_hash)
+            if details is not None and details.owner != "0x0000000000000000000000000000000000000000":
+                if details.public_key:
+                    if details.public_key.strip() == cert.strip():
+                        print(f"\t✔  the certificate of {ipfs_hash} is already registered")
+                        return False
+                    raise Exception(f"{ipfs_hash} already has a certificate, and it differs from the extracted one")
+                try:
+                    self._send(
+                        self.image_registry_contract.functions.setImageCert(ipfs_hash, cert),
+                        gas_limit,
+                        f"Registering the certificate of {ipfs_hash}")
+                    return True
+                except Exception as e:
+                    if "Image not found" not in str(e) or time.time() >= deadline:
+                        raise
+            elif time.time() >= deadline:
+                raise Exception(f"{ipfs_hash} is not registered")
+            time.sleep(15)
 
     def set_reward_address(self, ipfs_hash, reward_address):
         """Name where the image's developer fee is paid. The registry records
