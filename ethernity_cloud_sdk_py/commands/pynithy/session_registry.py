@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import time
+import warnings
 
 import requests
 from eth_abi import decode
@@ -74,8 +75,12 @@ ERRORS = {
 
 def _refusal(e):
     """A refusal as the registry states it: the custom error and its
-    arguments when `e` carries one of the registry's errors, else its text."""
+    arguments when `e` carries one of the registry's errors, else its text.
+    The bloxberg node (Parity) returns the revert data as "Reverted 0x...",
+    and web3 keeps that prefix in `e.data`."""
     data = getattr(e, "data", None)
+    if isinstance(data, str):
+        data = data.removeprefix("Reverted ")
     if isinstance(data, str) and data.startswith("0x") and len(data) >= 10:
         for error, types in ERRORS.items():
             selector = Web3.keccak(text=f"{error}({','.join(types)})")[:4].hex().removeprefix("0x")
@@ -157,15 +162,21 @@ def _web3(provider_url):
     return w3
 
 
-def _send(w3, chain_id, key, fn, gas, label):
-    """Simulate `fn` from the key's wallet, then sign and send it. A refusal
-    is raised with the registry's reason: a transaction sent with a fixed gas
-    limit and reverted reports none."""
+def _send(w3, chain_id, key, fn, label):
+    """Simulate `fn` from the key's wallet, then sign and send it with its gas
+    estimate plus 30%: a registration's cost grows with the length of the
+    name. A refusal is raised with the registry's reason, which only the
+    simulation reports."""
     acct = w3.eth.account.from_key(key)
     try:
-        fn.call({"from": acct.address})
+        # web3 reads Parity's "Reverted 0x..." as a reason string and warns
+        # when a custom error is not UTF-8; _refusal decodes it instead.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            fn.call({"from": acct.address})
     except ContractLogicError as e:
         raise SystemExit(f"SessionRegistry refuses {label}: {_refusal(e)}")
+    gas = fn.estimate_gas({"from": acct.address}) * 13 // 10
     txn = fn.build_transaction({
         "from": acct.address,
         "nonce": w3.eth.get_transaction_count(acct.address, "pending"),
@@ -197,11 +208,9 @@ def register(provider_url, chain_id, registry_address, key, body, ipfs_api_url, 
         return name, digest.hex(), cid, False
     txh, rcpt = _send(w3, chain_id, key,
                       reg.functions.register(digest, name, cid, image_cid, HASH_ALGO_SHA256, rules),
-                      gas=800000, label=name)
+                      label=name)
     if rcpt.status != 1:
-        raise SystemExit(
-            f"SessionRegistry.register reverted for {name} (tx {txh.hex()}): this name's "
-            f"creator may be another wallet, or the SessionRules shape differs from the ABI")
+        raise SystemExit(f"SessionRegistry.register reverted for {name} (tx {txh.hex()})")
     return name, digest.hex(), cid, True
 
 
@@ -213,7 +222,7 @@ def link_image(provider_url, chain_id, registry_address, key, name, image_cid):
     if latest is None:
         raise SystemExit(f"no registered session named {name!r}")
     txh, rcpt = _send(w3, chain_id, key, reg.functions.linkImage(latest[0], image_cid),
-                      gas=300000, label=f"the link of {name}")
+                      label=f"the link of {name}")
     if rcpt.status != 1:
         raise SystemExit(f"SessionRegistry.linkImage reverted for {name} (tx {txh.hex()})")
 

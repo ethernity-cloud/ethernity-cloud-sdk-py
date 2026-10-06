@@ -173,11 +173,17 @@ def extract_signed_mrenclave(service):
 
 
 def process_yaml_template(template_file, output_file):
-    
+
     config.write("IPFS_HASH", "")
     config.write("IPFS_DOCKER_COMPOSE_HASH","")
     config.write("IPFS_HASH_PUBLISH", "")
 
+    return render_session_file(template_file, output_file)
+
+
+def render_session_file(template_file, output_file):
+    """Write the securelock's CAS session from its template, for the
+    MRENCLAVE_SECURELOCK and SECURELOCK_SESSION in the config."""
     MRENCLAVE_SECURELOCK = config.read("MRENCLAVE_SECURELOCK")
     SECURELOCK_SESSION = config.read("SECURELOCK_SESSION")
     
@@ -266,8 +272,28 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
             trustedzone_hash = image_registry.get_trusted_zone_hash(
                 config.read("TRUSTED_ZONE_IMAGE"), "v3"
             )
-            trustedzone = image_registry.get_trustezone_image_session(trustedzone_hash)
+            if trustedzone_hash:
+                trustedzone = image_registry.get_trustezone_image_session(trustedzone_hash)
+            if not trustedzone:
+                raise RuntimeError(
+                    f"the image registry records no trustedzone session for {config.read('TRUSTED_ZONE_IMAGE')}")
         memory = config.read("MEMORY_TO_ALLOCATE")
+
+        # The CAS each compose names. Mainnet: the Scontain CAS. A CAS-attested
+        # testnet: the local compose, which harvests the certificate, names a
+        # validator that answered (or ECLD_CAS_ADDR), and the shipped compose
+        # the first validator in registry order, so that a rerun of this
+        # publish renders the same compose. The node and the extraction
+        # service resolve a CAS again before they run it.
+        harvest_cas_addr = published_cas_addr = None
+        if BLOCKCHAIN_CONFIG.cas_provisioned:
+            if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
+                harvest_cas_addr = published_cas_addr = 'scone-cas.cf'
+            else:
+                validator_registry = BlockchainNetworks.get_validator_registry_address(BLOCKCHAIN_NETWORK)
+                harvest_cas_addr = cas_resolver.cas_address_for(BLOCKCHAIN_CONFIG.rpc_url, validator_registry)
+                published_cas_addr = cas_resolver.published_cas_address(BLOCKCHAIN_CONFIG.rpc_url, validator_registry)
+                print(f"\t✔  CAS for this network: {harvest_cas_addr} (the published compose names {published_cas_addr})")
 
         # Assuming variables like memory, securelock, trustedzone, BLOCKCHAIN_CONFIG, dest_dir are defined elsewhere
         # memory = config.read("MEMORY_TO_ALLOCATE")
@@ -340,18 +366,8 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
             # Determine environments based on network_type
             network_type = BLOCKCHAIN_CONFIG.network_type
             if BLOCKCHAIN_CONFIG.cas_provisioned:
-                # The CAS both enclaves are provisioned from. Mainnet: the
-                # Scontain CAS. A CAS-attested testnet: an ethernity-cas
-                # validator resolved from the ValidatorRegistry (or
-                # ECLD_CAS_ADDR); the node re-resolves it from chain before
-                # each task.
-                if network_type == 'mainnet':
-                    cas_addr = 'scone-cas.cf'
-                else:
-                    cas_addr = cas_resolver.cas_address_for(
-                        BLOCKCHAIN_CONFIG.rpc_url,
-                        BlockchainNetworks.get_validator_registry_address(BLOCKCHAIN_NETWORK))
-                    print(f"\t✔  CAS for this network: {cas_addr}")
+                # The CAS both enclaves are provisioned from.
+                cas_addr = published_cas_addr if is_final else harvest_cas_addr
                 securelock_env = {
                     'SCONE_CAS_ADDR': cas_addr,
                     'SCONE_LAS_ADDR': 'las',
@@ -837,7 +853,8 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
         print("Error: Docker version not found. Please install and run docker service.")
         exit(1)
 
-    spinner.spin_till_done("Updating docker composer files", update_docker_compose_files, build_dir)
+    if not spinner.spin_till_done("Updating docker composer files", update_docker_compose_files, build_dir):
+        exit(1)
 
     os.chdir(build_dir)
 
@@ -904,6 +921,10 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
     else:
         IPFS_HASH = config.read("IPFS_HASH")
         IPFS_DOCKER_COMPOSE_HASH = config.read("IPFS_DOCKER_COMPOSE_HASH")
+        # A CAS testnet registers the session on every publish, below, from
+        # this file; updating the compose files recreated the directory.
+        if BLOCKCHAIN_CONFIG.cas_provisioned and BLOCKCHAIN_CONFIG.network_type != 'mainnet':
+            render_session_file("etny-securelock-test.yaml.tpl", "etny-securelock-test.yaml")
 
     # Ensure the IPFS hashes point at THIS build's image + compose, before cert
     # extraction, regardless of which extraction path (local SGX or the remote
@@ -918,7 +939,9 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
     # cached KEYED ON THE BUILD CONTENT: we fingerprint the on-disk registry +
     # compose locally and reuse the stored CID only when the fingerprint
     # matches what was last uploaded. A hash left over from a DIFFERENT build
-    # can never match and always triggers a fresh upload.
+    # can never match and always triggers a fresh upload. Only an IPFS
+    # endpoint of the application's own keeps what was uploaded to it: the
+    # publish's own Kubo starts empty, so with it the build is always added.
     build_fingerprint = spinner.spin_till_done(
         "Fingerprinting built enclave image",
         _local_build_fingerprint,
@@ -929,7 +952,8 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
     stored_ipfs_hash = config.read("IPFS_HASH")
     stored_compose_hash = config.read("IPFS_DOCKER_COMPOSE_HASH")
     reuse_upload = bool(
-        build_fingerprint
+        local_kubo is None
+        and build_fingerprint
         and build_fingerprint == stored_fingerprint
         and stored_ipfs_hash
         and stored_compose_hash
@@ -944,7 +968,11 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
     # ECImageRegistryV3 that binds the image name to this wallet before the
     # upload, the session registration or anything else discloses it. A V1
     # registry takes the record and the certificate in one addImage call.
-    registry_v2 = image_registry.is_v2()
+    try:
+        registry_v2 = image_registry.is_v2()
+    except Exception as e:
+        print(f"\t✖  Could not read the image registry: {e}")
+        exit(1)
     if reuse_upload:
         IPFS_HASH = stored_ipfs_hash
         IPFS_DOCKER_COMPOSE_HASH = stored_compose_hash
@@ -1014,9 +1042,6 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
     # serve the session, because the public-key harvest below provisions the
     # enclave from them.
     if BLOCKCHAIN_CONFIG.cas_provisioned and BLOCKCHAIN_CONFIG.network_type != 'mainnet':
-        if not os.path.exists("etny-securelock-test.yaml"):
-            print("\t\u2716  The session file etny-securelock-test.yaml is missing; run ecld-build again")
-            exit(1)
         registry_address = BlockchainNetworks.get_session_registry_address(BLOCKCHAIN_NETWORK)
         with open("etny-securelock-test.yaml", "rb") as f:
             session_body = f.read()

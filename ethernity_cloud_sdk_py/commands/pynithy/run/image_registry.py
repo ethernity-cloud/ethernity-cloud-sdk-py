@@ -365,6 +365,7 @@ class ImageRegistry:
             details.owner = result[0]
             details.name = result[10]
             details.ipfs_hash = result[1]
+            details.session = result[3]
             details.public_key = result[8]
             details.docker_compose_hash = result[9]
 
@@ -452,13 +453,14 @@ class ImageRegistry:
                         fee,
                     )
                     if txn == False:
+                        if attempt >= max_retries:
+                            raise Exception("the addImage transaction could not be built")
                         continue
 
-                    last_result = spinner.spin_till_done(
-                        f"Processing transaction 0x{txn.hash.hex()}",
-                        self.process_transaction,
-                        txn
-                    )
+                    # Called directly: a transaction that reverts must raise
+                    # here, and the spinner returns None for any exception.
+                    print(f"\t   Processing transaction 0x{txn.hash.hex()}")
+                    last_result = self.process_transaction(txn)
                     break  # this channel registered successfully
                 except Exception as e:
                     if "already in registry" in str(e).lower():
@@ -479,11 +481,12 @@ class ImageRegistry:
     def is_v2(self):
         """Whether the network's registry is an ECImageRegistryV2 or later,
         which records an image before its certificate exists (registerImage,
-        then setImageCert). A V1 registry has no pendingImages() and reverts."""
+        then setImageCert). A V1 registry has no pendingImages() and reverts;
+        a node that does not answer raises."""
         try:
             self.image_registry_contract.functions.pendingImages().call()
             return True
-        except Exception:
+        except ContractLogicError:
             return False
 
     def image_name_owner(self, image_name):
@@ -493,33 +496,49 @@ class ImageRegistry:
         name and its -unsafe twin have one owner."""
         try:
             return self.image_registry_contract.functions.imageNameOwner(image_name).call()
-        except Exception:
+        except ContractLogicError:
             return None
 
     def _send(self, txn_builder, gas_limit, label):
         """Sign and send a transaction built by `txn_builder` from the
-        publishing wallet, waiting for its receipt. The call is simulated
-        first: a transaction sent with a fixed gas limit and reverted reports
-        no reason, the simulation reports the registry's."""
+        publishing wallet, waiting for its receipt; a transaction that
+        reverts raises. The call is simulated first: a transaction sent with a
+        fixed gas limit and reverted reports no reason, the simulation reports
+        the registry's."""
         try:
             txn_builder.call({"from": self.acct.address})
         except ContractLogicError as e:
             raise Exception(f"{label}: the image registry refuses it ({e})")
         txn = txn_builder.build_transaction(self._transaction_options(gas_limit))
         signed = self.provider.eth.account.sign_transaction(txn, private_key=self.private_key)
-        return Spinner().spin_till_done(label, self.process_transaction, signed)
+        print(f"\t   {label}: transaction 0x{signed.hash.hex()}")
+        return self.process_transaction(signed)
 
     def register_image(self, ipfs_hash, docker_compose_hash, ipfs_peer):
         """Record the securelock on a V2 registry before its certificate
         exists: name, protocol version v3, compose, session, the publisher's
         fee and the IPFS node that holds the image (`ipfs_peer`, a multiaddr
-        or an empty string). A hash the registry already has is left as it
-        is; a hash another wallet registered is refused, and so is a name
-        another wallet owns."""
+        or an empty string). A hash this wallet already registered with the
+        same name, compose and session is left as it is; a hash another
+        wallet registered is refused, and so is a name another wallet owns.
+        The record cannot be changed, so a hash registered with another
+        compose or session is refused too: the nodes would fetch the compose
+        the record names."""
+        session = config.read("SECURELOCK_SESSION") or ""
         details = self.get_image_details(ipfs_hash)
         if details is not None and details.owner != "0x0000000000000000000000000000000000000000":
             if details.owner.lower() != self.acct.address.lower():
                 raise Exception(f"{ipfs_hash} is registered by {details.owner}, not by this wallet")
+            differing = [(field, recorded, wanted) for field, recorded, wanted in (
+                ("name", details.name, self.enclave_name_securelock),
+                ("compose", details.docker_compose_hash, docker_compose_hash),
+                ("session", details.session, session),
+            ) if recorded != wanted]
+            if differing:
+                recorded = ", ".join(f"{field} {value}" for field, value, _ in differing)
+                wanted = ", ".join(f"{field} {value}" for field, _, value in differing)
+                raise Exception(f"{ipfs_hash} is registered with {recorded}, and this publish has {wanted}; "
+                                f"run ecld-build to publish a new version")
             print(f"\t✔  {ipfs_hash} is already registered")
             return False
         name_owner = self.image_name_owner(self.enclave_name_securelock)
@@ -527,7 +546,6 @@ class ImageRegistry:
             raise Exception(f"the image name {self.enclave_name_securelock} belongs to {name_owner}; "
                             f"publish under another PROJECT_NAME")
         fee = int(config.read("DEVELOPER_FEE") or 0)
-        session = config.read("SECURELOCK_SESSION") or ""
         gas_limit = 9000000 if self.blockchain_config.network == "bloxberg" else 1200000
         self._send(
             self.image_registry_contract.functions.registerImage(

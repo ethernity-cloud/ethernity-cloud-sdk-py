@@ -5,7 +5,7 @@ import pytest
 from ethernity_cloud_sdk_py.commands import run
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 
-V2_IMAGE_REGISTRY = "0xDf8cBCb1B57Fa34e7eA6b0f6B104B1aC8EF1dc53"
+V3_IMAGE_REGISTRY = "0xa372a6e1Eb7Fcf343AF6b91E809b900C55001CD1"
 
 
 def test_the_unsafe_testnet_shares_the_testnet_chain_and_contracts():
@@ -15,7 +15,7 @@ def test_the_unsafe_testnet_shares_the_testnet_chain_and_contracts():
     for field in ("network", "network_type", "protocol_contract_address",
                   "image_registry_contract_address", "rpc_url", "chain_id"):
         assert getattr(unsafe, field) == getattr(safe, field), field
-    assert safe.image_registry_contract_address == V2_IMAGE_REGISTRY
+    assert safe.image_registry_contract_address == V3_IMAGE_REGISTRY
     assert (BlockchainNetworks.get_esr_contract_address("BLOXBERG_TESTNET_UNSAFE")
             == BlockchainNetworks.get_esr_contract_address("BLOXBERG_TESTNET"))
 

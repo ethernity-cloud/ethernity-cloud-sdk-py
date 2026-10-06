@@ -46,7 +46,7 @@ class BlockchainNetworks(Enum):
         # validator set exactly as on mainnet (see `cas_provisioned`).
         "testnet", # Network type
         "0x02882F03097fE8cD31afbdFbB5D72a498B41112c", # protocol contract address
-        "0xDf8cBCb1B57Fa34e7eA6b0f6B104B1aC8EF1dc53", # Image Registry Contract Address (ECImageRegistryV2, deployed 2026-10-05)
+        "0xa372a6e1Eb7Fcf343AF6b91E809b900C55001CD1", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-06)
         # The endpoint the runner, the node and the CAS validators use. The
         # public core.bloxberg.org lagged thousands of blocks and stalled
         # requests indefinitely on 2026-09-27, hanging a publish mid-way.
@@ -77,7 +77,7 @@ class BlockchainNetworks(Enum):
         # as <project>-unsafe (UNSAFE_NETWORKS).
         "testnet", # Network type
         "0x02882F03097fE8cD31afbdFbB5D72a498B41112c", # protocol contract address
-        "0xDf8cBCb1B57Fa34e7eA6b0f6B104B1aC8EF1dc53", # Image Registry Contract Address (ECImageRegistryV2, deployed 2026-10-05)
+        "0xa372a6e1Eb7Fcf343AF6b91E809b900C55001CD1", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-06)
         "https://bloxberg.ethernity.cloud",
         8995,  # Example Chain ID
         False, # EIP 1559 SUPPORT
@@ -440,7 +440,7 @@ VALIDATOR_REGISTRY_ADDRESSES = {
 # session. A testnet NOT listed here has no CAS: its securelock self-signs
 # from MR_ENCLAVE.
 SESSION_REGISTRY_ADDRESSES = {
-    "BLOXBERG_TESTNET": "0xcb1F389bF4524d1D61EDcbC24eC1F1F9C3FF4Fa6",
+    "BLOXBERG_TESTNET": "0x444429681fCb26470Cb12B5436E48402cF7478A3",
     "LITVM_LITEFORGE": "0x8ad24b3F406A41a0F8D3440021792EB203957F43",
 }
 
