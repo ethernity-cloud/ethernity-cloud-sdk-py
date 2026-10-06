@@ -880,11 +880,10 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
         
         # Where the session goes depends on who provisions the securelock.
         # mainnet: POSTed to the Scontain CAS. A testnet with a SessionRegistry:
-        # registered ON-CHAIN there, which the validator set reads; the publish
-        # then waits until the validators serve it, because the public-key
-        # harvest below provisions the enclave from them. A testnet without
-        # one: no session at all -- the enclave self-signs from MR_ENCLAVE, and
-        # a CAS-issued SERVER_CERT would not match the key it generates.
+        # registered ON-CHAIN there, below, once the image is registered. A
+        # testnet without one: no session at all -- the enclave self-signs from
+        # MR_ENCLAVE, and a CAS-issued SERVER_CERT would not match the key it
+        # generates.
         if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
             # Generate certificates if needed
             key_pem_path = certs_dir / "key.pem"
@@ -897,20 +896,7 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
                 spinner.spin_till_done("Generating certificate for session registration", generate_certificates)
 
             spinner.spin_till_done("Registering session into CAS", update_cas_session)
-        elif BLOCKCHAIN_CONFIG.cas_provisioned:
-            registry_address = BlockchainNetworks.get_session_registry_address(BLOCKCHAIN_NETWORK)
-            with open("etny-securelock-test.yaml", "rb") as f:
-                session_body = f.read()
-            name, session_hash_hex, body_cid, registered = session_registry.register(
-                BLOCKCHAIN_CONFIG.rpc_url, BLOCKCHAIN_CONFIG.chain_id, registry_address,
-                private_key, session_body, ipfs_client.api_url)
-            if registered:
-                print(f"\t✔  Session {name} registered on-chain (body {body_cid})")
-                session_registry.wait_visible(
-                    BLOCKCHAIN_CONFIG.rpc_url, registry_address, name, session_hash_hex)
-            else:
-                print(f"\t✔  Session {name} already registered on-chain with this body (0x{session_hash_hex})")
-        else:
+        elif not BLOCKCHAIN_CONFIG.cas_provisioned:
             print("\t✔  Testnet: skipping CAS session registration (enclave self-signs from MR_ENCLAVE)")
 
         config.write("MRENCLAVE_SECURELOCK", mrenclave_securelock)
@@ -942,17 +928,55 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
     stored_fingerprint = config.read("IPFS_UPLOAD_FINGERPRINT")
     stored_ipfs_hash = config.read("IPFS_HASH")
     stored_compose_hash = config.read("IPFS_DOCKER_COMPOSE_HASH")
-
-    if (
+    reuse_upload = bool(
         build_fingerprint
         and build_fingerprint == stored_fingerprint
         and stored_ipfs_hash
         and stored_compose_hash
-    ):
+    )
+
+    # On a two-step registry (ECImageRegistryV2 and later) the image is
+    # recorded before its certificate exists, from the publishing wallet, with
+    # the IPFS node that holds it: the bootnode's mirror pins it and the
+    # extraction service queues it from that record, and the same wallet
+    # writes the certificate below. The record is made first, under the CIDs
+    # the upload gives, hashed before anything is stored: on
+    # ECImageRegistryV3 that binds the image name to this wallet before the
+    # upload, the session registration or anything else discloses it. A V1
+    # registry takes the record and the certificate in one addImage call.
+    registry_v2 = image_registry.is_v2()
+    if reuse_upload:
         IPFS_HASH = stored_ipfs_hash
         IPFS_DOCKER_COMPOSE_HASH = stored_compose_hash
         print(f"\t\u2714  Build unchanged since last upload; reusing pinned CID {IPFS_HASH}")
-    else:
+    elif registry_v2:
+        try:
+            IPFS_DOCKER_COMPOSE_HASH = spinner.spin_till_done(
+                "Hashing docker compose file for IPFS",
+                ipfs_client.upload,
+                "docker-compose-final.yml",
+                True,
+            )
+        except Exception as e:
+            print(f"\t\u2716  Could not hash docker-compose-final.yml for IPFS: {e}")
+            exit(1)
+        IPFS_HASH = ipfs_client.upload(registry_path, only_hash=True)
+        if not IPFS_HASH or not IPFS_DOCKER_COMPOSE_HASH:
+            print("\t\u2716  Error: Could not hash the enclave for IPFS")
+            exit(1)
+
+    ipfs_peer = ""
+    if registry_v2:
+        if local_kubo is not None:
+            ipfs_peer = local_kubo.peer_multiaddr()
+        try:
+            image_registry.register_image(IPFS_HASH, IPFS_DOCKER_COMPOSE_HASH, ipfs_peer)
+        except Exception as e:
+            print(f"\t\u2716  {e}")
+            exit(1)
+
+    if not reuse_upload:
+        registered_cids = (IPFS_HASH, IPFS_DOCKER_COMPOSE_HASH)
         try:
             IPFS_DOCKER_COMPOSE_HASH = spinner.spin_till_done(
                 "Uploading and pinning docker compose file to IPFS",
@@ -970,27 +994,41 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
             print("\t\u2716  Error: Could not upload enclave to IPFS")
             exit(1)
         config.write("IPFS_HASH", IPFS_HASH)
+        if registry_v2 and (IPFS_HASH, IPFS_DOCKER_COMPOSE_HASH) != registered_cids:
+            print(f"\t\u2716  The upload gave {IPFS_HASH} (compose {IPFS_DOCKER_COMPOSE_HASH}), "
+                  f"not the registered {registered_cids[0]} (compose {registered_cids[1]})")
+            exit(1)
         # Record what these CIDs were computed from, so future publishes only
         # reuse them while the on-disk build is byte-identical.
         config.write("IPFS_UPLOAD_FINGERPRINT", build_fingerprint)
 
-    # On a V2 registry the image is recorded before its certificate exists,
-    # from the publishing wallet, with the IPFS node that holds it: the
-    # bootnode's mirror pins it and the extraction service queues it from
-    # that record, and the same wallet writes the certificate below. A V1
-    # registry takes the record and the certificate in one addImage call.
-    registry_v2 = image_registry.is_v2()
-    if registry_v2:
-        ipfs_peer = ""
-        if local_kubo is not None:
-            local_kubo.provide(IPFS_HASH)
-            local_kubo.provide(IPFS_DOCKER_COMPOSE_HASH)
-            ipfs_peer = local_kubo.peer_multiaddr()
-        try:
-            image_registry.register_image(IPFS_HASH, IPFS_DOCKER_COMPOSE_HASH, ipfs_peer)
-        except Exception as e:
-            print(f"\t\u2716  {e}")
+    if registry_v2 and local_kubo is not None:
+        local_kubo.provide(IPFS_HASH)
+        local_kubo.provide(IPFS_DOCKER_COMPOSE_HASH)
+
+    # A testnet with a SessionRegistry: the session is registered ON-CHAIN
+    # there, which the validator set reads, on every publish (a body already
+    # registered is reported and left as it is), now that the image name is
+    # this wallet's: the SessionRegistry takes a securelock session only from
+    # the wallet that owns it. The publish then waits until the validators
+    # serve the session, because the public-key harvest below provisions the
+    # enclave from them.
+    if BLOCKCHAIN_CONFIG.cas_provisioned and BLOCKCHAIN_CONFIG.network_type != 'mainnet':
+        if not os.path.exists("etny-securelock-test.yaml"):
+            print("\t\u2716  The session file etny-securelock-test.yaml is missing; run ecld-build again")
             exit(1)
+        registry_address = BlockchainNetworks.get_session_registry_address(BLOCKCHAIN_NETWORK)
+        with open("etny-securelock-test.yaml", "rb") as f:
+            session_body = f.read()
+        name, session_hash_hex, body_cid, registered = session_registry.register(
+            BLOCKCHAIN_CONFIG.rpc_url, BLOCKCHAIN_CONFIG.chain_id, registry_address,
+            private_key, session_body, ipfs_client.api_url)
+        if registered:
+            print(f"\t\u2714  Session {name} registered on-chain (body {body_cid})")
+            session_registry.wait_visible(
+                BLOCKCHAIN_CONFIG.rpc_url, registry_address, name, session_hash_hex)
+        else:
+            print(f"\t\u2714  Session {name} already registered on-chain with this body (0x{session_hash_hex})")
 
     print('\n\u276f\u276f Extracting public key from enclave')
 

@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from eth_utils.address import to_checksum_address
 from web3 import Web3
 #from web3.middleware.geth_poa import geth_poa_middleware
+from web3.exceptions import ContractLogicError
 from web3.middleware import ExtraDataToPOAMiddleware
 from eth_account import Account
 
@@ -123,6 +124,19 @@ class ImageRegistry:
             return None
 
     def check_image_permissions(self):
+        # On a registry with name owners the name's owner answers, whether or
+        # not an image is certified under the name yet.
+        name_owner = self.image_name_owner(self.enclave_name_securelock)
+        if name_owner is not None:
+            if int(name_owner, 16) == 0:
+                return True
+            if name_owner.lower() != self.acct.address.lower():
+                print(
+                    f"\t✘  Enclave '{self.enclave_name_securelock}' is owned by '{name_owner}'.\nYou are not the account holder of the image.\nPlease change the project name and try again.\n"
+                )
+                return False
+            return f"\t✔  Project ownership verified on {self.blockchain_network}"
+
         try:
             image_hash = self._get_latest_image_version_public_key(
                 self.enclave_name_securelock, self.securelock_version
@@ -463,18 +477,34 @@ class ImageRegistry:
         return last_result
 
     def is_v2(self):
-        """Whether the network's registry is an ECImageRegistryV2, which
-        records an image before its certificate exists (registerImage, then
-        setImageCert). A V1 registry has no pendingImages() and reverts."""
+        """Whether the network's registry is an ECImageRegistryV2 or later,
+        which records an image before its certificate exists (registerImage,
+        then setImageCert). A V1 registry has no pendingImages() and reverts."""
         try:
             self.image_registry_contract.functions.pendingImages().call()
             return True
         except Exception:
             return False
 
+    def image_name_owner(self, image_name):
+        """The wallet that owns the securelock name on an ECImageRegistryV3 or
+        later (the zero address while nobody does), or None on a registry
+        without name owners. Only the owner publishes under the name, and a
+        name and its -unsafe twin have one owner."""
+        try:
+            return self.image_registry_contract.functions.imageNameOwner(image_name).call()
+        except Exception:
+            return None
+
     def _send(self, txn_builder, gas_limit, label):
         """Sign and send a transaction built by `txn_builder` from the
-        publishing wallet, waiting for its receipt."""
+        publishing wallet, waiting for its receipt. The call is simulated
+        first: a transaction sent with a fixed gas limit and reverted reports
+        no reason, the simulation reports the registry's."""
+        try:
+            txn_builder.call({"from": self.acct.address})
+        except ContractLogicError as e:
+            raise Exception(f"{label}: the image registry refuses it ({e})")
         txn = txn_builder.build_transaction(self._transaction_options(gas_limit))
         signed = self.provider.eth.account.sign_transaction(txn, private_key=self.private_key)
         return Spinner().spin_till_done(label, self.process_transaction, signed)
@@ -484,13 +514,18 @@ class ImageRegistry:
         exists: name, protocol version v3, compose, session, the publisher's
         fee and the IPFS node that holds the image (`ipfs_peer`, a multiaddr
         or an empty string). A hash the registry already has is left as it
-        is; a hash another wallet registered is refused."""
+        is; a hash another wallet registered is refused, and so is a name
+        another wallet owns."""
         details = self.get_image_details(ipfs_hash)
         if details is not None and details.owner != "0x0000000000000000000000000000000000000000":
             if details.owner.lower() != self.acct.address.lower():
                 raise Exception(f"{ipfs_hash} is registered by {details.owner}, not by this wallet")
             print(f"\t✔  {ipfs_hash} is already registered")
             return False
+        name_owner = self.image_name_owner(self.enclave_name_securelock)
+        if name_owner is not None and int(name_owner, 16) != 0 and name_owner.lower() != self.acct.address.lower():
+            raise Exception(f"the image name {self.enclave_name_securelock} belongs to {name_owner}; "
+                            f"publish under another PROJECT_NAME")
         fee = int(config.read("DEVELOPER_FEE") or 0)
         session = config.read("SECURELOCK_SESSION") or ""
         gas_limit = 9000000 if self.blockchain_config.network == "bloxberg" else 1200000
@@ -526,18 +561,16 @@ class ImageRegistry:
     def set_reward_address(self, ipfs_hash, reward_address):
         """Name where the image's developer fee is paid. The registry records
         the publishing wallet at registration; only the image's owner, the
-        publisher, changes it."""
+        publisher, changes it. ECImageRegistryV3 refuses the zero address, so
+        it is refused here before any transaction."""
         reward_address = self.provider.to_checksum_address(reward_address)
+        if int(reward_address, 16) == 0:
+            raise Exception("REWARD_ADDRESS is the zero address; leave it empty to be paid at the publishing wallet")
         current = self.image_registry_contract.functions.getRewardAddress(ipfs_hash).call()
         if current == reward_address:
             print(f"\t✔  reward address is already {reward_address}")
             return
-        txn = self.image_registry_contract.functions.changeImageRewardAddress(
-            ipfs_hash, reward_address
-        ).build_transaction(self._transaction_options(200000))
-        signed_txn = self.provider.eth.account.sign_transaction(txn, private_key=self.private_key)
-        Spinner().spin_till_done(
-            f"Setting the reward address to {reward_address}",
-            self.process_transaction,
-            signed_txn,
-        )
+        self._send(
+            self.image_registry_contract.functions.changeImageRewardAddress(ipfs_hash, reward_address),
+            200000,
+            f"Setting the reward address to {reward_address}")

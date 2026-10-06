@@ -21,13 +21,18 @@ import os
 import time
 
 import requests
+from eth_abi import decode
 from web3 import Web3
+from web3.exceptions import ContractLogicError
 
 try:
     from web3.middleware import ExtraDataToPOAMiddleware as _poa_middleware
 except Exception:
     from web3.middleware import geth_poa_middleware as _poa_middleware
 
+# `latest` and `record` name a version by its record key: a record id
+# (keccak256(abi.encode(name, sessionHash))), or the body's hash on the
+# registries that key records by it. The record holds the body's hash on both.
 ABI = json.loads("""[
  {"type":"function","name":"register","stateMutability":"nonpayable",
   "inputs":[{"name":"sessionHash","type":"bytes32"},{"name":"name","type":"string"},
@@ -43,12 +48,52 @@ ABI = json.loads("""[
   "outputs":[{"name":"version","type":"uint32"}]},
  {"type":"function","name":"latest","stateMutability":"view",
   "inputs":[{"name":"name","type":"string"}],"outputs":[{"type":"bytes32"}]},
+ {"type":"function","name":"record","stateMutability":"view",
+  "inputs":[{"name":"id","type":"bytes32"}],
+  "outputs":[{"name":"sessionHash","type":"bytes32"},{"name":"creator","type":"address"},
+             {"name":"enclaveName","type":"string"},{"name":"version","type":"uint32"},
+             {"name":"bodyCid","type":"string"},{"name":"imageCid","type":"string"},
+             {"name":"hashAlgo","type":"uint8"},{"name":"registeredAt","type":"uint64"},
+             {"name":"exists","type":"bool"}]},
  {"type":"function","name":"linkImage","stateMutability":"nonpayable",
-  "inputs":[{"name":"sessionHash","type":"bytes32"},
+  "inputs":[{"name":"id","type":"bytes32"},
             {"name":"imageCid","type":"string"}],"outputs":[]}
 ]""")
 
 HASH_ALGO_SHA256 = 1
+
+# The registry's custom errors, by name, with their argument types.
+ERRORS = {
+    "NotCreator": ["address", "address"],
+    "DuplicateSession": ["bytes32"],
+    "NotImageNameOwner": ["string", "address", "address"],
+    "NotAllowedPublisher": ["address"],
+    "AmbiguousSecurelockName": ["string"],
+}
+
+
+def _refusal(e):
+    """A refusal as the registry states it: the custom error and its
+    arguments when `e` carries one of the registry's errors, else its text."""
+    data = getattr(e, "data", None)
+    if isinstance(data, str) and data.startswith("0x") and len(data) >= 10:
+        for error, types in ERRORS.items():
+            selector = Web3.keccak(text=f"{error}({','.join(types)})")[:4].hex().removeprefix("0x")
+            if selector == data[2:10]:
+                args = decode(types, bytes.fromhex(data[10:]))
+                shown = ", ".join("0x" + a.hex() if isinstance(a, bytes) else str(a) for a in args)
+                return f"{error}({shown})"
+    return str(e)
+
+
+def latest_record(reg, name):
+    """The latest version of `name`: (record key, body hash, creator), or
+    None when the name has none."""
+    record_id = reg.functions.latest(name).call()
+    if not any(record_id):
+        return None
+    rec = reg.functions.record(record_id).call()
+    return record_id, rec[0], rec[1]
 
 
 def _yaml_list(text):
@@ -112,8 +157,15 @@ def _web3(provider_url):
     return w3
 
 
-def _send(w3, chain_id, key, fn, gas):
+def _send(w3, chain_id, key, fn, gas, label):
+    """Simulate `fn` from the key's wallet, then sign and send it. A refusal
+    is raised with the registry's reason: a transaction sent with a fixed gas
+    limit and reverted reports none."""
     acct = w3.eth.account.from_key(key)
+    try:
+        fn.call({"from": acct.address})
+    except ContractLogicError as e:
+        raise SystemExit(f"SessionRegistry refuses {label}: {_refusal(e)}")
     txn = fn.build_transaction({
         "from": acct.address,
         "nonce": w3.eth.get_transaction_count(acct.address, "pending"),
@@ -130,8 +182,8 @@ def _send(w3, chain_id, key, fn, gas):
 def register(provider_url, chain_id, registry_address, key, body, ipfs_api_url, image_cid=""):
     """Pin `body` and register it under its own `name:`. Returns
     (name, hash_hex, cid, registered): `registered` is False when the chain
-    already held these exact bytes as the name's latest version, which the
-    contract would refuse as a duplicate."""
+    already held these exact bytes as the name's latest version, registered
+    by this wallet, which the contract would refuse as a duplicate."""
     text = body.decode("utf-8", "replace")
     name, rules = parse_name_and_rules(text)
     if not name:
@@ -140,11 +192,12 @@ def register(provider_url, chain_id, registry_address, key, body, ipfs_api_url, 
     w3 = _web3(provider_url)
     reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=ABI)
     cid = pin_body(ipfs_api_url, body)
-    if reg.functions.latest(name).call() == digest:
+    latest = latest_record(reg, name)
+    if latest is not None and latest[1] == digest and latest[2] == w3.eth.account.from_key(key).address:
         return name, digest.hex(), cid, False
     txh, rcpt = _send(w3, chain_id, key,
                       reg.functions.register(digest, name, cid, image_cid, HASH_ALGO_SHA256, rules),
-                      gas=800000)
+                      gas=800000, label=name)
     if rcpt.status != 1:
         raise SystemExit(
             f"SessionRegistry.register reverted for {name} (tx {txh.hex()}): this name's "
@@ -156,17 +209,18 @@ def link_image(provider_url, chain_id, registry_address, key, name, image_cid):
     """Point the name's latest version at the published image CID."""
     w3 = _web3(provider_url)
     reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=ABI)
-    digest = reg.functions.latest(name).call()
-    if not any(digest):
+    latest = latest_record(reg, name)
+    if latest is None:
         raise SystemExit(f"no registered session named {name!r}")
-    txh, rcpt = _send(w3, chain_id, key, reg.functions.linkImage(digest, image_cid), gas=300000)
+    txh, rcpt = _send(w3, chain_id, key, reg.functions.linkImage(latest[0], image_cid),
+                      gas=300000, label=f"the link of {name}")
     if rcpt.status != 1:
         raise SystemExit(f"SessionRegistry.linkImage reverted for {name} (tx {txh.hex()})")
 
 
 def wait_visible(provider_url, registry_address, name, hash_hex, timeout=180, poll_secs=None):
-    """Block until the chain reports `name` at `hash_hex`, then hold while the
-    validators pick it up.
+    """Block until the chain reports `name`'s latest version at body hash
+    `hash_hex`, then hold while the validators pick it up.
 
     The hold is three legs, each up to one CAS poll interval
     (ECAS_SESSION_WATCH_SECS, 60 s): the elected writer's poll notices the
@@ -182,7 +236,8 @@ def wait_visible(provider_url, registry_address, name, hash_hex, timeout=180, po
     deadline = time.time() + timeout
     while True:
         try:
-            got = reg.functions.latest(name).call().hex().removeprefix("0x")
+            latest = latest_record(reg, name)
+            got = latest[1].hex().removeprefix("0x") if latest else "(none)"
         except Exception as e:
             got = f"(read failed: {e})"
         if got == want:

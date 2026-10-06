@@ -35,6 +35,17 @@ def initialize_config(file_path):
     config.load()
     #print("Configuration loaded:", config.config)
 
+# The project name is the securelock's image name, and <name>-unsafe on an
+# -unsafe network. ECImageRegistryV3 takes 1 to 128 of [0-9A-Za-z._-], so a
+# project name is at most 121 of them; spaces are written as '_'. It also
+# begins the securelock's session name, <name>_SECURELOCK_V3_..., which the
+# SessionRegistry refuses when "_SECURELOCK_" occurs in it twice, so a project
+# name does not contain "SECURELOCK".
+PROJECT_NAME_RULE = re.compile(r"(?!.*SECURELOCK)[0-9A-Za-z._-]{1,121}")
+PROJECT_NAME_HELP = ("A project name is 1 to 121 letters, digits, '.', '-' or '_' (a space becomes '_'), "
+                     "and does not contain SECURELOCK.")
+
+
 def get_project_name():
     """
     Project name: ECLD_PROJECT_NAME, else prompt (required either way).
@@ -42,6 +53,8 @@ def get_project_name():
     env_name = env_str("ECLD_PROJECT_NAME")
     if env_name:
         print(f"Project name (from ECLD_PROJECT_NAME): {env_name}")
+        if not PROJECT_NAME_RULE.fullmatch(env_name.replace(" ", "_")):
+            die(f"ECLD_PROJECT_NAME {env_name!r}: {PROJECT_NAME_HELP}")
         return env_name
     if non_interactive():
         die("ECLD_PROJECT_NAME is required in non-interactive mode.")
@@ -49,6 +62,8 @@ def get_project_name():
         project_name = input("Choose a name for your project: ").strip()
         if not project_name:
             print("Project name cannot be blank. Please enter a valid name.")
+        elif not PROJECT_NAME_RULE.fullmatch(project_name.replace(" ", "_")):
+            print(f"{PROJECT_NAME_HELP} Please enter a valid name.")
         else:
             print(f"You have chosen the project name: {project_name}")
             return project_name

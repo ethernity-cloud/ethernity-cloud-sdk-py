@@ -59,12 +59,15 @@ class IPFSClient:
         self.folder_path = ""
         self.files = []
         self.total_size = 0
+        self._step = "Uploading and pinning enclave to IPFS"
 
         if token:
             self.headers = {"Authorization": token}
     @retry_on_failure()
-    def upload_file(self, file_path: str) -> None:
-        add_url = f"{self.api_url}/api/v0/add"
+    def upload_file(self, file_path: str, only_hash: bool = False) -> None:
+        """Add a file and return its CID. With only_hash the node computes
+        the same CID and neither stores nor announces anything."""
+        add_url = f"{self.api_url}/api/v0/add" + ("?only-hash=true" if only_hash else "")
 
         with open(file_path, "rb") as file:
             files = {"file": file}
@@ -99,12 +102,13 @@ class IPFSClient:
             self.frame_index = (self.frame_index + 1) % len(self.SPINNER_FRAMES)
             self._last_shown_mb = current_mb
             sys.stdout.write(
-                f"\r\t{self.SPINNER_FRAMES[self.frame_index]}  Uploading and pinning enclave to IPFS... {current_mb}MB/{int(mb_total)}MB"
+                f"\r\t{self.SPINNER_FRAMES[self.frame_index]}  {self._step}... {current_mb}MB/{int(mb_total)}MB"
             )
             sys.stdout.flush()
 
-    def upload_dir(self, dir_path, attempts=3):
-        """Add a directory tree and return its root CID.
+    def upload_dir(self, dir_path, attempts=3, only_hash=False):
+        """Add a directory tree and return its root CID. With only_hash the
+        node computes the same CID and neither stores nor announces anything.
 
         The enclave image is ~1.2 GB and the gateway processes the upload
         only after the last byte, so a failure shows up after minutes of
@@ -113,11 +117,12 @@ class IPFSClient:
         (SSLError, ConnectionError). Each attempt re-sends the whole tree;
         `attempts` bounds it.
         """
+        self._step = "Hashing enclave for IPFS" if only_hash else "Uploading and pinning enclave to IPFS"
         for attempt in range(1, attempts + 1):
             try:
-                ipfs_hash = self._upload_dir_once(dir_path)
+                ipfs_hash = self._upload_dir_once(dir_path, only_hash)
             except RequestException as e:
-                sys.stdout.write("\r" + f"\t{self.FAIL}Uploading and pinning enclave to IPFS\n")
+                sys.stdout.write("\r" + f"\t{self.FAIL}{self._step}\n")
                 print(f"\tthe upload connection failed: {type(e).__name__}: {e}")
                 ipfs_hash = False
             if ipfs_hash:
@@ -126,7 +131,7 @@ class IPFSClient:
                 print(f"\tretrying the upload ({attempt}/{attempts} failed)")
         return False
 
-    def _upload_dir_once(self, dir_path):
+    def _upload_dir_once(self, dir_path, only_hash=False):
 
         self._last_shown_mb = -1
         self.frame_index = 0
@@ -163,7 +168,8 @@ class IPFSClient:
             # than a 1.2 GB upload over an ordinary uplink, and the gateway aborted
             # the add after every byte had been sent.
             response = requests.post(
-                self.add_url + "?quieter=true&stream-channels=true&wrap-with-directory=true&progress=false&timeout=60m",
+                self.add_url + "?quieter=true&stream-channels=true&wrap-with-directory=true&progress=false&timeout=60m"
+                + ("&only-hash=true" if only_hash else ""),
                 data=monitor,
                 stream=True,
                 headers={
@@ -189,21 +195,21 @@ class IPFSClient:
                     # An empty "Name" often indicates the root hash of the added directory
                     if file_info["Name"] == "":
                         ipfs_hash = file_info["Hash"]
-                        sys.stdout.write("\r" + f"\t{self.CHECK}Uploading and pinning enclave to IPFS")
+                        sys.stdout.write("\r" + f"\t{self.CHECK}{self._step}")
                         return ipfs_hash
                 # A 200 with no root entry: the gateway closed the add before
                 # the wrapping directory was written (its own request timeout,
                 # reached after the last byte arrived).
-                sys.stdout.write("\r" + f"\t{self.FAIL}Uploading and pinning enclave to IPFS")
+                sys.stdout.write("\r" + f"\t{self.FAIL}{self._step}")
                 print(f"Failed to upload to IPFS: the gateway returned no root hash "
                       f"({len(response.text)} bytes of response)")
                 return False
             except Exception as e:
-                sys.stdout.write("\r" + f"\t{self.FAIL}Uploading and pinning enclave to IPFS")
+                sys.stdout.write("\r" + f"\t{self.FAIL}{self._step}")
                 print(f"Failed to upload to IPFS. Error: {e}")
                 return False
         else:
-            sys.stdout.write("\r" + f"\t{self.FAIL}Uploading and pinning enclave to IPFS")
+            sys.stdout.write("\r" + f"\t{self.FAIL}{self._step}")
             print(f"Failed to upload to IPFS. Status code: {response.status_code}")
             #print(response.text)
             return False
@@ -242,13 +248,13 @@ class IPFSClient:
 
         return None
     
-    def upload(self, path: str) -> str:
+    def upload(self, path: str, only_hash: bool = False) -> str:
         if os.path.isfile(path):
             # It's a single file
-            return self.upload_file(path)
+            return self.upload_file(path, only_hash=only_hash)
         elif os.path.isdir(path):
             # It's a directory
-            return self.upload_dir(path)
+            return self.upload_dir(path, only_hash=only_hash)
         else:
             print(f"Path {path} is neither a file nor a directory.")
             return None
