@@ -251,7 +251,11 @@ def main():
             REGISTRY_DOCKER_COMPOSE_HASH = IMAGE_DETAILS.docker_compose_hash
 
             #print(REGISTRY_ENCLAVE_HASH, REGISTRY_PUBLIC_KEY, REGISTRY_DOCKER_COMPOSE_HASH)
-            if REGISTRY_ENCLAVE_HASH != "":
+            # An image is published once its certificate is on chain. A
+            # two-step registry records it before the certificate exists, so
+            # a record without one is a publish that stopped part-way, which
+            # running ecld-publish again completes.
+            if REGISTRY_ENCLAVE_HASH != "" and REGISTRY_PUBLIC_KEY:
                 #print(f"IPFS hash '{IPFS_HASH}' exists.")
                 #print(f"Registry Enclave Hash: {REGISTRY_ENCLAVE_HASH}")
                 #print(f"Registry Public Key: {REGISTRY_PUBLIC_KEY}")
