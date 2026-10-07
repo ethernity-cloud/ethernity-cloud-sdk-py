@@ -128,7 +128,7 @@ def prompt_options(message, options, default_option):
             )
 
 def extract_scone_hash(service):
-    command = f"docker-compose -f docker-compose.yml run -e SCONE_LOG=INFO -e SCONE_HASH=1 {service}"
+    command = f"docker-compose -f docker-compose.yml run --rm -e SCONE_LOG=INFO -e SCONE_HASH=1 {service}"
     try:
         output = (
             subprocess.check_output(
@@ -157,7 +157,7 @@ def extract_signed_mrenclave(service):
     match-gate: if the runtime SCONE_HASH measurement differs from this value,
     SCONE recomputed the enclave at load (params drift) and dynamically re-signed
     it as DEBUG -- CAS would reject it, so publishing must be refused."""
-    command = f"docker-compose -f docker-compose.yml run --no-deps --entrypoint cat {service} /signed_mrenclave.txt"
+    command = f"docker-compose -f docker-compose.yml run --rm --no-deps --entrypoint cat {service} /signed_mrenclave.txt"
     try:
         output = (
             subprocess.check_output(
@@ -472,7 +472,7 @@ def extract_public_key_local():
         try:
             output = (
                 subprocess.check_output(
-                    "docker-compose run etny-securelock",
+                    "docker-compose run --rm etny-securelock",
                     shell=True,
                     cwd=build_dir,
                     stderr=subprocess.STDOUT,
