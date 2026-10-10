@@ -4,7 +4,7 @@ chain, and when it is stopped. No docker and no network: the Kubo's API and
 import subprocess
 
 from ethernity_cloud_sdk_py.commands.pynithy import local_kubo
-from ethernity_cloud_sdk_py.commands.pynithy.local_kubo import LocalKubo, own_endpoint
+from ethernity_cloud_sdk_py.commands.pynithy.local_kubo import LocalKubo, api_port_in, own_endpoint
 
 PEER = "12D3KooWB8qpxeHqcdb6xTNu3FXjrWE4zTFPverw8XMpms2Qm4pJ"
 
@@ -49,6 +49,13 @@ def test_behind_nat_the_bare_peer_id_is_registered(monkeypatch):
         f"/ip4/192.168.1.20/udp/4001/quic-v1/p2p/{PEER}",
     ])
     assert kubo.peer_multiaddr() == f"/p2p/{PEER}"
+
+
+def test_the_api_port_of_a_kept_node_is_read_from_docker_port():
+    assert api_port_in("127.0.0.1:60823\n") == 60823
+    assert api_port_in("127.0.0.1:60823\n[::1]:60823\n") == 60823
+    assert api_port_in("") is None
+    assert api_port_in("Error: No public port '5001/tcp' published") is None
 
 
 def _removals(monkeypatch):

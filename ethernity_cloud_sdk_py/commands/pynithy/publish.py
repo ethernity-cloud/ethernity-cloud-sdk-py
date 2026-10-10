@@ -1100,11 +1100,12 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
         # The image + compose were already uploaded fresh above (unconditionally,
         # before extraction), so IPFS_HASH / IPFS_DOCKER_COMPOSE_HASH already
         # point at THIS build. Hand them to the remote extraction service.
+        # The service takes strings; VERSION is stored as a number.
         ENCLAVE_PUBLIC_KEY = public_key_service.main(
             enclave_name=BLOCKCHAIN_CONFIG.securelock_name(config.read("PROJECT_NAME")),
             protocol_version="v3",
             network=config.read("BLOCKCHAIN_NETWORK"),
-            template_version=config.read("VERSION"),
+            template_version=str(config.read("VERSION")),
             ipfs_hash=IPFS_HASH,
             docker_composer_hash=IPFS_DOCKER_COMPOSE_HASH
         )

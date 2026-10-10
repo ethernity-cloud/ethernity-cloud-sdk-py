@@ -39,6 +39,14 @@ def own_endpoint(endpoint):
     return bool(endpoint) and urlparse(endpoint).hostname != PUBLIC_IPFS_HOST
 
 
+def api_port_in(docker_port_output):
+    """The host port in the first line of `docker port <container> 5001/tcp`
+    (`127.0.0.1:60823`), or None when there is none."""
+    first = (docker_port_output or "").strip().splitlines()
+    match = re.search(r":(\d+)$", first[0].strip()) if first else None
+    return int(match.group(1)) if match else None
+
+
 def _free_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -70,19 +78,33 @@ class LocalKubo:
         response.raise_for_status()
         return response.json() if response.text.strip() else {}
 
+    def kept_api_port(self):
+        """The API port of the container a previous publish of this project
+        left running (`release`), or None when none runs."""
+        run = subprocess.run(["docker", "port", self.container, "5001/tcp"], capture_output=True, text=True)
+        return api_port_in(run.stdout) if run.returncode == 0 else None
+
     def start(self):
-        """Start the container and wait for its API; peer it with the
+        """Start the container and wait for its API, or take over the one a
+        previous publish of this project left serving its registered image,
+        whose peer id that image's registry entry names; peer it with the
         bootnode. Raises when docker cannot run it or the API does not come
         up in time."""
-        subprocess.run(["docker", "rm", "-f", self.container], capture_output=True, text=True)
-        command = ["docker", "run", "-d", "--name", self.container,
-                   "-p", f"127.0.0.1:{self.api_port}:5001"]
-        if _port_free(SWARM_PORT):
-            command += ["-p", f"{SWARM_PORT}:4001", "-p", f"{SWARM_PORT}:4001/udp"]
-        command += [KUBO_IMAGE, "daemon", "--init", "--migrate=true"]
-        run = subprocess.run(command, capture_output=True, text=True)
-        if run.returncode != 0:
-            raise Exception(f"docker could not start {KUBO_IMAGE}: {run.stderr.strip()}")
+        kept = self.kept_api_port()
+        if kept is not None:
+            self.api_port = kept
+            self.api_url = f"http://127.0.0.1:{kept}"
+            print(f"\t✔  IPFS node of the previous publish kept: {self.container}")
+        else:
+            subprocess.run(["docker", "rm", "-f", self.container], capture_output=True, text=True)
+            command = ["docker", "run", "-d", "--name", self.container,
+                       "-p", f"127.0.0.1:{self.api_port}:5001"]
+            if _port_free(SWARM_PORT):
+                command += ["-p", f"{SWARM_PORT}:4001", "-p", f"{SWARM_PORT}:4001/udp"]
+            command += [KUBO_IMAGE, "daemon", "--init", "--migrate=true"]
+            run = subprocess.run(command, capture_output=True, text=True)
+            if run.returncode != 0:
+                raise Exception(f"docker could not start {KUBO_IMAGE}: {run.stderr.strip()}")
         deadline = time.time() + API_READY_SECONDS
         while True:
             try:
@@ -143,7 +165,8 @@ class LocalKubo:
         """End the publish's use of the Kubo: stop it, unless it is the source
         of a registered image whose certificate is not on chain yet, which it
         keeps serving to the extraction service and the bootnode's mirror;
-        the next publish of the project replaces it, `docker rm -f` stops it."""
+        the next publish of the project takes it over, `docker rm -f` stops
+        it."""
         if not self.serving:
             self.stop()
             return
