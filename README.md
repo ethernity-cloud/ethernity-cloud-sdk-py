@@ -66,8 +66,10 @@ The sdk has been tested on the following operating systems:
       ValidatorRegistry (`0x0014aB10...`, or `ECLD_CAS_ADDR=host:port`) for
       the compose and the certificate harvest, and links the session to the
       published image. `ecld-build` signs the securelock `--production`.
-      Harvesting the certificate needs SGX; the remote extraction service
-      does not reach this CAS. `tests/e2e_testnet_cas.sh` runs the whole
+      The certificate is harvested on an SGX host or, without one,
+      extracted by publickey.ethernity.cloud, which fetches the image from
+      the publish's IPFS node and attests it through a CAS member it
+      resolves from the ValidatorRegistry. `tests/e2e_testnet_cas.sh` runs the whole
       path -- init, build, publish, one task, and the CAS validators'
       verdict on it. The other testnets (Amoy, IoTeX, Sepolia, LiteForge)
       have no CAS deployment and self-sign from MR_ENCLAVE as before.

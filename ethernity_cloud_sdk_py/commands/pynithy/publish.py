@@ -19,14 +19,13 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from requests.packages.urllib3 import disable_warnings
 
-from urllib.parse import urlparse
 
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.pynithy import cas_resolver, session_registry
 import ethernity_cloud_sdk_py.commands.pynithy.run.public_key_service as public_key_service
 from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
 from ethernity_cloud_sdk_py.commands.pynithy.ipfs_client import IPFSClient
-from ethernity_cloud_sdk_py.commands.pynithy.local_kubo import LocalKubo
+from ethernity_cloud_sdk_py.commands.pynithy.local_kubo import LocalKubo, own_endpoint
 from ethernity_cloud_sdk_py.commands.spinner import Spinner
 
 from pathlib import Path
@@ -36,10 +35,6 @@ config = Config(Path(".config.json").resolve())
 config.load()
 
 image_registry = ImageRegistry()
-
-# The public IPFS API: an IPFS_ENDPOINT naming it is not an endpoint of the
-# application's own, so the publish runs its own Kubo instead.
-PUBLIC_IPFS_HOST = "ipfs.ethernity.cloud"
 
 
 def _local_build_fingerprint(registry_path, compose_file):
@@ -805,7 +800,7 @@ def main(private_key):
     ipfs_endpoint = os.environ.get("ECLD_IPFS_ENDPOINT", "").strip() or (config.read("IPFS_ENDPOINT") or "")
     ipfs_token = os.environ.get("ECLD_IPFS_TOKEN", "").strip() or (config.read("IPFS_TOKEN") or "")
     local_kubo = None
-    if not ipfs_endpoint or urlparse(ipfs_endpoint).hostname == PUBLIC_IPFS_HOST:
+    if not own_endpoint(ipfs_endpoint):
         local_kubo = LocalKubo(config.read("PROJECT_NAME") or "publish")
         try:
             spinner.spin_till_done("Starting the publish's IPFS node", local_kubo.start)
@@ -819,7 +814,7 @@ def main(private_key):
         _publish(private_key, spinner, ipfs_client, local_kubo)
     finally:
         if local_kubo is not None:
-            local_kubo.stop()
+            local_kubo.release()
 
 
 def _publish(private_key, spinner, ipfs_client, local_kubo):
@@ -1002,6 +997,10 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
         except Exception as e:
             print(f"\t\u2716  {e}")
             exit(1)
+        # From here the registered image's source is this Kubo, until its
+        # certificate is on chain.
+        if local_kubo is not None:
+            local_kubo.serving = True
 
     if not reuse_upload:
         registered_cids = (IPFS_HASH, IPFS_DOCKER_COMPOSE_HASH)
@@ -1161,6 +1160,8 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
     except Exception as e:
         print(f"\t\u2716  {e}")
         exit(1)
+    if local_kubo is not None:
+        local_kubo.serving = False
 
     # The on-chain session points at the image it admits, so a validator can
     # pin the image beside the body it serves.

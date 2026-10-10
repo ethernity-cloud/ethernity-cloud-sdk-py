@@ -18,14 +18,25 @@ import subprocess
 import time
 
 import requests
+from urllib.parse import urlparse
 
 KUBO_IMAGE = os.environ.get("ECLD_KUBO_IMAGE", "ipfs/kubo:release")
 # The bootnode's IPFS node (ipfs.ethernity.cloud), as the node agents peer with it.
 BOOTNODE_MULTIADDR = "/dns4/ipfs.ethernity.cloud/tcp/4001/p2p/QmRBc1eBt4hpJQUqHqn6eA8ixQPD3LFcUDsn6coKBQtia5"
 SWARM_PORT = int(os.environ.get("ECLD_KUBO_SWARM_PORT", "4001"))
 API_READY_SECONDS = 90
+# The public IPFS API: an IPFS_ENDPOINT naming it is not an endpoint of the
+# application's own, so the publish runs its own Kubo instead.
+PUBLIC_IPFS_HOST = "ipfs.ethernity.cloud"
 
 _PRIVATE = re.compile(r"^/ip4/(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|0\.0\.0\.0|169\.254\.)|^/ip6/(::1|fe80|fc|fd)")
+
+
+def own_endpoint(endpoint):
+    """Whether `endpoint` is an IPFS API of the application's own: set, and
+    not the public one. An empty setting and the public API both mean the
+    publish runs a Kubo of its own."""
+    return bool(endpoint) and urlparse(endpoint).hostname != PUBLIC_IPFS_HOST
 
 
 def _free_port():
@@ -49,6 +60,10 @@ class LocalKubo:
         self.api_port = _free_port()
         self.api_url = f"http://127.0.0.1:{self.api_port}"
         self.peers = [p.strip() for p in os.environ.get("ECLD_IPFS_PEERS", BOOTNODE_MULTIADDR).split(",") if p.strip()]
+        # True while a registered image has this Kubo as its source: from the
+        # image's registration on chain until its certificate is on chain. A
+        # publish that ends in between leaves the Kubo running (`release`).
+        self.serving = False
 
     def _api(self, command, params=None, timeout=30):
         response = requests.post(f"{self.api_url}/api/v0/{command}", params=params or {}, timeout=timeout)
@@ -123,3 +138,15 @@ class LocalKubo:
 
     def stop(self):
         subprocess.run(["docker", "rm", "-f", self.container], capture_output=True, text=True)
+
+    def release(self):
+        """End the publish's use of the Kubo: stop it, unless it is the source
+        of a registered image whose certificate is not on chain yet, which it
+        keeps serving to the extraction service and the bootnode's mirror;
+        the next publish of the project replaces it, `docker rm -f` stops it."""
+        if not self.serving:
+            self.stop()
+            return
+        print(f"\t⚠  The registered image stays available from this publish's IPFS node, the docker")
+        print(f"\t   container {self.container}, for the extraction service and the bootnode.")
+        print(f"\t   Publish again to retry; `docker rm -f {self.container}` stops it.")
