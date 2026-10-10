@@ -55,7 +55,10 @@ def execute_task(code) -> None:
     runner.set_log_level("INFO")
     runner.set_private_key(PRIVATE_KEY)
 
-    runner.set_storage_ipfs("https://ipfs.ethernity.cloud/api/v0")
+    # The task's artefacts go through the bootnode's payload intake; a Kubo RPC
+    # API of the dApp's own goes in set_storage_ipfs(url) instead (the public
+    # API's add is closed to callers without a token).
+    runner.set_public_intake()
     runner.connect()
 
     resources = {

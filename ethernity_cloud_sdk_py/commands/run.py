@@ -47,11 +47,13 @@ import time
 # version resolves a stale/missing image. This is a fixed constant.
 SECURELOCK_PROTOCOL_VERSION = "v3"
 
-DEFAULT_IPFS = "https://ipfs.ethernity.cloud/api/v0"
-# `--ipfs intake`: no IPFS API of our own; artefact CIDs are computed locally
-# and the bytes are delivered to the bootnode's payload intake once the DO
-# request is on chain (runner set_public_intake).
+# `--ipfs intake` (the default): no IPFS API of our own; artefact CIDs are
+# computed locally and the bytes are delivered to the bootnode's payload intake
+# once the DO request is on chain (runner set_public_intake). `--ipfs <url>`
+# uploads and reads through that Kubo RPC API instead; the public API's add is
+# closed to callers without a token.
 INTAKE_KEYWORD = "intake"
+DEFAULT_IPFS = INTAKE_KEYWORD
 
 
 def _load_config():
@@ -217,8 +219,9 @@ def main(argv=None):
                         help="trustedzone enclave name (default: the network's, "
                              "else TRUSTED_ZONE_IMAGE)")
     parser.add_argument("--ipfs", default=DEFAULT_IPFS,
-                        help=f"IPFS API endpoint for uploads and reads (default: {DEFAULT_IPFS}); "
-                             f"'{INTAKE_KEYWORD}' uses the bootnode's payload intake instead")
+                        help=f"'{INTAKE_KEYWORD}' (default) delivers the task's artefacts through the "
+                             f"bootnode's payload intake; a Kubo RPC API URL uploads and reads through "
+                             f"that node instead")
     parser.add_argument("--timeout", type=int, default=600,
                         help="seconds to wait for a result before giving up (default: 600)")
     parser.add_argument("--log-level", default="ERROR",

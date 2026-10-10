@@ -201,12 +201,12 @@ from ethernity_cloud_runner_py.runner import EthernityCloudRunner  # type: ignor
 
 
 def execute_task() -> None:
-    ipfs_address = "https://ipfs.ethernity.cloud/api/v0"
-
     code = 'hello("Hello, Python World!")'
 
     runner = EthernityCloudRunner()
-    runner.initialize_storage(ipfs_address)
+    # The task's artefacts go through the bootnode's payload intake; a Kubo RPC
+    # API of your own goes in runner.set_storage_ipfs(url) instead.
+    runner.set_public_intake()
 
     resources = {
         "taskPrice": 8,
