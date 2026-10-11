@@ -189,12 +189,14 @@ class BlockchainNetworks(Enum):
         "litvm", # Network short name
         "testnet", # Network type
         # LitVM (LiteForge) testnet -- Litecoin EVM ZK-rollup (Arbitrum Orbit),
-        # gas token zkLTC. The PoX/registry addresses match Ethereum Sepolia
-        # because the same deployer deployed the same contracts in the same order
-        # (deterministic CREATE); they are distinct on-chain deployments keyed by
-        # chain_id/RPC. CAS-attested by LitVM's own ethernity-cas set:
-        # SESSION_REGISTRY_ADDRESSES names its SessionRegistry (`cas_provisioned`).
-        "0x29D3eC870565B6A1510232bd950A8Bc8336f0EB2", # protocol contract address
+        # gas token zkLTC. The PoX is the EthernityImplementationV2 1.1 of
+        # 2026-10-11 (pox-smart-contract feature/fee-splitters), the one LitVM's
+        # CAS set validates orders on. The image registry address matches
+        # Ethereum Sepolia's (the same deployer, the same CREATE order); it is a
+        # distinct deployment keyed by chain_id/RPC. CAS-attested by LitVM's own
+        # ethernity-cas set: SESSION_REGISTRY_ADDRESSES names its SessionRegistry
+        # (`cas_provisioned`).
+        "0xE35991de1f2A435e29E70406FA2781b1AffCb168", # protocol contract address
         "0x55e0ad455Be85162b71a790f00Fc305680E3CE53", # Image Registry Contract Address
         "https://liteforge.rpc.caldera.xyz/infra-partner-http",
         4441,  # Chain ID for LitVM LiteForge
@@ -222,7 +224,7 @@ class BlockchainNetworks(Enum):
         # -unsafe trustedzone are debug-signed and self-sign from MR_ENCLAVE.
         # The securelock is registered as <project>-unsafe (UNSAFE_NETWORKS).
         "testnet", # Network type
-        "0x29D3eC870565B6A1510232bd950A8Bc8336f0EB2", # protocol contract address
+        "0xE35991de1f2A435e29E70406FA2781b1AffCb168", # protocol contract address
         "0x55e0ad455Be85162b71a790f00Fc305680E3CE53", # Image Registry Contract Address
         "https://liteforge.rpc.caldera.xyz/infra-partner-http",
         4441,  # Chain ID for LitVM LiteForge
