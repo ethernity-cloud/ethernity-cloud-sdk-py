@@ -3,8 +3,9 @@
 The network-side sibling of `ecld-test`: same payload flags (a code string,
 --file, --input/--input-text), but instead of executing locally it drives the
 real runner (ethernity_cloud_runner_py.EthernityCloudRunner) end to end --
-encrypt the payload, push to IPFS, place the on-chain DO request, wait for a
-node to process it, download and decrypt the result.
+encrypt the payload, place the on-chain DO request, deliver the artefacts to
+the bootnode's payload intake, wait for a node to process it, download and
+decrypt the result.
 
 Where ecld-test answers "does my CALL work?", ecld-run answers "does it work on
 the network, on the enclave I published?" -- it costs gas and needs a funded
@@ -40,6 +41,7 @@ import json
 import os
 import sys
 import time
+from urllib.parse import urlparse
 
 
 # The runner queries the image registry with the PROTOCOL version ("v3"), not
@@ -50,8 +52,10 @@ SECURELOCK_PROTOCOL_VERSION = "v3"
 # `--ipfs intake` (the default): no IPFS API of our own; artefact CIDs are
 # computed locally and the bytes are delivered to the bootnode's payload intake
 # once the DO request is on chain (runner set_public_intake). `--ipfs <url>`
-# uploads and reads through that Kubo RPC API instead; the public API's add is
-# closed to callers without a token.
+# uploads and reads through that Kubo RPC API instead (runner set_storage_ipfs,
+# given the URL with /api/v0 appended when it does not end in it), with
+# `--ipfs-token` / ECLD_IPFS_TOKEN sent verbatim as the Authorization header;
+# the public API takes writes only with a token.
 INTAKE_KEYWORD = "intake"
 DEFAULT_IPFS = INTAKE_KEYWORD
 
@@ -173,6 +177,16 @@ def _build_resources(args):
     }
 
 
+def _ipfs_api_url(url):
+    """The Kubo RPC API URL for runner.set_storage_ipfs(), which posts to
+    <url>/add and <url>/cat: a node's base URL (http://127.0.0.1:5001) gets
+    /api/v0 appended, a URL already ending in /api/v0 is kept."""
+    url = url.strip().rstrip("/")
+    if not urlparse(url).path.endswith("/api/v0"):
+        url = f"{url}/api/v0"
+    return url
+
+
 def _print_progress(runner, timeout):
     """Poll the runner, printing each new progress phase, until it stops or
     the timeout elapses. Returns the final state dict."""
@@ -220,8 +234,13 @@ def main(argv=None):
                              "else TRUSTED_ZONE_IMAGE)")
     parser.add_argument("--ipfs", default=DEFAULT_IPFS,
                         help=f"'{INTAKE_KEYWORD}' (default) delivers the task's artefacts through the "
-                             f"bootnode's payload intake; a Kubo RPC API URL uploads and reads through "
-                             f"that node instead")
+                             f"bootnode's payload intake; a Kubo RPC API URL is your own node, e.g. "
+                             f"http://127.0.0.1:5001 (/api/v0 is appended when the URL does not end "
+                             f"in it), which uploads and reads the artefacts instead (the public API "
+                             f"takes writes only with a token, see --ipfs-token)")
+    parser.add_argument("--ipfs-token", dest="ipfs_token", default=None,
+                        help="sent verbatim as the Authorization header to the API --ipfs names, "
+                             "when it requires one (default: ECLD_IPFS_TOKEN)")
     parser.add_argument("--timeout", type=int, default=600,
                         help="seconds to wait for a result before giving up (default: 600)")
     parser.add_argument("--log-level", default="ERROR",
@@ -246,6 +265,9 @@ def main(argv=None):
 
     # ---- payload ----
     env = os.environ.get
+    ipfs_token = args.ipfs_token if args.ipfs_token is not None else env("ECLD_IPFS_TOKEN", "")
+    if args.ipfs_token is not None and args.ipfs == INTAKE_KEYWORD:
+        parser.error("--ipfs-token needs --ipfs <url>: the payload intake takes no token")
     if args.file:
         with open(args.file, encoding="utf-8") as fh:
             code = fh.read()
@@ -316,7 +338,7 @@ def main(argv=None):
         if args.ipfs == INTAKE_KEYWORD:
             runner.set_public_intake()
         else:
-            runner.set_storage_ipfs(args.ipfs)
+            runner.set_storage_ipfs(_ipfs_api_url(args.ipfs), ipfs_token)
         runner.connect()
 
         resources = _build_resources(args)

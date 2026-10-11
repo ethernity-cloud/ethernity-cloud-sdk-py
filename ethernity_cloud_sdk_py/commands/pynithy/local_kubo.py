@@ -1,13 +1,12 @@
 """The Kubo a publish runs for its own upload.
 
-An image is published by adding it to IPFS and registering its CID. The
-public write API of ipfs.ethernity.cloud is closing, so a publish without an
-IPFS endpoint of its own runs a Kubo in docker (the SDK already requires
-docker), adds the image through that Kubo's HTTP API with the same call the
-public API received (so a build gives the same CIDs as before), peers the
-Kubo with the bootnode, whose mirror pins every registered image and from
-which the certificate extraction service fetches, and stops it once the
-certificate is on chain. The Kubo listens for the API on the loopback
+An image is published by adding it to IPFS and registering its CID. A
+publish without an IPFS endpoint of its own runs a Kubo in docker (the SDK
+already requires docker), adds the image through that Kubo's HTTP API (the
+add's parameters fix the CIDs, so a build gives the same CIDs on any Kubo),
+peers the Kubo with the bootnode, whose mirror pins every registered image
+and from which the certificate extraction service fetches, and stops it once
+the certificate is on chain. The Kubo listens for the API on the loopback
 interface only; its swarm port is published when free, so a publisher with a
 reachable address is also dialed directly.
 """

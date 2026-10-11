@@ -793,10 +793,10 @@ def main(private_key):
     spinner = Spinner()
     image_registry.set_private_key(private_key)
     # Where the image goes. An IPFS API of the application's own
-    # (ECLD_IPFS_ENDPOINT / ECLD_IPFS_TOKEN, else the stored IPFS_ENDPOINT)
-    # takes precedence. Otherwise, the publish runs its own Kubo: the public
-    # write API of ipfs.ethernity.cloud is closing, and the image is held by
-    # this Kubo, peered with the bootnode, until its certificate is on chain.
+    # (ECLD_IPFS_ENDPOINT / ECLD_IPFS_TOKEN, else the stored IPFS_ENDPOINT /
+    # IPFS_TOKEN; the token is sent verbatim as the Authorization header)
+    # takes precedence. Otherwise the publish runs its own Kubo, peered with
+    # the bootnode, which holds the image until its certificate is on chain.
     ipfs_endpoint = os.environ.get("ECLD_IPFS_ENDPOINT", "").strip() or (config.read("IPFS_ENDPOINT") or "")
     ipfs_token = os.environ.get("ECLD_IPFS_TOKEN", "").strip() or (config.read("IPFS_TOKEN") or "")
     local_kubo = None
@@ -921,22 +921,19 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
         if BLOCKCHAIN_CONFIG.cas_provisioned and BLOCKCHAIN_CONFIG.network_type != 'mainnet':
             render_session_file("etny-securelock-test.yaml.tpl", "etny-securelock-test.yaml")
 
-    # Ensure the IPFS hashes point at THIS build's image + compose, before cert
-    # extraction, regardless of which extraction path (local SGX or the remote
-    # service) is taken below. Previously the upload was gated on an empty
-    # config IPFS_HASH and lived only inside the remote path, so a stale hash
-    # from a PRIOR build suppressed the upload and the OLD image got registered
-    # while a NEW enclave ran -> "MAC check failed" for clients.
+    # The IPFS hashes point at THIS build's image + compose before the
+    # certificate extraction, whichever extraction path (local SGX or the
+    # remote service) is taken below.
     #
-    # To still save bandwidth on publish RETRIES (the image is ~1.2GB and the
-    # upload is a full HTTP POST to the remote gateway -- content-addressing
-    # only dedups server-side, the bytes are re-sent either way), the upload is
-    # cached KEYED ON THE BUILD CONTENT: we fingerprint the on-disk registry +
-    # compose locally and reuse the stored CID only when the fingerprint
-    # matches what was last uploaded. A hash left over from a DIFFERENT build
-    # can never match and always triggers a fresh upload. Only an IPFS
-    # endpoint of the application's own keeps what was uploaded to it: the
-    # publish's own Kubo starts empty, so with it the build is always added.
+    # The upload is cached KEYED ON THE BUILD CONTENT: the on-disk registry +
+    # compose are fingerprinted locally and the stored CID is reused only when
+    # the fingerprint matches what was last uploaded, so a publish retry of an
+    # unchanged build does not re-send the ~1.2GB image (an IPFS add is a full
+    # HTTP POST; content-addressing dedups only on the receiving node). A hash
+    # left over from a DIFFERENT build never matches and triggers a fresh
+    # upload. Only an IPFS endpoint of the application's own keeps what was
+    # uploaded to it: the publish's own Kubo starts empty, so with it the
+    # build is always added.
     build_fingerprint = spinner.spin_till_done(
         "Fingerprinting built enclave image",
         _local_build_fingerprint,
@@ -1037,16 +1034,18 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
     # there, which the validator set reads, on every publish (a body already
     # registered is reported and left as it is), now that the image name is
     # this wallet's: the SessionRegistry takes a securelock session only from
-    # the wallet that owns it. The publish then waits until the validators
-    # serve the session, because the public-key harvest below provisions the
-    # enclave from them.
+    # the wallet that owns it. The session body is added through the same
+    # IPFS API as the image, with the same Authorization header. The publish
+    # then waits until the validators serve the session, because the
+    # public-key harvest below provisions the enclave from them.
     if BLOCKCHAIN_CONFIG.cas_provisioned and BLOCKCHAIN_CONFIG.network_type != 'mainnet':
         registry_address = BlockchainNetworks.get_session_registry_address(BLOCKCHAIN_NETWORK)
         with open("etny-securelock-test.yaml", "rb") as f:
             session_body = f.read()
         name, session_hash_hex, body_cid, registered = session_registry.register(
             BLOCKCHAIN_CONFIG.rpc_url, BLOCKCHAIN_CONFIG.chain_id, registry_address,
-            private_key, session_body, ipfs_client.api_url)
+            private_key, session_body, ipfs_client.api_url,
+            ipfs_headers=ipfs_client.headers)
         if registered:
             print(f"\t\u2714  Session {name} registered on-chain (body {body_cid})")
             session_registry.wait_visible(
@@ -1067,9 +1066,9 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
         print("\n\t\tTo publish the eclave, the public key needs to be extracted and for this SGX technology is required.\n\t\tIt seems that your machine is not configured to use SGX.\n")
 
         # Answering "always" persists the choice to .config.json, so subsequent
-        # publishes upload to IPFS and use the remote extraction service without
-        # asking again. Delete REMOTE_CERT_EXTRACTION from .config.json (or set
-        # it to anything other than "always") to be prompted once more.
+        # publishes use the remote extraction service without asking again.
+        # Delete REMOTE_CERT_EXTRACTION from .config.json (or set it to
+        # anything other than "always") to be prompted once more.
         # ECLD_REMOTE_CERT_EXTRACTION overrides both (RFC §9): "always"/"never".
         env_choice = os.environ.get("ECLD_REMOTE_CERT_EXTRACTION", "").strip().lower()
         if env_choice == "never":
@@ -1089,7 +1088,7 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
             ).lower()
             if should_generate_certificates == "always":
                 config.write("REMOTE_CERT_EXTRACTION", "always")
-                print("\t\t✔  Saved: IPFS upload + remote certificate extraction will run automatically from now on")
+                print("\t\t✔  Saved: remote certificate extraction will run automatically from now on")
                 should_generate_certificates = "y"
 
         if should_generate_certificates != "y" and should_generate_certificates != "yes":
@@ -1097,9 +1096,9 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
             exit(1)
 
         print()
-        # The image + compose were already uploaded fresh above (unconditionally,
-        # before extraction), so IPFS_HASH / IPFS_DOCKER_COMPOSE_HASH already
-        # point at THIS build. Hand them to the remote extraction service.
+        # IPFS_HASH / IPFS_DOCKER_COMPOSE_HASH point at THIS build (added
+        # above, before the extraction). The remote extraction service fetches
+        # the image by them, from the publish's IPFS node or the bootnode.
         # The service takes strings; VERSION is stored as a number.
         ENCLAVE_PUBLIC_KEY = public_key_service.main(
             enclave_name=BLOCKCHAIN_CONFIG.securelock_name(config.read("PROJECT_NAME")),

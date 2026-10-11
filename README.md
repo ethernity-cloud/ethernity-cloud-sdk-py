@@ -109,7 +109,12 @@ The sdk has been tested on the following operating systems:
   of your own (`IPFS_ENDPOINT`, or `ECLD_IPFS_ENDPOINT` in the environment),
   the publish runs its own IPFS node in docker (`ipfs/kubo`), adds the image
   and its compose there and peers it with the network's bootnode, which pins
-  every registered image. On a network whose image registry records images
+  every registered image. An endpoint naming `ipfs.ethernity.cloud` counts as
+  no endpoint (configs written by earlier versions of `ecld-init`): the
+  publish runs its own node. For an API of your own that requires one,
+  `IPFS_TOKEN` (or `ECLD_IPFS_TOKEN`) is sent verbatim as the `Authorization`
+  header, on the image upload and on the session body's add alike; your own
+  node needs none. On a network whose image registry records images
   before their certificate (the bloxberg testnet), the publish registers the
   image from your wallet first (`registerImage`, with your node's address),
   has the certificate extracted (on your SGX host, or by
@@ -117,7 +122,10 @@ The sdk has been tested on the following operating systems:
   bootnode and reports its progress) and writes it from the same wallet
   (`setImageCert`). Keep the publish running until it prints the registration:
   your node is the image's first source. `ECLD_KUBO_SWARM_PORT` (default
-  4001) is the port your node listens on when it is free.
+  4001) is the port your node listens on when it is free, `ECLD_IPFS_PEERS`
+  (comma-separated multiaddrs, default the bootnode) the peers it keeps
+  connected to, and `ECLD_KUBO_IMAGE` (default `ipfs/kubo:release`) the
+  docker image it runs.
 
 - **Test (local, no chain)**: To run your backend locally with the enclave's own
   executor — no SGX, no gas, instant — run:
@@ -144,8 +152,13 @@ The sdk has been tested on the following operating systems:
   ecld-run --json 'esr_increment()'
   ```
   This is the network-side sibling of `ecld-test`: instead of executing locally
-  it drives the runner end to end — encrypt → IPFS → on-chain request → wait for
-  a node → download and decrypt the result. It **costs gas and needs a funded
+  it drives the runner end to end — encrypt → on-chain request → payload intake
+  → wait for a node → download and decrypt the result. The task's artefacts go
+  through the bootnode's payload intake; `--ipfs <url>` uploads and reads them
+  through a Kubo RPC API of your own instead (e.g. `http://127.0.0.1:5001`;
+  `/api/v0` is appended when the URL does not end in it), with `--ipfs-token`
+  (or `ECLD_IPFS_TOKEN`) sent verbatim as its `Authorization` header when that
+  API requires one. It **costs gas and needs a funded
   key**. Network and enclaves come from `.config.json` (`BLOCKCHAIN_NETWORK`,
   `PROJECT_NAME`, `TRUSTED_ZONE_IMAGE`), overridable with
   `--network`/`--securelock`/`--trustedzone`; the signing key is
@@ -192,21 +205,31 @@ def hello(msg='World'):
 From your py application, using the ethernity cloud runner library, you will be calling the function as seen in the below example, where we pass `hello("World")` to be executed on the backend which will run in the Blockchain:
 ```py
 import os
-import sys
+from getpass import getpass
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from ethernity_cloud_runner_py.runner import EthernityCloudRunner  # type: ignore
+from ethernity_cloud_sdk_py.commands.private_key import PrivateKeyManager
 
 
 def execute_task() -> None:
     code = 'hello("Hello, Python World!")'
 
-    runner = EthernityCloudRunner()
+    # The funded 0x key that pays for the order. ecld-publish exports it to
+    # src/.env as ENC_PRIVATE_KEY, encrypted with your key password (as a
+    # plaintext PRIVATE_KEY only when told not to encrypt it).
+    private_key = PrivateKeyManager(getpass("Private key password: ")).decrypt_private_key(
+        os.getenv("ENC_PRIVATE_KEY")
+    )
+
+    runner = EthernityCloudRunner(os.getenv("NETWORK_NAME"), os.getenv("NETWORK_TYPE"))
+    runner.set_private_key(private_key)
     # The task's artefacts go through the bootnode's payload intake; a Kubo RPC
-    # API of your own goes in runner.set_storage_ipfs(url) instead.
+    # API of your own goes in runner.set_storage_ipfs(url, token) instead.
     runner.set_public_intake()
+    runner.connect()
 
     resources = {
         "taskPrice": 8,
@@ -217,13 +240,15 @@ def execute_task() -> None:
         "duration": 1,
         "validators": 1,
     }
-    # this will execute a new task using Python template and will run the code provided above
-    # the code will run on the TESTNET network
+    # run(resources, securelock, protocol version, code, node, trustedzone):
+    # the version is the protocol's, "v3", under which the image registry keys
+    # the securelock; an empty node lets any node take the order.
     runner.run(
-        os.getenv("PROJECT_NAME"),
-        code,
-        "0xd58f5C1834279ABD601df85b3E4b2323aDD4E75e",
         resources,
+        os.getenv("PROJECT_NAME"),
+        "v3",
+        code,
+        "",
         os.getenv("TRUSTED_ZONE_IMAGE", ""),
     )
 

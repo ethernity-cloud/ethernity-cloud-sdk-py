@@ -1,6 +1,6 @@
 """IPFSClient.upload_dir: a connection dropped mid-upload is retried like a
-gateway error, and every attempt closes the files it opened. No network: the
-HTTP POST is replaced."""
+non-200 answer from the IPFS API, and every attempt closes the files it
+opened. No network: the HTTP POST is replaced."""
 from requests.exceptions import ConnectionError, SSLError
 
 from ethernity_cloud_sdk_py.commands.pynithy import ipfs_client

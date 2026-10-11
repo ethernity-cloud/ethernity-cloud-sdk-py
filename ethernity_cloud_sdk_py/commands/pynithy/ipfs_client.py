@@ -110,12 +110,11 @@ class IPFSClient:
         """Add a directory tree and return its root CID. With only_hash the
         node computes the same CID and neither stores nor announces anything.
 
-        The enclave image is ~1.2 GB and the gateway processes the upload
-        only after the last byte, so a failure shows up after minutes of
-        transfer: as a non-200 response (a gateway-side timeout), or as the
-        RequestException requests raises for a connection dropped mid-upload
-        (SSLError, ConnectionError). Each attempt re-sends the whole tree;
-        `attempts` bounds it.
+        The enclave image is ~1.2 GB and the IPFS API answers the add only
+        after the last byte, so a failure shows up after minutes of transfer:
+        as a non-200 response, or as the RequestException requests raises for
+        a connection dropped mid-upload (SSLError, ConnectionError). Each
+        attempt re-sends the whole tree; `attempts` bounds it.
         """
         self._step = "Hashing enclave for IPFS" if only_hash else "Uploading and pinning enclave to IPFS"
         for attempt in range(1, attempts + 1):
@@ -164,9 +163,8 @@ class IPFSClient:
             encoder = MultipartEncoder(fields=fields)
             monitor = MultipartEncoderMonitor(encoder, self.update_progress)
 
-            # `timeout` is the IPFS API's own bound on the request; 5m was shorter
-            # than a 1.2 GB upload over an ordinary uplink, and the gateway aborted
-            # the add after every byte had been sent.
+            # `timeout` is the IPFS API's own bound on the add; 60m covers a
+            # 1.2 GB upload over an ordinary uplink.
             response = requests.post(
                 self.add_url + "?quieter=true&stream-channels=true&wrap-with-directory=true&progress=false&timeout=60m"
                 + ("&only-hash=true" if only_hash else ""),
@@ -197,11 +195,10 @@ class IPFSClient:
                         ipfs_hash = file_info["Hash"]
                         sys.stdout.write("\r" + f"\t{self.CHECK}{self._step}")
                         return ipfs_hash
-                # A 200 with no root entry: the gateway closed the add before
-                # the wrapping directory was written (its own request timeout,
-                # reached after the last byte arrived).
+                # A 200 with no root entry: the API closed the add before the
+                # wrapping directory was written.
                 sys.stdout.write("\r" + f"\t{self.FAIL}{self._step}")
-                print(f"Failed to upload to IPFS: the gateway returned no root hash "
+                print(f"Failed to upload to IPFS: the IPFS API returned no root hash "
                       f"({len(response.text)} bytes of response)")
                 return False
             except Exception as e:
@@ -214,40 +211,6 @@ class IPFSClient:
             #print(response.text)
             return False
 
-    def download_file(
-        self, ipfs_hash: str, download_path: str, attempt: int = 0
-    ) -> None:
-        gateway_url = f"https://ipfs.io/ipfs/{ipfs_hash}"
-        response = requests.get(url=gateway_url, timeout=60, headers=self.headers)
-
-        if response.status_code == 200:
-            with open(download_path, "wb") as file:
-                file.write(response.content)
-            print(f"File downloaded successfully to {download_path}")
-        else:
-            print(
-                f"Failed to download from IPFS. Attempt {attempt}. Status code: {response.status_code}. Response text: {response.text}.\n{'Trying again...' if attempt < 6 else ''}"
-            )
-            if attempt < 6:
-                self.download_file(ipfs_hash, download_path, attempt + 1)
-
-    def get_file_content(self, ipfs_hash: str, attempt: int = 0) -> None:
-        url = self.api_url
-        gateway_url = f"{url}/api/v0/cat?arg={ipfs_hash}"
-        response = requests.post(url=gateway_url, timeout=60, headers=self.headers)
-
-        if response.status_code == 200:
-            # TODO: use a get encoding function to determine the encoding
-            return response.content.decode("utf-8")
-        else:
-            print(
-                f"Failed to get content from IPFS. Attempt {attempt}. Status code: {response.status_code}. Response text: {response.text}.\n{'Trying again...' if attempt < 6 else ''}"
-            )
-            if attempt < 6:
-                self.get_file_content(ipfs_hash, attempt + 1)
-
-        return None
-    
     def upload(self, path: str, only_hash: bool = False) -> str:
         if os.path.isfile(path):
             # It's a single file

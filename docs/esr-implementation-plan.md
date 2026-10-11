@@ -119,8 +119,11 @@ first, CI second, crypto third, money last.
   in non-interactive mode a missing key is a hard error, never a hang. This retires
   StarChart's `run_publish.py`.
 - `commands/init.py`: env/flag for every prompt (`ECLD_PROJECT_NAME`,
-  `ECLD_DAPP_TYPE`, `ECLD_BLOCKCHAIN_NETWORK`, IPFS choice, template choice, the ESR
-  prompts from §8) + the Custom-type docker prompts (`init.py:183-186` getpass).
+  `ECLD_DAPP_TYPE`, `ECLD_BLOCKCHAIN_NETWORK`, the IPFS choice — the publish's own
+  IPFS node in docker by default, written as an empty `IPFS_ENDPOINT`, or an IPFS
+  API of your own from `ECLD_IPFS_ENDPOINT` with `ECLD_IPFS_TOKEN` as its
+  Authorization header — template choice, the ESR prompts from §8) + the
+  Custom-type docker prompts (`init.py:183-186` getpass).
 - `commands/test.py`: `ECLD_TEST_CODE`, `ECLD_TEST_INPUT`, **`--expect` /
   `ECLD_TEST_EXPECT`** (exit non-zero on mismatch). Network mode (submitting a real
   testnet task via runner-py with `ECLD_RUNNER_KEY` / `ECLD_TEST_NETWORK`) rides on

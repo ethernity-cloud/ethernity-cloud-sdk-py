@@ -314,28 +314,32 @@ def main():
     config.write("DAPP_TYPE", selected_dApp_type)
 
     print()
+    # Where ecld-publish adds the image. An empty IPFS_ENDPOINT means the
+    # publish runs its own IPFS node in docker; a Kubo RPC API URL means that
+    # node, with IPFS_TOKEN sent verbatim as the Authorization header when the
+    # API requires one. ECLD_IPFS_ENDPOINT / ECLD_IPFS_TOKEN set both unattended.
     custom_url = ipfs_token = None
     if env_str("ECLD_IPFS_ENDPOINT"):
         custom_url = env_str("ECLD_IPFS_ENDPOINT")
         ipfs_token = env_str("ECLD_IPFS_TOKEN")
-        print(f"IPFS pinning service (from ECLD_IPFS_ENDPOINT): {custom_url}")
+        print(f"IPFS API (from ECLD_IPFS_ENDPOINT): {custom_url}")
     else:
-        ipfs_service_options = ["Ethernity (best effort)", "Custom IPFS"]
+        own_node, own_api = "the publish's own IPFS node in docker (default)", "an IPFS API of your own"
         ipfs_service = prompt_options(
-            "Select the IPFS pinning service you want to use (default is Ethernity): ",
-            ipfs_service_options,
-            "Ethernity (best effort)",
+            "Where should ecld-publish add the enclave image? (default is the publish's own IPFS node): ",
+            [own_node, own_api],
+            own_node,
         )
 
-        if ipfs_service == "Custom IPFS":
+        if ipfs_service == own_api:
             custom_url = input(
-                "Enter the endpoint URL for the IPFS pinning service you want to use: "
+                "Enter the Kubo RPC API URL of your own node (e.g. http://127.0.0.1:5001): "
             ).strip()
             ipfs_token = input(
-                "Enter the access token to be used when calling the IPFS pinning service: "
+                "Enter the Authorization header value if that API requires one (empty for your own node): "
             ).strip()
         else:
-            custom_url = "https://ipfs.ethernity.cloud"
+            custom_url = ""
 
     os.makedirs("src/serverless", exist_ok=True)
 

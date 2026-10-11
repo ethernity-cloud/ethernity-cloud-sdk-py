@@ -143,11 +143,13 @@ def session_hash(body):
     return hashlib.sha256(body).digest()
 
 
-def pin_body(ipfs_api_url, body):
-    """Pin the exact bytes as CIDv1/raw/sha2-256 and return the CID."""
+def pin_body(ipfs_api_url, body, headers=None):
+    """Pin the exact bytes as CIDv1/raw/sha2-256 and return the CID.
+    `headers` go with the add: the Authorization header of an API that
+    requires one."""
     r = requests.post(
         f"{ipfs_api_url}/api/v0/add?cid-version=1&raw-leaves=true&pin=true",
-        files={"file": ("session", body)}, timeout=60)
+        files={"file": ("session", body)}, headers=headers or {}, timeout=60)
     r.raise_for_status()
     return r.json()["Hash"]
 
@@ -190,11 +192,14 @@ def _send(w3, chain_id, key, fn, label):
     return txh, w3.eth.wait_for_transaction_receipt(txh, timeout=180)
 
 
-def register(provider_url, chain_id, registry_address, key, body, ipfs_api_url, image_cid=""):
-    """Pin `body` and register it under its own `name:`. Returns
-    (name, hash_hex, cid, registered): `registered` is False when the chain
-    already held these exact bytes as the name's latest version, registered
-    by this wallet, which the contract would refuse as a duplicate."""
+def register(provider_url, chain_id, registry_address, key, body, ipfs_api_url, image_cid="",
+             ipfs_headers=None):
+    """Pin `body` through the IPFS API at `ipfs_api_url`, with `ipfs_headers`
+    (the IPFS client's Authorization header) on the add, and register it
+    under its own `name:`. Returns (name, hash_hex, cid, registered):
+    `registered` is False when the chain already held these exact bytes as
+    the name's latest version, registered by this wallet, which the contract
+    would refuse as a duplicate."""
     text = body.decode("utf-8", "replace")
     name, rules = parse_name_and_rules(text)
     if not name:
@@ -202,7 +207,7 @@ def register(provider_url, chain_id, registry_address, key, body, ipfs_api_url, 
     digest = session_hash(body)
     w3 = _web3(provider_url)
     reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=ABI)
-    cid = pin_body(ipfs_api_url, body)
+    cid = pin_body(ipfs_api_url, body, ipfs_headers)
     latest = latest_record(reg, name)
     if latest is not None and latest[1] == digest and latest[2] == w3.eth.account.from_key(key).address:
         return name, digest.hex(), cid, False

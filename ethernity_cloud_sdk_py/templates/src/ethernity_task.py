@@ -56,8 +56,10 @@ def execute_task(code) -> None:
     runner.set_private_key(PRIVATE_KEY)
 
     # The task's artefacts go through the bootnode's payload intake; a Kubo RPC
-    # API of the dApp's own goes in set_storage_ipfs(url) instead (the public
-    # API's add is closed to callers without a token).
+    # API of the dApp's own goes in set_storage_ipfs(url, token) instead, the
+    # URL ending in /api/v0 and the token sent verbatim as the Authorization
+    # header when that API requires one (the public API takes writes only with
+    # a writer token).
     runner.set_public_intake()
     runner.connect()
 

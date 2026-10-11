@@ -76,6 +76,9 @@ assert c['PROJECT_NAME'] == 'ci_acceptance', c
 assert c['BLOCKCHAIN_NETWORK'] == 'BLOXBERG_TESTNET', c
 assert c['ESR']['enabled'] is True, c
 assert c['ESR']['contract_address'].startswith('0x1111'), c
+# The unattended default: the publish runs its own IPFS node, no API and no token.
+assert c['IPFS_ENDPOINT'] == '', c
+assert c['IPFS_TOKEN'] == '', c
 print('init config OK')
 "
 test -f src/serverless/backend.py || fail "template not scaffolded"
