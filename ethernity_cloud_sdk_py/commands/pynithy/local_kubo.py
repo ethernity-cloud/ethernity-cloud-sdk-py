@@ -25,8 +25,10 @@ BOOTNODE_MULTIADDR = "/dns4/ipfs.ethernity.cloud/tcp/4001/p2p/QmRBc1eBt4hpJQUqHq
 SWARM_PORT = int(os.environ.get("ECLD_KUBO_SWARM_PORT", "4001"))
 API_READY_SECONDS = 90
 # The public IPFS API: an IPFS_ENDPOINT naming it is not an endpoint of the
-# application's own, so the publish runs its own Kubo instead.
+# application's own, so the publish runs its own Kubo instead. It takes a pin
+# with a token (publish.py `_pin_on_public_api`).
 PUBLIC_IPFS_HOST = "ipfs.ethernity.cloud"
+PUBLIC_IPFS_API = f"https://{PUBLIC_IPFS_HOST}"
 
 _PRIVATE = re.compile(r"^/ip4/(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|0\.0\.0\.0|169\.254\.)|^/ip6/(::1|fe80|fc|fd)")
 

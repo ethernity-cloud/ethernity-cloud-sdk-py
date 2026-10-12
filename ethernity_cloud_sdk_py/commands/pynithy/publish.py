@@ -25,7 +25,7 @@ from ethernity_cloud_sdk_py.commands.pynithy import cas_resolver, session_regist
 import ethernity_cloud_sdk_py.commands.pynithy.run.public_key_service as public_key_service
 from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
 from ethernity_cloud_sdk_py.commands.pynithy.ipfs_client import IPFSClient
-from ethernity_cloud_sdk_py.commands.pynithy.local_kubo import LocalKubo, own_endpoint
+from ethernity_cloud_sdk_py.commands.pynithy.local_kubo import LocalKubo, own_endpoint, PUBLIC_IPFS_API
 from ethernity_cloud_sdk_py.commands.spinner import Spinner
 
 from pathlib import Path
@@ -810,14 +810,37 @@ def main(private_key):
         ipfs_client = IPFSClient(local_kubo.api_url, None)
     else:
         ipfs_client = IPFSClient(ipfs_endpoint, ipfs_token or None)
+    # The public API, for the pins a V1 registry needs (below); it takes a
+    # pin only with a token.
+    public_ipfs = IPFSClient(PUBLIC_IPFS_API, ipfs_token) if ipfs_token else None
     try:
-        _publish(private_key, spinner, ipfs_client, local_kubo)
+        _publish(private_key, spinner, ipfs_client, local_kubo, public_ipfs)
     finally:
         if local_kubo is not None:
             local_kubo.release()
 
 
-def _publish(private_key, spinner, ipfs_client, local_kubo):
+def _pin_on_public_api(spinner, public_ipfs, cids):
+    """On a V1 registry nothing is recorded before the certificate, so the
+    bootnode's mirror pins nothing from the publish's Kubo, and the
+    certificate extraction service and the nodes, which fetch from the
+    bootnode, would wait on an image it never receives: the image and the
+    compose are pinned on the public API, which fetches them from the
+    publish's Kubo over the connection that Kubo holds to it. The pin takes a
+    token; without one the publish stops here, before anything is on chain."""
+    if public_ipfs is None:
+        print("\t✖  This network's image registry records an image only with its certificate, "
+              "so the image must be pinned on the public IPFS API before the certificate is extracted, "
+              "and the public API takes a pin only with a token.")
+        print("\t   Set ECLD_IPFS_TOKEN (or IPFS_TOKEN in .config.json) to a writer token of ipfs.ethernity.cloud and publish again.")
+        exit(1)
+    for cid in cids:
+        if not spinner.spin_till_done(f"Pinning {cid} on the public IPFS API", public_ipfs.pin, cid):
+            print(f"\t✖  The public IPFS API did not pin {cid}")
+            exit(1)
+
+
+def _publish(private_key, spinner, ipfs_client, local_kubo, public_ipfs=None):
 
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
     DAPP_TYPE = config.read("DAPP_TYPE")
@@ -1029,6 +1052,8 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
     if registry_v2 and local_kubo is not None:
         local_kubo.provide(IPFS_HASH)
         local_kubo.provide(IPFS_DOCKER_COMPOSE_HASH)
+    elif not registry_v2 and local_kubo is not None:
+        _pin_on_public_api(spinner, public_ipfs, (IPFS_DOCKER_COMPOSE_HASH, IPFS_HASH))
 
     # A testnet with a SessionRegistry: the session is registered ON-CHAIN
     # there, which the validator set reads, on every publish (a body already

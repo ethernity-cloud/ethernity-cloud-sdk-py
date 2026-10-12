@@ -211,6 +211,19 @@ class IPFSClient:
             #print(response.text)
             return False
 
+    def pin(self, cid: str, timeout_secs: int = 3600) -> bool:
+        """Pin `cid` on this API (`pin/add`), which fetches the blocks it does
+        not hold from the peers that provide them; the API answers once the
+        pin is complete. Returns True when the pin is reported."""
+        response = requests.post(
+            f"{self.api_url}/api/v0/pin/add?arg={cid}&recursive=true",
+            headers=self.headers, timeout=timeout_secs)
+        if response.status_code != 200:
+            print(f"\tFailed to pin {cid} on {self.api_url}: status {response.status_code}")
+            print(f"\t{response.text[:300]}")
+            return False
+        return cid in response.text
+
     def upload(self, path: str, only_hash: bool = False) -> str:
         if os.path.isfile(path):
             # It's a single file
