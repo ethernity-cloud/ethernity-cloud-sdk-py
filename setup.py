@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 setup(
     name="ethernity-cloud-sdk-py",
-    version="0.9.11",
+    version="0.9.12",
     url="https://github.com/ethernity-cloud/ethernity-cloud-sdk-py",
     author="Ethernity Cloud Team",
     author_email="contact@ethernity.cloud",
@@ -25,9 +25,11 @@ setup(
         "requests_toolbelt",
         "cryptography",
         "typing-extensions",
-        # 0.5.6: the LitVM PoX 0xE35991de (EthernityImplementationV2 1.1),
-        # the one this SDK's LitVM network names.
-        "ethernity-cloud-runner-py>=0.5.6",
+        # 0.5.7: the LitVM PoX 0xE35991de (EthernityImplementationV2 1.1),
+        # the one this SDK's LitVM network names, and a run through the
+        # bootnode's payload intake on a network it does not serve is refused
+        # before any transaction.
+        "ethernity-cloud-runner-py>=0.5.7",
         "pyyaml",
         # Add other dependencies here
     ],

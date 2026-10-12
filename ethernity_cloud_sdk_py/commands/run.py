@@ -328,6 +328,20 @@ def main(argv=None):
               f"(pip install ethernity-cloud-runner-py): {e}", file=sys.stderr)
         return 1
 
+    # The bootnode's payload intake serves the networks the bootnode's agent
+    # runs (runner ipfs.INTAKE_NETWORKS); on another network the artefacts go
+    # through a Kubo RPC API named by --ipfs, decided here, before the order.
+    if args.ipfs == INTAKE_KEYWORD:
+        try:
+            from ethernity_cloud_runner_py.ipfs import INTAKE_NETWORKS
+        except Exception:
+            INTAKE_NETWORKS = ()
+        network_key = f"{network_name.lower()}_{network_type.lower()}"
+        if INTAKE_NETWORKS and network_key not in INTAKE_NETWORKS:
+            parser.error(f"the bootnode's payload intake serves {', '.join(INTAKE_NETWORKS)}, not "
+                         f"{network_key}: pass --ipfs <Kubo RPC API URL> (your own node, or "
+                         f"https://ipfs.ethernity.cloud with --ipfs-token / ECLD_IPFS_TOKEN set to a writer token)")
+
     try:
         runner = EthernityCloudRunner(network_name, network_type)
         try:
