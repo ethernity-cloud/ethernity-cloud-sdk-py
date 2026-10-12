@@ -191,13 +191,14 @@ class BlockchainNetworks(Enum):
         # LitVM (LiteForge) testnet -- Litecoin EVM ZK-rollup (Arbitrum Orbit),
         # gas token zkLTC. The PoX is the EthernityImplementationV2 1.1 of
         # 2026-10-11 (pox-smart-contract feature/fee-splitters), the one LitVM's
-        # CAS set validates orders on. The image registry address matches
-        # Ethereum Sepolia's (the same deployer, the same CREATE order); it is a
-        # distinct deployment keyed by chain_id/RPC. CAS-attested by LitVM's own
+        # CAS set validates orders on. The image registry is the ECImageRegistryV3
+        # of 2026-10-12, which records an image before its certificate and owns
+        # securelock names per wallet (the V1 before it, 0x55e0ad45..., holds
+        # the images published up to that day). CAS-attested by LitVM's own
         # ethernity-cas set: SESSION_REGISTRY_ADDRESSES names its SessionRegistry
         # (`cas_provisioned`).
         "0xE35991de1f2A435e29E70406FA2781b1AffCb168", # protocol contract address
-        "0x55e0ad455Be85162b71a790f00Fc305680E3CE53", # Image Registry Contract Address
+        "0xAf8Ce29103E1f59feDD49688ff070Ffc2346AF1D", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-12)
         "https://liteforge.rpc.caldera.xyz/infra-partner-http",
         4441,  # Chain ID for LitVM LiteForge
         True, # EIP 1559 SUPPORT
@@ -225,7 +226,7 @@ class BlockchainNetworks(Enum):
         # The securelock is registered as <project>-unsafe (UNSAFE_NETWORKS).
         "testnet", # Network type
         "0xE35991de1f2A435e29E70406FA2781b1AffCb168", # protocol contract address
-        "0x55e0ad455Be85162b71a790f00Fc305680E3CE53", # Image Registry Contract Address
+        "0xAf8Ce29103E1f59feDD49688ff070Ffc2346AF1D", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-12)
         "https://liteforge.rpc.caldera.xyz/infra-partner-http",
         4441,  # Chain ID for LitVM LiteForge
         True, # EIP 1559 SUPPORT
@@ -443,7 +444,9 @@ VALIDATOR_REGISTRY_ADDRESSES = {
 # from MR_ENCLAVE.
 SESSION_REGISTRY_ADDRESSES = {
     "BLOXBERG_TESTNET": "0x444429681fCb26470Cb12B5436E48402cF7478A3",
-    "LITVM_LITEFORGE": "0x8ad24b3F406A41a0F8D3440021792EB203957F43",
+    # Bound to the ECImageRegistryV3 of 2026-10-12: securelock session names
+    # only from the wallet that owns the image name.
+    "LITVM_LITEFORGE": "0xfA70B5Df7C773A21164cAc5413704117e4dEaB76",
 }
 
 # The -unsafe variants: networks whose enclaves run without a CAS on platforms
