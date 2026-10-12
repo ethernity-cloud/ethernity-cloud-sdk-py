@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 setup(
     name="ethernity-cloud-sdk-py",
-    version="0.9.8",
+    version="0.9.9",
     url="https://github.com/ethernity-cloud/ethernity-cloud-sdk-py",
     author="Ethernity Cloud Team",
     author_email="contact@ethernity.cloud",
@@ -25,10 +25,9 @@ setup(
         "requests_toolbelt",
         "cryptography",
         "typing-extensions",
-        # 0.5.3: the bloxberg testnet image registry 0xa372a6e1
-        # (ECImageRegistryV3), where the dApps this SDK publishes are
-        # registered.
-        "ethernity-cloud-runner-py>=0.5.3",
+        # 0.5.6: the LitVM PoX 0xE35991de (EthernityImplementationV2 1.1),
+        # the one this SDK's LitVM network names.
+        "ethernity-cloud-runner-py>=0.5.6",
         "pyyaml",
         # Add other dependencies here
     ],
