@@ -1043,7 +1043,7 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
         with open("etny-securelock-test.yaml", "rb") as f:
             session_body = f.read()
         name, session_hash_hex, body_cid, registered = session_registry.register(
-            BLOCKCHAIN_CONFIG.rpc_url, BLOCKCHAIN_CONFIG.chain_id, registry_address,
+            BLOCKCHAIN_CONFIG, registry_address,
             private_key, session_body, ipfs_client.api_url,
             ipfs_headers=ipfs_client.headers)
         if registered:
@@ -1167,7 +1167,7 @@ def _publish(private_key, spinner, ipfs_client, local_kubo):
     # pin the image beside the body it serves.
     if BLOCKCHAIN_CONFIG.cas_provisioned and BLOCKCHAIN_CONFIG.network_type != 'mainnet':
         session_registry.link_image(
-            BLOCKCHAIN_CONFIG.rpc_url, BLOCKCHAIN_CONFIG.chain_id,
+            BLOCKCHAIN_CONFIG,
             BlockchainNetworks.get_session_registry_address(BLOCKCHAIN_NETWORK),
             private_key, config.read("SECURELOCK_SESSION"), IPFS_HASH)
         print(f"\t✔  Session {config.read('SECURELOCK_SESSION')} linked to image {IPFS_HASH}")

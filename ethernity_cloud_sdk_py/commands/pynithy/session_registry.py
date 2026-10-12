@@ -164,11 +164,30 @@ def _web3(provider_url):
     return w3
 
 
-def _send(w3, chain_id, key, fn, label):
+def fee_fields(w3, network):
+    """The fee fields of a transaction on `network` (a BlockchainNetworks
+    member): on an EIP-1559 chain a type-2 transaction whose maxFeePerGas is
+    the latest block's base fee plus a tenth and the network's priority fee,
+    refused above the network's maxFeePerGas; otherwise the network's gas
+    price. The same model as the image registry's transactions."""
+    if network.is_eip1559:
+        base_fee = w3.eth.get_block("latest").baseFeePerGas
+        priority = w3.to_wei(network.max_priority_fee_per_gas, "gwei")
+        max_fee = int(base_fee * 1.1) + priority
+        cap = w3.to_wei(network.max_fee_per_gas, "gwei")
+        if max_fee > cap:
+            raise SystemExit(
+                f"{network.display_name}: a base fee of {base_fee} wei puts the fee per gas "
+                f"at {max_fee} wei, above the network's {cap} wei")
+        return {"type": 2, "maxFeePerGas": max_fee, "maxPriorityFeePerGas": priority}
+    return {"gasPrice": w3.to_wei(network.gas_price, "gwei")}
+
+
+def _send(w3, network, key, fn, label):
     """Simulate `fn` from the key's wallet, then sign and send it with its gas
-    estimate plus 30%: a registration's cost grows with the length of the
-    name. A refusal is raised with the registry's reason, which only the
-    simulation reports."""
+    estimate plus 30% (a registration's cost grows with the length of the
+    name) and the fees of `network`. A refusal is raised with the registry's
+    reason, which only the simulation reports."""
     acct = w3.eth.account.from_key(key)
     try:
         # web3 reads Parity's "Reverted 0x..." as a reason string and warns
@@ -182,7 +201,7 @@ def _send(w3, chain_id, key, fn, label):
     txn = fn.build_transaction({
         "from": acct.address,
         "nonce": w3.eth.get_transaction_count(acct.address, "pending"),
-        "chainId": chain_id, "gas": gas, "gasPrice": w3.to_wei("1", "mwei"),
+        "chainId": network.chain_id, "gas": gas, **fee_fields(w3, network),
     })
     signed = w3.eth.account.sign_transaction(txn, private_key=key)
     raw = getattr(signed, "raw_transaction", None)
@@ -192,11 +211,12 @@ def _send(w3, chain_id, key, fn, label):
     return txh, w3.eth.wait_for_transaction_receipt(txh, timeout=180)
 
 
-def register(provider_url, chain_id, registry_address, key, body, ipfs_api_url, image_cid="",
+def register(network, registry_address, key, body, ipfs_api_url, image_cid="",
              ipfs_headers=None):
     """Pin `body` through the IPFS API at `ipfs_api_url`, with `ipfs_headers`
     (the IPFS client's Authorization header) on the add, and register it
-    under its own `name:`. Returns (name, hash_hex, cid, registered):
+    under its own `name:` on `network` (a BlockchainNetworks member: its RPC,
+    chain id and fees). Returns (name, hash_hex, cid, registered):
     `registered` is False when the chain already held these exact bytes as
     the name's latest version, registered by this wallet, which the contract
     would refuse as a duplicate."""
@@ -205,13 +225,13 @@ def register(provider_url, chain_id, registry_address, key, body, ipfs_api_url, 
     if not name:
         raise SystemExit("the session body has no `name:`")
     digest = session_hash(body)
-    w3 = _web3(provider_url)
+    w3 = _web3(network.rpc_url)
     reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=ABI)
     cid = pin_body(ipfs_api_url, body, ipfs_headers)
     latest = latest_record(reg, name)
     if latest is not None and latest[1] == digest and latest[2] == w3.eth.account.from_key(key).address:
         return name, digest.hex(), cid, False
-    txh, rcpt = _send(w3, chain_id, key,
+    txh, rcpt = _send(w3, network, key,
                       reg.functions.register(digest, name, cid, image_cid, HASH_ALGO_SHA256, rules),
                       label=name)
     if rcpt.status != 1:
@@ -219,12 +239,13 @@ def register(provider_url, chain_id, registry_address, key, body, ipfs_api_url, 
     return name, digest.hex(), cid, True
 
 
-def link_image(provider_url, chain_id, registry_address, key, name, image_cid, wait_secs=600):
-    """Point the name's latest version at the published image CID. A node
-    behind the chain can answer that a name registered minutes earlier has no
-    record, so the name is read again every 15 seconds for `wait_secs` before
-    it is called unregistered."""
-    w3 = _web3(provider_url)
+def link_image(network, registry_address, key, name, image_cid, wait_secs=600):
+    """Point the name's latest version at the published image CID, on
+    `network` (a BlockchainNetworks member). A node behind the chain can
+    answer that a name registered minutes earlier has no record, so the name
+    is read again every 15 seconds for `wait_secs` before it is called
+    unregistered."""
+    w3 = _web3(network.rpc_url)
     reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=ABI)
     deadline = time.time() + wait_secs
     latest = latest_record(reg, name)
@@ -233,7 +254,7 @@ def link_image(provider_url, chain_id, registry_address, key, name, image_cid, w
             raise SystemExit(f"no registered session named {name!r}")
         time.sleep(15)
         latest = latest_record(reg, name)
-    txh, rcpt = _send(w3, chain_id, key, reg.functions.linkImage(latest[0], image_cid),
+    txh, rcpt = _send(w3, network, key, reg.functions.linkImage(latest[0], image_cid),
                       label=f"the link of {name}")
     if rcpt.status != 1:
         raise SystemExit(f"SessionRegistry.linkImage reverted for {name} (tx {txh.hex()})")

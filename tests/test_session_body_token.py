@@ -1,8 +1,10 @@
 """The session body's add carries the IPFS client's Authorization header, as
 the image upload does. No network: the HTTP POST and the chain are replaced."""
+from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.pynithy import session_registry
 from ethernity_cloud_sdk_py.commands.pynithy.ipfs_client import IPFSClient
 
+NETWORK = BlockchainNetworks.BLOXBERG_TESTNET
 API = "http://ipfs.example:5001"
 CID = "bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy"
 REGISTRY = "0x" + "11" * 20
@@ -70,7 +72,7 @@ def test_register_pins_the_body_with_the_clients_header(monkeypatch):
                         lambda url, body, headers=None: pinned.append((url, body, headers)) or CID)
     client = IPFSClient(API, "writer-token")
     name, hash_hex, cid, registered = session_registry.register(
-        "http://rpc.example", 8995, REGISTRY, KEY, BODY, client.api_url,
+        NETWORK, REGISTRY, KEY, BODY, client.api_url,
         ipfs_headers=client.headers)
     assert (name, cid, registered) == ("demo_SECURELOCK_V3_1", CID, False)
     assert pinned == [(API, BODY, {"Authorization": "writer-token"})]
@@ -84,6 +86,6 @@ def test_a_client_without_a_token_adds_the_body_without_headers(monkeypatch):
     monkeypatch.setattr(session_registry, "pin_body",
                         lambda url, body, headers=None: pinned.append(headers) or CID)
     client = IPFSClient(API, None)
-    session_registry.register("http://rpc.example", 8995, REGISTRY, KEY, BODY, client.api_url,
+    session_registry.register(NETWORK, REGISTRY, KEY, BODY, client.api_url,
                               ipfs_headers=client.headers)
     assert pinned == [{}]

@@ -88,7 +88,7 @@ class LocalKubo:
         previous publish of this project left serving its registered image,
         whose peer id that image's registry entry names; peer it with the
         bootnode. Raises when docker cannot run it or the API does not come
-        up in time."""
+        up in time; returns True (the spinner marks a falsy result failed)."""
         kept = self.kept_api_port()
         if kept is not None:
             self.api_port = kept
@@ -128,6 +128,7 @@ class LocalKubo:
                 time.sleep(1)
             if not self.connected_to(peer):
                 print(f"\t⚠  not connected to {peer} yet; the peering service keeps trying")
+        return True
 
     def peer_multiaddr(self):
         """How this Kubo is registered on chain: its first public address
