@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 setup(
     name="ethernity-cloud-sdk-py",
-    version="0.9.13",
+    version="0.9.14",
     url="https://github.com/ethernity-cloud/ethernity-cloud-sdk-py",
     author="Ethernity Cloud Team",
     author_email="contact@ethernity.cloud",
@@ -25,10 +25,8 @@ setup(
         "requests_toolbelt",
         "cryptography",
         "typing-extensions",
-        # 0.5.8: the LitVM ECImageRegistryV3 0xAf8Ce291 and the bootnode's
-        # payload intake serving the LitVM networks, as this SDK's LitVM
-        # network names them.
-        "ethernity-cloud-runner-py>=0.5.8",
+        # 0.5.9: do_request_id is the run's DO request id, which ecld-run --json reports.
+        "ethernity-cloud-runner-py>=0.5.9",
         "pyyaml",
         # Add other dependencies here
     ],

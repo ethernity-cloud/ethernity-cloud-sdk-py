@@ -243,6 +243,15 @@ def main():
     config.write("BLOCKCHAIN_NETWORK", BLOCKCHAIN_ID)
     print()
 
+    if BLOCKCHAIN_CONFIG.is_unsafe:
+        sibling = BLOCKCHAIN_CONFIG.cas_variant.display_name
+        print(f"{BLOCKCHAIN_CONFIG.display_name} runs your dApp WITHOUT a CAS, on the chain and contracts of {sibling},")
+        print("for SGX platforms the CAS cannot attest (EPID-only, SGX1). Its enclaves are debug-signed and")
+        print("sign their own certificates from their measurement: a result proves which image ran, not that")
+        print(f"an enclave ran it. The securelock is registered as <project>-unsafe; choose {sibling} for")
+        print("a CAS-attested run.")
+        print()
+
     print(
         f"Checking if the project named {BLOCKCHAIN_CONFIG.securelock_name(project_name)} is available on the {BLOCKCHAIN_CONFIG.display_name} network and ownership..."
     )

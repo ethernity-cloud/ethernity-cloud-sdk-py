@@ -71,9 +71,18 @@ The sdk has been tested on the following operating systems:
       the publish's IPFS node and attests it through a CAS member it
       resolves from the ValidatorRegistry. `tests/e2e_testnet_cas.sh` runs the whole
       path -- init, build, publish, one task, and the CAS validators'
-      verdict on it. The other testnets (Amoy, IoTeX, Sepolia, LiteForge)
-      have no CAS deployment and self-sign from MR_ENCLAVE as before.
+      verdict on it. Amoy, IoTeX and Sepolia have no ethernity-cas
+      deployment: their enclaves are debug-signed and sign their own
+      certificates from their measurement, and `ecld-publish` registers no
+      CAS session for them.
+    - Testnet unsafe (no CAS) - the unsafe network beside the testnet (see
+      "The testnets and their unsafe networks").
     - Mainnet - to be provided during the following updates
+- LitVM:
+    - LiteForge - CAS-attested the same way, by LitVM's own ethernity-cas
+      validator set (SessionRegistry `0xfA70B5Df...`, ValidatorRegistry
+      `0xbE3759f3...`, ECImageRegistryV3 `0xAf8Ce291...`).
+    - LiteForge unsafe (no CAS) - the unsafe network beside LiteForge.
 - Polyhon:
     - Amoy Testnet - to be provided during the following updates
     - Mainnet - to be provided during the following updates

@@ -36,6 +36,14 @@ def test_only_the_unsafe_members_are_unsafe():
         "BLOXBERG_TESTNET_UNSAFE", "LITVM_LITEFORGE_UNSAFE"}
 
 
+def test_an_unsafe_network_names_the_cas_attested_one_beside_it():
+    assert BlockchainNetworks.BLOXBERG_TESTNET_UNSAFE.cas_variant is BlockchainNetworks.BLOXBERG_TESTNET
+    assert BlockchainNetworks.LITVM_LITEFORGE_UNSAFE.cas_variant is BlockchainNetworks.LITVM_LITEFORGE
+    for member in BlockchainNetworks:
+        if not member.is_unsafe:
+            assert member.cas_variant is None, member.name
+
+
 def test_the_unsafe_litvm_shares_the_litvm_chain_and_contracts():
     safe = BlockchainNetworks.LITVM_LITEFORGE
     unsafe = BlockchainNetworks.LITVM_LITEFORGE_UNSAFE

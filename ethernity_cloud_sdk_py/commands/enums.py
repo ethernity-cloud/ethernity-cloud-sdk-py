@@ -368,6 +368,13 @@ class BlockchainNetworks(Enum):
         securelock registered as <project>-unsafe, and no LAS in its compose."""
         return self.name in UNSAFE_NETWORKS
 
+    @property
+    def cas_variant(self):
+        """The CAS-attested network an -unsafe variant has the chain and
+        contracts of (UNSAFE_NETWORKS); None for every other member."""
+        sibling = UNSAFE_NETWORKS.get(self.name)
+        return type(self)[sibling] if sibling else None
+
     def securelock_name(self, project_name):
         """The Image Registry name the project's securelock is published and
         run under on this network: <project>-unsafe on an -unsafe variant, so
@@ -450,10 +457,11 @@ SESSION_REGISTRY_ADDRESSES = {
 }
 
 # The -unsafe variants: networks whose enclaves run without a CAS on platforms
-# the CAS cannot attest. Listed by member name; see BLOXBERG_TESTNET_UNSAFE.
+# the CAS cannot attest, each with the CAS-attested network it has the chain
+# and contracts of. Keyed by member name; see BLOXBERG_TESTNET_UNSAFE.
 UNSAFE_NETWORKS = {
-    "BLOXBERG_TESTNET_UNSAFE",
-    "LITVM_LITEFORGE_UNSAFE",
+    "BLOXBERG_TESTNET_UNSAFE": "BLOXBERG_TESTNET",
+    "LITVM_LITEFORGE_UNSAFE": "LITVM_LITEFORGE",
 }
 
 # The (network name, network type) each member is in the runner's network
