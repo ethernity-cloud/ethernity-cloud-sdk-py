@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 setup(
     name="ethernity-cloud-sdk-py",
-    version="0.9.15",
+    version="0.9.16",
     url="https://github.com/ethernity-cloud/ethernity-cloud-sdk-py",
     author="Ethernity Cloud Team",
     author_email="contact@ethernity.cloud",
@@ -26,7 +26,7 @@ setup(
         "cryptography",
         "typing-extensions",
         # 0.5.9: do_request_id is the run's DO request id, which ecld-run --json reports.
-        "ethernity-cloud-runner-py>=0.5.10",
+        "ethernity-cloud-runner-py>=0.5.11",
         "pyyaml",
         # Add other dependencies here
     ],
