@@ -38,7 +38,7 @@ def _notice(unsafe, sibling):
     )
 
 
-@pytest.mark.parametrize("network", ["BLOXBERG_TESTNET_UNSAFE", "LITVM_LITEFORGE_UNSAFE"])
+@pytest.mark.parametrize("network", ["BLOXBERG_TESTNET_UNSAFE", "LITVM_LITEFORGE_UNSAFE", "ETHEREUM_SEPOLIA_UNSAFE"])
 def test_an_unsafe_choice_prints_the_notice_naming_the_cas_attested_network(tmp_path, network):
     member = BlockchainNetworks[network]
     out = _ecld_init(tmp_path, network)

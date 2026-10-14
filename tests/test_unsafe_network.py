@@ -33,12 +33,13 @@ def test_only_the_unsafe_members_are_unsafe():
     for member in BlockchainNetworks:
         assert member.is_unsafe == member.name.endswith("_UNSAFE"), member.name
     assert {m.name for m in BlockchainNetworks if m.is_unsafe} == {
-        "BLOXBERG_TESTNET_UNSAFE", "LITVM_LITEFORGE_UNSAFE"}
+        "BLOXBERG_TESTNET_UNSAFE", "LITVM_LITEFORGE_UNSAFE", "ETHEREUM_SEPOLIA_UNSAFE"}
 
 
 def test_an_unsafe_network_names_the_cas_attested_one_beside_it():
     assert BlockchainNetworks.BLOXBERG_TESTNET_UNSAFE.cas_variant is BlockchainNetworks.BLOXBERG_TESTNET
     assert BlockchainNetworks.LITVM_LITEFORGE_UNSAFE.cas_variant is BlockchainNetworks.LITVM_LITEFORGE
+    assert BlockchainNetworks.ETHEREUM_SEPOLIA_UNSAFE.cas_variant is BlockchainNetworks.ETHEREUM_SEPOLIA
     for member in BlockchainNetworks:
         if not member.is_unsafe:
             assert member.cas_variant is None, member.name
@@ -68,6 +69,33 @@ def test_litvm_is_cas_attested_by_its_own_set_and_its_unsafe_variant_is_not():
     assert BlockchainNetworks.get_validator_registry_address("LITVM_LITEFORGE_UNSAFE") == ""
 
 
+def test_the_unsafe_sepolia_shares_the_sepolia_chain_and_contracts():
+    safe = BlockchainNetworks.ETHEREUM_SEPOLIA
+    unsafe = BlockchainNetworks.ETHEREUM_SEPOLIA_UNSAFE
+    for field in ("network", "network_type", "protocol_contract_address",
+                  "image_registry_contract_address", "rpc_url", "chain_id"):
+        assert getattr(unsafe, field) == getattr(safe, field), field
+    assert safe.protocol_contract_address == "0x798975F9FdD90A21Cb11Ac26F1377e1542c58f9c"
+    assert safe.image_registry_contract_address == "0xa7E43a269E3307cf9d246b07df2B89CAA1b4C42F"
+    assert (BlockchainNetworks.get_esr_contract_address("ETHEREUM_SEPOLIA_UNSAFE")
+            == BlockchainNetworks.get_esr_contract_address("ETHEREUM_SEPOLIA")
+            == "0x9927809B61122B2af3f3b3A3303875e0687b8eE3")
+    assert unsafe.template_image["Pynithy"].trusted_zone_image == "ecld-pynithy-ethereum-sepolia-unsafe"
+
+
+def test_sepolia_is_cas_attested_by_its_own_set_and_its_unsafe_variant_is_not():
+    safe = BlockchainNetworks.ETHEREUM_SEPOLIA
+    unsafe = BlockchainNetworks.ETHEREUM_SEPOLIA_UNSAFE
+    assert safe.cas_provisioned
+    assert (BlockchainNetworks.get_validator_registry_address("ETHEREUM_SEPOLIA")
+            == "0x8ad24b3F406A41a0F8D3440021792EB203957F43")
+    assert (BlockchainNetworks.get_session_registry_address("ETHEREUM_SEPOLIA")
+            == "0xDbB249E108d19fC1691483Bf897bA8BA0dA99c06")
+    assert not unsafe.cas_provisioned
+    assert BlockchainNetworks.get_session_registry_address("ETHEREUM_SEPOLIA_UNSAFE") == ""
+    assert BlockchainNetworks.get_validator_registry_address("ETHEREUM_SEPOLIA_UNSAFE") == ""
+
+
 def test_the_securelock_is_registered_as_project_unsafe():
     unsafe = BlockchainNetworks.BLOXBERG_TESTNET_UNSAFE
     safe = BlockchainNetworks.BLOXBERG_TESTNET
@@ -87,6 +115,7 @@ def test_run_resolves_each_network_to_the_runners():
     assert run._resolve_network("BLOXBERG_TESTNET", None) == ("BLOXBERG", "TESTNET")
     assert run._resolve_network("POLYGON_AMOY", None) == ("POLYGON", "AMOY")
     assert run._resolve_network("ETHEREUM_SEPOLIA", None) == ("ETHEREUM", "SEPOLIA")
+    assert run._resolve_network("ETHEREUM_SEPOLIA_UNSAFE", None) == ("ETHEREUM", "SEPOLIA_UNSAFE")
     assert run._resolve_network("LITVM_LITEFORGE", None) == ("LITVM", "LITEFORGE")
     assert run._resolve_network("LITVM_LITEFORGE_UNSAFE", None) == ("LITVM", "LITEFORGE_UNSAFE")
 

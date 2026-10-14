@@ -42,7 +42,7 @@ def test_bloxberg_testnet_is_cas_provisioned():
 
 
 def test_a_testnet_without_a_session_registry_self_signs():
-    for name in ("POLYGON_AMOY", "IOTEX_TESTNET", "ETHEREUM_SEPOLIA"):
+    for name in ("POLYGON_AMOY", "IOTEX_TESTNET"):
         net = BlockchainNetworks[name]
         assert net.network_type == "testnet"
         assert not net.cas_provisioned

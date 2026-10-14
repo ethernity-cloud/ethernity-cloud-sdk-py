@@ -178,12 +178,14 @@ The sdk has been tested on the following operating systems:
   remains available as a scriptable template if you prefer driving the runner yourself.)
   `--unsafe` runs the network's `-unsafe` variant (see below).
 
-- **The testnets and their unsafe networks**: `Bloxberg Testnet` (`BLOXBERG_TESTNET`) and
-  `LitVM LiteForge` (`LITVM_LITEFORGE`) run your securelock in an enclave
+- **The testnets and their unsafe networks**: `Bloxberg Testnet` (`BLOXBERG_TESTNET`),
+  `LitVM LiteForge` (`LITVM_LITEFORGE`) and `Ethereum Sepolia` (`ETHEREUM_SEPOLIA`)
+  run your securelock in an enclave
   attested through that chain's Ethernity CAS validator set, on nodes whose
   platform the CAS can attest (DCAP). Each has an unsafe network beside it,
-  `Bloxberg Testnet unsafe (no CAS)` (`BLOXBERG_TESTNET_UNSAFE`) and `LitVM
-  LiteForge unsafe (no CAS)` (`LITVM_LITEFORGE_UNSAFE`): the same chain and
+  `Bloxberg Testnet unsafe (no CAS)` (`BLOXBERG_TESTNET_UNSAFE`), `LitVM
+  LiteForge unsafe (no CAS)` (`LITVM_LITEFORGE_UNSAFE`) and `Ethereum Sepolia
+  unsafe (no CAS)` (`ETHEREUM_SEPOLIA_UNSAFE`): the same chain and
   contracts, for hardware SGX platforms the CAS cannot attest (EPID-only,
   SGX1). No CAS: enclaves are debug-signed and self-signed from their
   measurement, so a result proves which image ran but not that an enclave ran

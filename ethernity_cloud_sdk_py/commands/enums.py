@@ -165,8 +165,17 @@ class BlockchainNetworks(Enum):
         "Ethereum Sepolia", # Network display name
         "ethereum", # Network short name
         "testnet", # Network type
-        "0x29D3eC870565B6A1510232bd950A8Bc8336f0EB2", # protocol contract address
-        "0x55e0ad455Be85162b71a790f00Fc305680E3CE53", # Image Registry Contract Address
+        # Ethereum Sepolia. The PoX is the EthernityImplementationV2 1.1 of
+        # 2026-10-14 (pox-smart-contract feature/fee-splitters), the one
+        # Sepolia's CAS set validates orders on; the image registry is the
+        # ECImageRegistryV3 of the same day, which records an image before its
+        # certificate and owns securelock names per wallet. Both are owned by
+        # 0xA247...; the previous family (PoX 0x29D3eC87..., V1 registry
+        # 0x55e0ad45...) is abandoned. CAS-attested by Sepolia's own
+        # ethernity-cas set: SESSION_REGISTRY_ADDRESSES names its SessionRegistry
+        # (`cas_provisioned`).
+        "0x798975F9FdD90A21Cb11Ac26F1377e1542c58f9c", # protocol contract address
+        "0xa7E43a269E3307cf9d246b07df2B89CAA1b4C42F", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-14)
         "https://ethereum-sepolia-rpc.publicnode.com",
         11155111,  # Chain ID for Ethreum Sepolia
         True, # EIP 1559 SUPPORT
@@ -176,6 +185,33 @@ class BlockchainNetworks(Enum):
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
                 trusted_zone_image="ecld-pynithy-ethereum-sepolia",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
+                docker_login="",
+                docker_password="",
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
+            ),
+        }
+    )
+
+    ETHEREUM_SEPOLIA_UNSAFE = (
+        "Ethereum Sepolia unsafe (no CAS)", # Network display name
+        "ethereum", # Network short name
+        # The same chain and contracts as ETHEREUM_SEPOLIA, for hardware SGX
+        # platforms the CAS cannot attest. No CAS: the securelock and the
+        # -unsafe trustedzone are debug-signed and self-sign from MR_ENCLAVE.
+        # The securelock is registered as <project>-unsafe (UNSAFE_NETWORKS).
+        "testnet", # Network type
+        "0x798975F9FdD90A21Cb11Ac26F1377e1542c58f9c", # protocol contract address
+        "0xa7E43a269E3307cf9d246b07df2B89CAA1b4C42F", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-14)
+        "https://ethereum-sepolia-rpc.publicnode.com",
+        11155111,  # Chain ID for Ethreum Sepolia
+        True, # EIP 1559 SUPPORT
+        5,   # Gas Price in Gwei
+        15,  # maxFeePerGas in Gwei
+        1,    # maxPriorityFeePerGas in Gwei
+        {  # template_images
+            dAppTypes.PYNITHY.value: TemplateConfig(
+                trusted_zone_image="ecld-pynithy-ethereum-sepolia-unsafe",
                 docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
                 docker_login="",
                 docker_password="",
@@ -424,12 +460,15 @@ ESR_CONTRACT_ADDRESSES = {
     "BLOXBERG_TESTNET_UNSAFE": "0x0Ea1728EAE108FD3B9340ae91451348E2Cc6b4E4",
     "LITVM_LITEFORGE": "0x709052Fe77Af543d3d9FE2Ac06a15c635c8D4Be5",
     "LITVM_LITEFORGE_UNSAFE": "0x709052Fe77Af543d3d9FE2Ac06a15c635c8D4Be5",
+    # Deployed 2026-10-14 with Sepolia's PoX family (pox-smart-contract
+    # deploy/08-deploy-esr.js, the same source as contracts/esr).
+    "ETHEREUM_SEPOLIA": "0x9927809B61122B2af3f3b3A3303875e0687b8eE3",
+    "ETHEREUM_SEPOLIA_UNSAFE": "0x9927809B61122B2af3f3b3A3303875e0687b8eE3",
     # Not deployed yet on these chains. ecld-build must refuse to build an
     # ESR-enabled enclave here rather than sealing in an empty address.
     "POLYGON_MAINNET": "",
     "POLYGON_AMOY": "",
     "IOTEX_TESTNET": "",
-    "ETHEREUM_SEPOLIA": "",
 }
 
 # ethernity-cas ValidatorRegistry deployments, keyed like the ESR map above
@@ -440,6 +479,7 @@ ESR_CONTRACT_ADDRESSES = {
 VALIDATOR_REGISTRY_ADDRESSES = {
     "BLOXBERG_TESTNET": "0x0014aB102FEa6b02e3D793FF4b9a0Af309fB4E14",
     "LITVM_LITEFORGE": "0xbE3759f327e8643fC5A1717fb2072A0dAcBAD29E",
+    "ETHEREUM_SEPOLIA": "0x8ad24b3F406A41a0F8D3440021792EB203957F43",
 }
 
 # ethernity-cas SessionRegistry deployments, keyed like the maps above. A
@@ -454,6 +494,8 @@ SESSION_REGISTRY_ADDRESSES = {
     # Bound to the ECImageRegistryV3 of 2026-10-12: securelock session names
     # only from the wallet that owns the image name.
     "LITVM_LITEFORGE": "0xfA70B5Df7C773A21164cAc5413704117e4dEaB76",
+    # Bound to Sepolia's ECImageRegistryV3 of 2026-10-14, the same way.
+    "ETHEREUM_SEPOLIA": "0xDbB249E108d19fC1691483Bf897bA8BA0dA99c06",
 }
 
 # The -unsafe variants: networks whose enclaves run without a CAS on platforms
@@ -462,6 +504,7 @@ SESSION_REGISTRY_ADDRESSES = {
 UNSAFE_NETWORKS = {
     "BLOXBERG_TESTNET_UNSAFE": "BLOXBERG_TESTNET",
     "LITVM_LITEFORGE_UNSAFE": "LITVM_LITEFORGE",
+    "ETHEREUM_SEPOLIA_UNSAFE": "ETHEREUM_SEPOLIA",
 }
 
 # The (network name, network type) each member is in the runner's network
@@ -475,6 +518,7 @@ RUNNER_NETWORKS = {
     "POLYGON_AMOY": ("POLYGON", "AMOY"),
     "IOTEX_TESTNET": ("IOTEX", "TESTNET"),
     "ETHEREUM_SEPOLIA": ("ETHEREUM", "SEPOLIA"),
+    "ETHEREUM_SEPOLIA_UNSAFE": ("ETHEREUM", "SEPOLIA_UNSAFE"),
     "LITVM_LITEFORGE": ("LITVM", "LITEFORGE"),
     "LITVM_LITEFORGE_UNSAFE": ("LITVM", "LITEFORGE_UNSAFE"),
 }
