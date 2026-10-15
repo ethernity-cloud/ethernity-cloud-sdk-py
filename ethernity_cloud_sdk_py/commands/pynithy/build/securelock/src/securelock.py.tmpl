@@ -616,6 +616,12 @@ class EtnySecureLock:
         # attests this order and this run's challenge; the data itself is
         # pushed unchanged. Without a binding (older trustedzone) the bare
         # data is signed, which that trustedzone verifies.
+        if not self.trustedzone_public_key_pem:
+            # A failure before execute() (the client-data check) reaches here
+            # with neither the trustedzone's certificate, which the result is
+            # encrypted to, nor the task binding it is signed over.
+            self.__get_trustedzone_public_key()
+            self.__load_task_binding()
         binding = getattr(self, "task_binding", None)
         prefix = f"{binding['challenge']}:{binding['order_id']}:" if binding else ""
         self.encrypt_file_and_push_to_swifstream(str(self.task_result), self.result, signed_prefix=prefix)
@@ -817,6 +823,9 @@ class EtnySecureLock:
                 f"No attested task caller supplied "
                 f"({e.__class__.__name__}); treating task as anonymous")
 
+        self.__load_task_binding()
+
+    def __load_task_binding(self):
         # Task binding: the order id and enclave challenge the trustedzone
         # generated for this task, forwarded as task.securelock + .sig. When
         # present (and only with a valid trustedzone signature) the result and
