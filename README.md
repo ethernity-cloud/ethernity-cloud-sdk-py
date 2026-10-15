@@ -134,7 +134,9 @@ The sdk has been tested on the following operating systems:
   4001) is the port your node listens on when it is free, `ECLD_IPFS_PEERS`
   (comma-separated multiaddrs, default the bootnode) the peers it keeps
   connected to, and `ECLD_KUBO_IMAGE` (default `ipfs/kubo:release`) the
-  docker image it runs.
+  docker image it runs. On such a registry the publish waits up to three
+  minutes for the service to queue the image from the chain event before
+  posting the hash itself.
 
 - **Test (local, no chain)**: To run your backend locally with the enclave's own
   executor — no SGX, no gas, instant — run:

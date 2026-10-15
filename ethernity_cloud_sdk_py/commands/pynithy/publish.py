@@ -1131,7 +1131,8 @@ def _publish(private_key, spinner, ipfs_client, local_kubo, public_ipfs=None):
             network=config.read("BLOCKCHAIN_NETWORK"),
             template_version=str(config.read("VERSION")),
             ipfs_hash=IPFS_HASH,
-            docker_composer_hash=IPFS_DOCKER_COMPOSE_HASH
+            docker_composer_hash=IPFS_DOCKER_COMPOSE_HASH,
+            chain_registered=registry_v2,
         )
         # The service may return either the bare cert or a dict that also
         # carries the enclave's ESR wallet address (RFC §5.2).
