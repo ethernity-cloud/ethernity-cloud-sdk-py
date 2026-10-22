@@ -477,7 +477,8 @@ ESR_CONTRACT_ADDRESSES = {
 # build-side on purpose: a rogue CAS must not choose the registry that judges
 # it. "" means no registry on that network; the enclave skips the check.
 VALIDATOR_REGISTRY_ADDRESSES = {
-    "BLOXBERG_TESTNET": "0x0014aB102FEa6b02e3D793FF4b9a0Af309fB4E14",
+    # The Phase 2 ValidatorRegistry of 2026-10-21 (ethernity-cas CAS-SETUP.md).
+    "BLOXBERG_TESTNET": "0x8CC8B1dc22f0E06193161CeC79d75987b0640e02",
     "LITVM_LITEFORGE": "0xbE3759f327e8643fC5A1717fb2072A0dAcBAD29E",
     "ETHEREUM_SEPOLIA": "0x8ad24b3F406A41a0F8D3440021792EB203957F43",
 }
@@ -490,7 +491,9 @@ VALIDATOR_REGISTRY_ADDRESSES = {
 # session. A testnet NOT listed here has no CAS: its securelock self-signs
 # from MR_ENCLAVE.
 SESSION_REGISTRY_ADDRESSES = {
-    "BLOXBERG_TESTNET": "0x444429681fCb26470Cb12B5436E48402cF7478A3",
+    # The SessionRegistry with image binding of 2026-10-22; it links an image
+    # only once the Image Registry records it under the session's name.
+    "BLOXBERG_TESTNET": "0x78f0c5E92E7A9Ec2f2A36A4509ED4a75D0f9463B",
     # Bound to the ECImageRegistryV3 of 2026-10-12: securelock session names
     # only from the wallet that owns the image name.
     "LITVM_LITEFORGE": "0xfA70B5Df7C773A21164cAc5413704117e4dEaB76",
