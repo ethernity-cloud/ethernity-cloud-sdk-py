@@ -92,21 +92,24 @@ def test_cas_address_override_wins(monkeypatch):
     assert cas_resolver.cas_address_for("http://unused", "") == "cas.local:19765"
 
 
-def _render_session(tmp_path, network):
+def _render_session(tmp_path, network, esr=None, subdir=None):
     """Run publish.process_yaml_template for `network` in its own directory.
 
     A subprocess because publish.py builds an ImageRegistry at import time and
     reads .config.json from the process's CWD, so two networks cannot be
     rendered in one interpreter.
     """
-    work = tmp_path / network
+    work = tmp_path / (subdir or network)
     work.mkdir()
     shutil.copy(TEMPLATE, work / "etny-securelock-test.yaml.tpl")
-    (work / ".config.json").write_text(json.dumps({
+    stored = {
         "PROJECT_NAME": "demo", "BLOCKCHAIN_NETWORK": network, "VERSION": 1,
         "MRENCLAVE_SECURELOCK": "aa", "SECURELOCK_SESSION": "demo_SECURELOCK_V3_1",
         "PREDECESSOR_HASH_SECURELOCK": "",
-    }))
+    }
+    if esr is not None:
+        stored["ESR"] = esr
+    (work / ".config.json").write_text(json.dumps(stored))
     script = textwrap.dedent("""
         from ethernity_cloud_sdk_py.commands.pynithy import publish
         publish.config.load()
@@ -148,3 +151,27 @@ def test_no_session_tolerates_a_debug_enclave(tmp_path):
         out = _render_session(tmp_path, network)
         tolerate = _directive(out, "tolerate")
         assert "debug-mode" not in tolerate, f"{network}: {tolerate}"
+
+
+ESR_ADDRESS = "0x0Ea1728EAE108FD3B9340ae91451348E2Cc6b4E4"
+
+
+def test_an_esr_session_carries_the_registry_address(tmp_path):
+    """A CAS-provisioned securelock takes its environment from the session,
+    not from the image's ENV."""
+    out = _render_session(tmp_path, "BLOXBERG_TESTNET",
+                          esr={"enabled": True, "contract_address": ESR_ADDRESS})
+    assert _directive(out, "ESR_CONTRACT_ADDRESS") == f'ESR_CONTRACT_ADDRESS: "{ESR_ADDRESS}"'
+    assert "__ESR_ENVIRONMENT__" not in out
+
+
+def test_a_session_without_esr_sets_no_address(tmp_path):
+    cases = {
+        "absent": None,
+        "disabled": {"enabled": False, "contract_address": ESR_ADDRESS},
+        "malformed": {"enabled": True, "contract_address": "0x1234"},
+    }
+    for name, esr in cases.items():
+        out = _render_session(tmp_path, "BLOXBERG_TESTNET", esr=esr, subdir=name)
+        assert "ESR_CONTRACT_ADDRESS" not in out, name
+        assert "__ESR_ENVIRONMENT__" not in out, name

@@ -197,6 +197,15 @@ def render_session_file(template_file, output_file):
         config.read("BLOCKCHAIN_NETWORK")).network_type
     ignore_advisories = '["INTEL-SA-00615"]' if network_type == "mainnet" else '["*"]'
 
+    # A CAS-provisioned enclave takes its environment from the session, not
+    # from the image's ENV, so the ESR registry address goes in here as well.
+    esr = config.read_esr()
+    esr_address = str(esr.get("contract_address") or "").strip()
+    if esr.get("enabled") and re.fullmatch(r"0x[0-9a-fA-F]{40}", esr_address):
+        esr_environment = f'ESR_CONTRACT_ADDRESS: "{esr_address}"'
+    else:
+        esr_environment = "# ESR not enabled"
+
     replacements = {
         "__PREDECESSOR__": (
             f""
@@ -206,6 +215,7 @@ def render_session_file(template_file, output_file):
         "__MRENCLAVE__": MRENCLAVE_SECURELOCK,
         "__ENCLAVE_NAME__": SECURELOCK_SESSION,
         "__IGNORE_ADVISORIES__": ignore_advisories,
+        "__ESR_ENVIRONMENT__": esr_environment,
     }
 
     if not os.path.exists(template_file):

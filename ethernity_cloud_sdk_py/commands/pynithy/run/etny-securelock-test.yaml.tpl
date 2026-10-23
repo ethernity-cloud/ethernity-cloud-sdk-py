@@ -22,6 +22,9 @@ services:
         # with "$HOME is not defined", which kills the enclave before it can
         # emit its public key. Provide a writable HOME so startup succeeds.
         HOME: /tmp
+        # A CAS-provisioned enclave takes its environment from this session,
+        # not from the image's ENV; publish.py fills in the ESR registry address.
+        __ESR_ENVIRONMENT__
 
 images:
    - name: application_image
