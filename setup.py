@@ -25,9 +25,10 @@ setup(
         "requests_toolbelt",
         "cryptography",
         "typing-extensions",
-        # 0.5.15: run(input_data=...) and the ERROR status of a non-zero task code,
-        # which ecld-run's --input and exit code rely on.
-        "ethernity-cloud-runner-py>=0.5.15",
+        # 0.5.16: run(input_data=...) and the ERROR status of a non-zero task code,
+        # which ecld-run's --input and exit code rely on, and artefacts of any
+        # size through the payload intake.
+        "ethernity-cloud-runner-py>=0.5.16",
         "pyyaml",
         # Add other dependencies here
     ],
