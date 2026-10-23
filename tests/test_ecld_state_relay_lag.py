@@ -88,15 +88,21 @@ def test_the_object_named_by_the_committed_cid_is_read_before_the_key_slot(esr):
     assert new_task().get("counter") == {"n": 1}
 
 
-def test_a_state_object_above_one_block_is_not_committed(esr):
-    """A state object is one raw IPFS block; above Kubo's largest the node
-    could not store it under the CID committed to the chain."""
+def test_a_state_object_above_one_block_commits_under_its_unixfs_root_and_reads_back(esr):
+    """A state object is stored as IPFS blocks of 256 KiB; above one block its
+    CID is the root of the UnixFS tree over them, computed in the enclave as
+    the node's Kubo computes it, so the node stores the object under the
+    committed CID."""
     ecld_state, wired, relay, new_task = esr
-    with pytest.raises(ecld_state.StateSizeError, match="limit is 1048576"):
-        new_task().commit("big", lambda state: {"payload": "x" * ecld_state.STATE_OBJECT_MAX})
+    payload = {"payload": "x" * 300000}
+    new_task().commit("big", lambda state: payload)
     relay()
-    assert wired["swift"].get_file_content_bytes("ecld-local", "state.big.enc")[1] in (None, b"")
-    assert new_task().get("big") == {}
+    cid, version, _ = wired["registry"].state(new_task().wallet_address, ecld_state._key_hash("big"))
+    assert version == 1 and cid.startswith("bafybei")
+    stored = wired["swift"].get_file_content_bytes("ecld-local", "state.big.enc")[1]
+    assert len(stored) > ecld_state.BLOCK_SIZE
+    assert ecld_state.unixfs_cid(stored) == cid
+    assert new_task().get("big") == payload
 
 
 def test_a_blob_that_matches_no_committed_cid_is_refused(esr):

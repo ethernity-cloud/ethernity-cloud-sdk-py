@@ -369,17 +369,6 @@ class StateLimitError(RuntimeError):
     commits. The over-limit commit is NOT applied; earlier commits stand."""
 
 
-# A state object is stored as one raw IPFS block: the CID committed to the
-# chain is computed here from the encrypted bytes, and the node can store the
-# object under it only up to Kubo's largest block.
-STATE_OBJECT_MAX = 1048576
-
-
-class StateSizeError(RuntimeError):
-    """Raised when a commit's encrypted state object is above
-    STATE_OBJECT_MAX bytes. The commit is NOT made."""
-
-
 class StateNonceError(RuntimeError):
     """Raised when a commit's idempotency nonce is out of sequence.
 
@@ -495,15 +484,77 @@ def looks_like_cid(value) -> bool:
     return False
 
 
-def cidv1_raw(content: bytes) -> str:
-    """CIDv1/raw/sha2-256 for `content`, computed without touching IPFS.
+# A state object is stored as the node's Kubo stores it with `add
+# --cid-version=1 --raw-leaves` and its default chunker: in raw sha256 blocks
+# of BLOCK_SIZE bytes (the last one shorter), a single block as it is, several
+# under a balanced UnixFS tree of at most LINKS_PER_NODE blocks per node.
+# unixfs_cid() computes the resulting CID from the bytes, so the enclave
+# commits a CID it derived itself rather than one a node handed it, and the
+# node stores the object under that CID (mvp-pox-node utils.py unixfs_cid).
+BLOCK_SIZE = 262144
+LINKS_PER_NODE = 174
 
-    Matches `ipfs add --cid-version=1 --raw-leaves`, which is what lets the
-    enclave commit a CID it derived itself rather than one a node handed it.
-    """
-    digest = hashlib.sha256(content).digest()
-    raw = bytes([0x01, 0x55, 0x12, 0x20]) + digest
-    return "b" + base64.b32encode(raw).decode("ascii").lower().rstrip("=")
+
+def _cid_b32(cid: bytes) -> str:
+    return "b" + base64.b32encode(cid).decode("ascii").lower().rstrip("=")
+
+
+def _pb_varint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte = n & 0x7F
+        n >>= 7
+        if n:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+def _pb_field(number: int, wire: int, payload: bytes) -> bytes:
+    """A protobuf field: varint (wire 0) or length-delimited (wire 2)."""
+    tag = _pb_varint((number << 3) | wire)
+    return tag + (_pb_varint(len(payload)) + payload if wire == 2 else payload)
+
+
+def _pb_raw_cid(content: bytes) -> bytes:
+    """CIDv1, codec raw (0x55), sha2-256 (0x12, 32 bytes)."""
+    return bytes([0x01, 0x55, 0x12, 0x20]) + hashlib.sha256(content).digest()
+
+
+def _pb_file_node(children):
+    """A dag-pb UnixFS File node over `children`, each (cid, tsize, filesize);
+    returns (cid, tsize, filesize). Links come before Data in dag-pb; a link
+    carries the child's CID, an empty Name and its Tsize, the size of the
+    child's subtree; Data is UnixFS Type=File(2), filesize, blocksizes."""
+    links = b"".join(
+        _pb_field(2, 2, _pb_field(1, 2, cid) + _pb_field(2, 2, b"") + _pb_field(3, 0, _pb_varint(tsize)))
+        for cid, tsize, _ in children)
+    filesize = sum(size for _, _, size in children)
+    data = _pb_field(1, 0, _pb_varint(2)) + _pb_field(3, 0, _pb_varint(filesize))
+    data += b"".join(_pb_field(4, 0, _pb_varint(size)) for _, _, size in children)
+    block = links + _pb_field(1, 2, data)
+    cid = bytes([0x01, 0x70, 0x12, 0x20]) + hashlib.sha256(block).digest()
+    return cid, len(block) + sum(tsize for _, tsize, _ in children), filesize
+
+
+def unixfs_cid(content: bytes, block_size: int = BLOCK_SIZE) -> str:
+    """The CID the node's Kubo gives `content`: the raw block's CID up to one
+    block, else the root of the balanced UnixFS tree over the blocks,
+    LINKS_PER_NODE to a node, every node full but the last."""
+    if len(content) <= block_size:
+        return _cid_b32(_pb_raw_cid(content))
+    nodes = [(_pb_raw_cid(content[i:i + block_size]), len(content[i:i + block_size]), len(content[i:i + block_size]))
+             for i in range(0, len(content), block_size)]
+    while len(nodes) > 1:
+        nodes = [_pb_file_node(nodes[i:i + LINKS_PER_NODE]) for i in range(0, len(nodes), LINKS_PER_NODE)]
+    return _cid_b32(nodes[0][0])
+
+
+def cidv1_raw(content: bytes) -> str:
+    """CIDv1/raw/sha2-256 for `content`: its CID as one raw block, which is
+    its CID through the node's Kubo up to BLOCK_SIZE bytes."""
+    return _cid_b32(_pb_raw_cid(content))
 
 
 # AES-GCM nonce length, pinned explicitly. PyCryptodome defaults to 16 bytes
@@ -766,12 +817,8 @@ class StateRegistry:
                            nonce=final_nonce)
 
             blob = _encrypt(json.dumps(stored, separators=(",", ":")).encode("utf-8"))
-            if len(blob) > STATE_OBJECT_MAX:
-                raise StateSizeError(
-                    f"the state object for '{key}' is {len(blob)} bytes encrypted; "
-                    f"the limit is {STATE_OBJECT_MAX}. Split the state across keys.")
             # Compute the CID from OUR bytes -- never accept one from the node.
-            cid = cidv1_raw(blob)
+            cid = unixfs_cid(blob)
 
             # Hand the blob and the CID to the node for pinning. It verifies the
             # CID matches; it does not get to choose it. Fire-and-forget: the
@@ -839,7 +886,7 @@ class StateRegistry:
         for name in (f"state.{cid}.enc", f"state.{key}.enc"):
             ok, data = _swift.get_file_content_bytes(_bucket, name)
             if ok and data:
-                if cidv1_raw(data) == cid:
+                if unixfs_cid(data) == cid:
                     return data
                 mismatched.append(name)
         if mismatched:
