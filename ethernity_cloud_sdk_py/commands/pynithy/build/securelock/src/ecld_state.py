@@ -75,6 +75,11 @@ _task_ledger = {}
 # get_nonce() right after a commit in the SAME task returns the fresh value
 # even though the node's relay (and thus the chain) has not landed yet.
 _task_nonces = {}
+# Per-task memo of this task's last commit per key, (acl, data, version, cid)
+# as the chain shows them once the node's relay lands. A read prefers it while
+# the chain still shows an older version, so get() after commit() returns the
+# committed state and a second commit to the key builds on the first.
+_task_writes = {}
 # Per-task memo of the NEXT relay nonce per key hash (hex), so multiple
 # commits to the same key within one task sign sequential relay nonces even
 # while the node is still relaying the earlier ones.
@@ -312,7 +317,7 @@ def configure(identity_priv, swift_stream_service, bucket, contract_address,
     value from the client payload or the node's .env.
     """
     global _identity_priv, _swift, _bucket, _contract_address, _web3, _esr_evidence
-    global _task_ledger, _task_nonces, _task_relay_nonces, _task_caller
+    global _task_ledger, _task_nonces, _task_writes, _task_relay_nonces, _task_caller
     _identity_priv = identity_priv
     _swift = swift_stream_service
     _bucket = bucket
@@ -320,6 +325,7 @@ def configure(identity_priv, swift_stream_service, bucket, contract_address,
     _web3 = web3
     _task_ledger = {}
     _task_nonces = {}
+    _task_writes = {}
     _task_relay_nonces = {}
     _esr_evidence = []
     _task_caller = _norm_addr(caller)
@@ -601,6 +607,9 @@ class StateRegistry:
         contract = self._contract()
         cid, version, _updated = contract.functions.getState(
             self.wallet_address, _key_hash(key)).call()
+        own = _task_writes.get(key)
+        if own is not None and own[2] > int(version or 0):
+            return own
         if not version or not cid:
             return None, default, 0, None
         if not looks_like_cid(cid):
@@ -766,6 +775,7 @@ class StateRegistry:
                 # The ledger records the DATA -- the ACL never leaves in results.
                 _ledger_record(key, current_version + 1, cid, new_data)
                 _task_nonces[key] = final_nonce
+                _task_writes[key] = (new_acl, new_data, current_version + 1, cid)
                 return new_acl, new_data
             except Exception as e:
                 # A version race means someone else committed first: re-read and
@@ -805,16 +815,22 @@ class StateRegistry:
         delivery path -- but not a trusted one: the content is checked against
         the CID the chain records, so a substituted or corrupted blob is
         rejected rather than decrypted and returned as state.
+
+        The node stages it as state.<cid>.enc. state.<key>.enc is the last
+        blob a commit of this key published, which matches only while no
+        later commit was published; one that does not match is passed over.
         """
-        candidates = (f"state.{key}.enc", f"state.{cid}.enc")
-        for name in candidates:
+        mismatched = []
+        for name in (f"state.{cid}.enc", f"state.{key}.enc"):
             ok, data = _swift.get_file_content_bytes(_bucket, name)
             if ok and data:
-                if cidv1_raw(data) != cid:
-                    raise RuntimeError(
-                        f"State object {name} does not match the committed CID "
-                        f"{cid} -- refusing to use it")
-                return data
+                if cidv1_raw(data) == cid:
+                    return data
+                mismatched.append(name)
+        if mismatched:
+            raise RuntimeError(
+                f"State object {' and '.join(mismatched)} does not match the "
+                f"committed CID {cid} -- refusing to use it")
         raise RuntimeError(f"Could not read state object for '{key}' ({cid})")
 
     def _send_commit(self, key_hash: bytes, cid: str, expected_version: int,
