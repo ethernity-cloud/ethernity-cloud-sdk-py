@@ -96,8 +96,12 @@ def execute_task(code) -> None:
     state = runner.get_state()
 
     if state['status'] == "ERROR":
-        for log in state['log']:
-            print(log)
+        print(f"Error: {state['last_error']}")
+        # A task the enclave reported with a non-zero task code keeps its
+        # result: the value is the enclave's error report.
+        result = runner.get_result()
+        if result:
+            print(result['value'])
         print(f"Processed Events: {state['processed_events']}, Remaining Events: {state['remaining_events']}")
         
     elif state['status'] == "SUCCESS":    

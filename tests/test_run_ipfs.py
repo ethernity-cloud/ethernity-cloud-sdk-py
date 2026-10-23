@@ -34,7 +34,7 @@ class _Runner:
     def connect(self):
         pass
 
-    def run(self, *args):
+    def run(self, *args, **kwargs):
         pass
 
     def is_running(self):
@@ -44,7 +44,7 @@ class _Runner:
         return {"status": "SUCCESS", "progress": "done"}
 
     def get_result(self):
-        return {"value": "ok", "task_code_int": 0}
+        return {"value": "ok", "result_task_code": "SUCCESS", "result_task_code_int": 0}
 
 
 @pytest.fixture

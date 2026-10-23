@@ -176,7 +176,12 @@ The sdk has been tested on the following operating systems:
   `ECLD_PRIVATE_KEY` (plaintext) or the encrypted `ENC_PRIVATE_KEY` unlocked with
   `ECLD_KEY_PASSWORD` (or an interactive prompt). Resources are tunable with
   `--task-price`/`--cpu`/`--memory`/`--storage`/`--bandwidth`/`--duration`/`--validators`.
-  Exit code 0 on a `SUCCESS` task result, 1 otherwise. (`python src/ethernity_task.py`
+  `--input <file>` / `--input-text <string>` send the task's input dataset, read
+  as `___etny_data_set___` (`ecld.input`); it travels encrypted, and the
+  trustedzone checks it against the sha256 the request carries.
+  Exit code 0 on a `SUCCESS` task result, 1 otherwise; a task that raised in the
+  enclave prints its task code (e.g. `4 (BASE_EXCEPTION)`) and the traceback as
+  its result. (`python src/ethernity_task.py`
   remains available as a scriptable template if you prefer driving the runner yourself.)
   `--unsafe` runs the network's `-unsafe` variant (see below).
 

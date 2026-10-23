@@ -359,10 +359,8 @@ def main(argv=None):
         print(f"resources : {resources}")
         print("submitting order... (this places an on-chain request and costs gas)")
 
-        run_args = [resources, securelock, SECURELOCK_PROTOCOL_VERSION, code, args.node]
-        if trustedzone:
-            run_args.append(trustedzone)
-        runner.run(*run_args)
+        runner.run(resources, securelock, SECURELOCK_PROTOCOL_VERSION, code, args.node,
+                   trustedzone_enclave=trustedzone, input_data=input_data)
 
         state = _print_progress(runner, args.timeout)
     except KeyboardInterrupt:
@@ -374,29 +372,29 @@ def main(argv=None):
         return 1
 
     status = state.get("status")
-    if status == "SUCCESS":
-        result = runner.get_result() or {}
+    result = runner.get_result()
+    if isinstance(result, dict):
         # The order this result came from, so the run can be followed on
-        # chain: the CAS validators' verdict is keyed by order id.
-        if isinstance(result, dict):
-            result["order_id"] = runner.order_id
-            result["do_request_id"] = runner.do_request_id
+        # chain: the CAS validators' verdict is keyed by order id. A run that
+        # ends in ERROR with a result is a task the enclave reported with a
+        # non-zero task code; the result's value is its error report.
+        result["order_id"] = runner.order_id
+        result["do_request_id"] = runner.do_request_id
         if args.json:
             print(json.dumps(result, indent=2, default=str))
         else:
-            value = result.get("value") if isinstance(result, dict) else result
-            code_str = result.get("task_code_string") if isinstance(result, dict) else None
-            if code_str and code_str != "SUCCESS":
-                print(f"task code : {result.get('task_code_int')} ({code_str})")
+            task_code = result.get("result_task_code_int")
+            if task_code not in (None, 0):
+                print(f"task code : {task_code} ({result.get('result_task_code')})")
             print(f"order     : {runner.order_id} (DO request {runner.do_request_id})")
             print("result    :")
-            print(value)
-        # A non-SUCCESS enclave task code is a failed run even though the order
-        # itself succeeded (the enclave reported an error as the result).
-        tc = result.get("task_code_int") if isinstance(result, dict) else None
-        return 0 if tc in (None, 0) else 1
+            print(result.get("value"))
+        if status == "SUCCESS":
+            return 0
+        print(f"error     : {state.get('last_error') or 'unknown error'}", file=sys.stderr)
+        return 1
 
-    # ERROR / timeout
+    # ERROR / timeout without a result
     err = state.get("last_error") or "unknown error"
     print(f"status    : {status}", file=sys.stderr)
     print(f"error     : {err}", file=sys.stderr)
