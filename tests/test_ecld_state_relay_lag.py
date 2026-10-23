@@ -88,6 +88,17 @@ def test_the_object_named_by_the_committed_cid_is_read_before_the_key_slot(esr):
     assert new_task().get("counter") == {"n": 1}
 
 
+def test_a_state_object_above_one_block_is_not_committed(esr):
+    """A state object is one raw IPFS block; above Kubo's largest the node
+    could not store it under the CID committed to the chain."""
+    ecld_state, wired, relay, new_task = esr
+    with pytest.raises(ecld_state.StateSizeError, match="limit is 1048576"):
+        new_task().commit("big", lambda state: {"payload": "x" * ecld_state.STATE_OBJECT_MAX})
+    relay()
+    assert wired["swift"].get_file_content_bytes("ecld-local", "state.big.enc")[1] in (None, b"")
+    assert new_task().get("big") == {}
+
+
 def test_a_blob_that_matches_no_committed_cid_is_refused(esr):
     _, wired, relay, new_task = esr
     new_task().commit("counter", increment)

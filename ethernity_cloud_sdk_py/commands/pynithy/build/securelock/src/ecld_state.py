@@ -369,6 +369,17 @@ class StateLimitError(RuntimeError):
     commits. The over-limit commit is NOT applied; earlier commits stand."""
 
 
+# A state object is stored as one raw IPFS block: the CID committed to the
+# chain is computed here from the encrypted bytes, and the node can store the
+# object under it only up to Kubo's largest block.
+STATE_OBJECT_MAX = 1048576
+
+
+class StateSizeError(RuntimeError):
+    """Raised when a commit's encrypted state object is above
+    STATE_OBJECT_MAX bytes. The commit is NOT made."""
+
+
 class StateNonceError(RuntimeError):
     """Raised when a commit's idempotency nonce is out of sequence.
 
@@ -755,6 +766,10 @@ class StateRegistry:
                            nonce=final_nonce)
 
             blob = _encrypt(json.dumps(stored, separators=(",", ":")).encode("utf-8"))
+            if len(blob) > STATE_OBJECT_MAX:
+                raise StateSizeError(
+                    f"the state object for '{key}' is {len(blob)} bytes encrypted; "
+                    f"the limit is {STATE_OBJECT_MAX}. Split the state across keys.")
             # Compute the CID from OUR bytes -- never accept one from the node.
             cid = cidv1_raw(blob)
 
