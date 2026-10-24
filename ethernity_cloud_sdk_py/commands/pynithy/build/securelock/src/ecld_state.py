@@ -46,6 +46,7 @@ import hashlib
 import io
 import json
 import os
+import time
 
 DOMAIN_SEP_STATE = b"ethernity-cloud/esr-encryption/v1"
 
@@ -362,6 +363,13 @@ class StatePermissionError(RuntimeError):
 # result transaction. 256 so the on-chain count fits ONE BYTE (bias-1:
 # 0x00 = 1 commit ... 0xFF = 256; an all-zero root means no commits at all).
 MAX_COMMITS_PER_TASK = 256
+
+# How long a read waits for the node to stage a state object the chain names
+# before the task fails, and how often it looks for it: the node writes the
+# objects pinned on it within seconds of the order's start and the ones it
+# has to fetch from the network as they arrive.
+STATE_STAGE_WAIT_SECONDS = 120
+STATE_STAGE_POLL_SECONDS = 2
 
 
 class StateLimitError(RuntimeError):
@@ -878,22 +886,33 @@ class StateRegistry:
         the CID the chain records, so a substituted or corrupted blob is
         rejected rather than decrypted and returned as state.
 
-        The node stages it as state.<cid>.enc. state.<key>.enc is the last
-        blob a commit of this key published, which matches only while no
-        later commit was published; one that does not match is passed over.
+        The node stages it as state.<cid>.enc, within seconds of the order's
+        start when the object is pinned on it and as it arrives when it has
+        to fetch it from the network, so the object is looked for every
+        STATE_STAGE_POLL_SECONDS for up to STATE_STAGE_WAIT_SECONDS.
+        state.<key>.enc is the last blob a commit of this key published,
+        which matches only while no later commit was published; one that
+        does not match is passed over.
         """
-        mismatched = []
-        for name in (f"state.{cid}.enc", f"state.{key}.enc"):
-            ok, data = _swift.get_file_content_bytes(_bucket, name)
-            if ok and data:
-                if unixfs_cid(data) == cid:
-                    return data
-                mismatched.append(name)
+        deadline = time.monotonic() + STATE_STAGE_WAIT_SECONDS
+        while True:
+            mismatched = []
+            for name in (f"state.{cid}.enc", f"state.{key}.enc"):
+                ok, data = _swift.get_file_content_bytes(_bucket, name)
+                if ok and data:
+                    if unixfs_cid(data) == cid:
+                        return data
+                    mismatched.append(name)
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(STATE_STAGE_POLL_SECONDS)
         if mismatched:
             raise RuntimeError(
                 f"State object {' and '.join(mismatched)} does not match the "
                 f"committed CID {cid} -- refusing to use it")
-        raise RuntimeError(f"Could not read state object for '{key}' ({cid})")
+        raise RuntimeError(
+            f"Could not read state object for '{key}' ({cid}): not staged "
+            f"within {STATE_STAGE_WAIT_SECONDS} s")
 
     def _send_commit(self, key_hash: bytes, cid: str, expected_version: int,
                      owner_addr: str = None, nonce: int = 0):
