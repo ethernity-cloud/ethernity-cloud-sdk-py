@@ -120,8 +120,10 @@ class BlockchainNetworks(Enum):
         "Polygon Amoy", # Network display name
         "polygon", # Network short name
         "testnet", # Network type
-        "0x1579b37C5a69ae02dDd23263A2b1318DE66a27C3", # protocol contract address
-        "0xeFA33c3976f31961285Ae4f5D10188616C912728", # Image Registry Contract Address
+        # The separate-ERC20 EthernityImplementationV2 1.1 of 2026-10-28, on
+        # the storage and token of the previous implementation 0x1579b37C....
+        "0xB8f46D2B943fFbe2A061Ae8be087ef5055AD96A3", # protocol contract address
+        "0x0C0f52ebd72cd2d2cBe94F385c9e23cec528b706", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-28)
         "https://polygon-amoy-bor-rpc.publicnode.com",
         80002,  # Chain ID for Polygon Amoy Testnet
         True, # EIP 1559 SUPPORT
@@ -136,7 +138,33 @@ class BlockchainNetworks(Enum):
                 docker_password="",
                 base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
             ),
-        }  
+        }
+    )
+    POLYGON_AMOY_UNSAFE = (
+        "Polygon Amoy unsafe (no CAS)", # Network display name
+        "polygon", # Network short name
+        # The same chain and contracts as POLYGON_AMOY, for hardware SGX
+        # platforms the CAS cannot attest; no CAS, debug-signed enclaves that
+        # self-sign from MR_ENCLAVE, the securelock registered as
+        # <project>-unsafe (UNSAFE_NETWORKS), as BLOXBERG_TESTNET_UNSAFE.
+        "testnet", # Network type
+        "0xB8f46D2B943fFbe2A061Ae8be087ef5055AD96A3", # protocol contract address
+        "0x0C0f52ebd72cd2d2cBe94F385c9e23cec528b706", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-28)
+        "https://polygon-amoy-bor-rpc.publicnode.com",
+        80002,  # Chain ID for Polygon Amoy Testnet
+        True, # EIP 1559 SUPPORT
+        100,  # Gas Price in Gwei
+        64,  # maxFeePerGas in Gwei
+        32,  # maxPriorityFeePerGas in Gwei
+        {  # template_images
+            dAppTypes.PYNITHY.value: TemplateConfig(
+                trusted_zone_image="ecld-pynithy-amoy-unsafe",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
+                docker_login="",
+                docker_password="",
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
+            ),
+        }
     )
     IOTEX_TESTNET = (
         "IoTeX Testnet", # Network display name
@@ -464,10 +492,13 @@ ESR_CONTRACT_ADDRESSES = {
     # deploy/08-deploy-esr.js, the same source as contracts/esr).
     "ETHEREUM_SEPOLIA": "0x9927809B61122B2af3f3b3A3303875e0687b8eE3",
     "ETHEREUM_SEPOLIA_UNSAFE": "0x9927809B61122B2af3f3b3A3303875e0687b8eE3",
+    # Deployed 2026-10-28 with Amoy's PoX implementation 1.1 (pox-smart-contract
+    # deploy/08-deploy-esr.js).
+    "POLYGON_AMOY": "0x1DC58496ed1cA66FD1E0b51fA28A9E7451970843",
+    "POLYGON_AMOY_UNSAFE": "0x1DC58496ed1cA66FD1E0b51fA28A9E7451970843",
     # Not deployed yet on these chains. ecld-build must refuse to build an
     # ESR-enabled enclave here rather than sealing in an empty address.
     "POLYGON_MAINNET": "",
-    "POLYGON_AMOY": "",
     "IOTEX_TESTNET": "",
 }
 
@@ -481,6 +512,8 @@ VALIDATOR_REGISTRY_ADDRESSES = {
     "BLOXBERG_TESTNET": "0x8CC8B1dc22f0E06193161CeC79d75987b0640e02",
     "LITVM_LITEFORGE": "0xbE3759f327e8643fC5A1717fb2072A0dAcBAD29E",
     "ETHEREUM_SEPOLIA": "0x8ad24b3F406A41a0F8D3440021792EB203957F43",
+    # Amoy's registry of 2026-10-28 (ethernity-cas CAS-SETUP.md).
+    "POLYGON_AMOY": "0x70bfdf41D4061592DF509b9b46F91a8457F88483",
 }
 
 # ethernity-cas SessionRegistry deployments, keyed like the maps above. A
@@ -508,6 +541,7 @@ UNSAFE_NETWORKS = {
     "BLOXBERG_TESTNET_UNSAFE": "BLOXBERG_TESTNET",
     "LITVM_LITEFORGE_UNSAFE": "LITVM_LITEFORGE",
     "ETHEREUM_SEPOLIA_UNSAFE": "ETHEREUM_SEPOLIA",
+    "POLYGON_AMOY_UNSAFE": "POLYGON_AMOY",
 }
 
 # The (network name, network type) each member is in the runner's network
@@ -519,6 +553,7 @@ RUNNER_NETWORKS = {
     "BLOXBERG_TESTNET_UNSAFE": ("BLOXBERG", "TESTNET_UNSAFE"),
     "POLYGON_MAINNET": ("POLYGON", "MAINNET"),
     "POLYGON_AMOY": ("POLYGON", "AMOY"),
+    "POLYGON_AMOY_UNSAFE": ("POLYGON", "AMOY_UNSAFE"),
     "IOTEX_TESTNET": ("IOTEX", "TESTNET"),
     "ETHEREUM_SEPOLIA": ("ETHEREUM", "SEPOLIA"),
     "ETHEREUM_SEPOLIA_UNSAFE": ("ETHEREUM", "SEPOLIA_UNSAFE"),

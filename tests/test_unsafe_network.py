@@ -33,7 +33,8 @@ def test_only_the_unsafe_members_are_unsafe():
     for member in BlockchainNetworks:
         assert member.is_unsafe == member.name.endswith("_UNSAFE"), member.name
     assert {m.name for m in BlockchainNetworks if m.is_unsafe} == {
-        "BLOXBERG_TESTNET_UNSAFE", "LITVM_LITEFORGE_UNSAFE", "ETHEREUM_SEPOLIA_UNSAFE"}
+        "BLOXBERG_TESTNET_UNSAFE", "LITVM_LITEFORGE_UNSAFE", "ETHEREUM_SEPOLIA_UNSAFE",
+        "POLYGON_AMOY_UNSAFE"}
 
 
 def test_an_unsafe_network_names_the_cas_attested_one_beside_it():
@@ -137,8 +138,10 @@ def test_the_unsafe_flag_selects_the_networks_unsafe_variant():
     assert run._network_member("BLOXBERG_TESTNET_UNSAFE", None, unsafe=True) is member
     assert (run._network_member("LITVM_LITEFORGE", None, unsafe=True)
             is BlockchainNetworks.LITVM_LITEFORGE_UNSAFE)
+    assert (run._network_member("POLYGON_AMOY", None, unsafe=True)
+            is BlockchainNetworks.POLYGON_AMOY_UNSAFE)
     with pytest.raises(ValueError):
-        run._network_member("POLYGON_AMOY", None, unsafe=True)
+        run._network_member("IOTEX_TESTNET", None, unsafe=True)
 
 
 def test_the_unsafe_run_takes_the_unsafe_trustedzone():
