@@ -1,10 +1,15 @@
 """public_key_service.main with chain_registered: the hash is not posted
 while the service's registry watcher is expected to queue the image; it is
-posted once the grace period passes with no row. No network: requests.get
-and requests.post are replaced, and the clock and sleep are injected."""
+posted once the grace period passes with no row, and when the service holds
+a failed extraction of the image. No network: requests.get and requests.post
+are replaced, and the clock and sleep are injected."""
+import pytest
+
 from ethernity_cloud_sdk_py.commands.pynithy.run import public_key_service as pks
 
 CERT = "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----"
+FAILED = {"status": "failed", "percent": 100, "publicKey": -1,
+          "reason": "the securelock printed no certificate in 10 runs"}
 
 
 class _Response:
@@ -72,6 +77,25 @@ def test_the_hash_is_posted_when_the_watcher_has_not_queued_it_within_the_grace_
     assert len(posts) == 1
     assert posts[0]["hash"] == "QmHash" and posts[0]["docker_composer_hash"] == "QmCompose"
     assert clock.t - 1000.0 >= pks.CHAIN_ROW_GRACE_SECONDS
+
+
+def test_a_failed_record_of_a_chain_registered_image_is_posted_again(monkeypatch):
+    # The service answers the old record once more right after the submission.
+    posts = _service(monkeypatch, [FAILED, FAILED, {"status": "running", "percent": 40, "publicKey": 0},
+                                   {"status": "done", "percent": 100, "publicKey": CERT}])
+    clock = _Clock()
+    assert _main(clock, chain_registered=True) == CERT
+    assert len(posts) == 1 and posts[0]["hash"] == "QmHash"
+    assert clock.t - 1000.0 == 2 * pks.POLL_SECONDS
+
+
+def test_a_failed_answer_is_the_outcome_once_the_resubmission_grace_has_passed(monkeypatch):
+    posts = _service(monkeypatch, [FAILED])
+    clock = _Clock()
+    with pytest.raises(SystemExit):
+        _main(clock, chain_registered=True)
+    assert len(posts) == 1
+    assert clock.t - 1000.0 >= pks.RESUBMIT_GRACE_SECONDS
 
 
 def test_an_image_not_registered_on_chain_is_posted_at_once(monkeypatch):

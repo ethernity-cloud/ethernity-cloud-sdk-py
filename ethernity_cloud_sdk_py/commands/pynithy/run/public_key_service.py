@@ -9,6 +9,11 @@ BASE_URL = "https://publickey.ethernity.cloud"
 # IPFS peer, which a posted row does not.
 CHAIN_ROW_GRACE_SECONDS = 180
 POLL_SECONDS = 5
+# A failed extraction is recorded against the hash with publicKey -1 and a
+# reason, and a new submission of the hash runs it again. The service answers
+# the old record for a moment after a submission, so a failed answer is taken
+# as the outcome only once this long has passed since this publish submitted.
+RESUBMIT_GRACE_SECONDS = 60
 
 # When stdout is a TTY we redraw a single spinner line with a carriage return;
 # in a non-TTY (log file / CI) carriage returns just overwrite invisibly and
@@ -51,6 +56,11 @@ def submit_ipfs_hash(
         exit(1)
 
 
+def _failed(answer):
+    """The service's record of an extraction that failed."""
+    return answer.get("publicKey") in (-1, "-1")
+
+
 def check_ipfs_hash_status(hash):
     """The service's answer for the hash, or None while the service does not
     know the hash yet (404)."""
@@ -85,15 +95,35 @@ def main(
     FAIL = "\033[91m✘\033[0m  "
 
     frame_index = 0
+    # When this publish posted the hash, for the failed answers that follow a
+    # submission for a moment.
+    submitted_at = None
     print()
     if chain_registered:
         # The image is registered on chain; the service queues it from the
         # ImageRegistered event, with this publish's IPFS peer. The hash is
-        # posted only when that row has not appeared within the grace period.
+        # posted only when that row has not appeared within the grace period,
+        # or when the service holds a failed extraction of it.
         deadline = now() + CHAIN_ROW_GRACE_SECONDS
         while True:
             check_response = check_ipfs_hash_status(ipfs_hash)
             if check_response is not None:
+                if _failed(check_response):
+                    _progress(
+                        f"\tThe service's previous extraction of this image failed"
+                        f" ({check_response.get('reason', 'no reason reported')});"
+                        f" submitting the hash again",
+                        transient=False,
+                    )
+                    submit_ipfs_hash(
+                        ipfs_hash,
+                        enclave_name,
+                        protocol_version,
+                        network,
+                        template_version,
+                        docker_composer_hash,
+                    )
+                    submitted_at = now()
                 break
             if now() >= deadline:
                 _progress(
@@ -109,6 +139,7 @@ def main(
                     template_version,
                     docker_composer_hash,
                 )
+                submitted_at = now()
                 break
             frame_index = (frame_index + 1) % len(SPINNER_FRAMES)
             _progress(
@@ -125,6 +156,7 @@ def main(
             template_version,
             docker_composer_hash,
         )
+        submitted_at = now()
 
     message = "Waiting for public key extraction to complete..."
     _progress(f"\t{SPINNER_FRAMES[frame_index]}  {message}")
@@ -142,7 +174,11 @@ def main(
                     message = f"Waiting for public key extraction to start. Queue position: {check_response.get('queuePosition', 'Unknown')}"
                 _progress(f"\t{SPINNER_FRAMES[frame_index]}  {message}")
                 sleep(POLL_SECONDS)
-            elif check_response["publicKey"] in (-1, "-1"):
+            elif _failed(check_response):
+                if submitted_at is not None and now() - submitted_at < RESUBMIT_GRACE_SECONDS:
+                    # The record of the run before this publish's submission.
+                    sleep(POLL_SECONDS)
+                    continue
                 _progress(f"\t{FAIL}Public key extraction", transient=False)
                 print("\t\tThe certificate extraction failed.")
                 print(f"\t\tReason:      {check_response.get('reason', 'not reported by the service')}")
