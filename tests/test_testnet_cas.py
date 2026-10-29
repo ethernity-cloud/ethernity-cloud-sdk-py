@@ -49,6 +49,18 @@ def test_a_testnet_without_a_session_registry_self_signs():
     assert BlockchainNetworks.get_session_registry_address("IOTEX_TESTNET") == ""
 
 
+def test_the_trustedzone_tag_is_the_networks_yaml_key():
+    """The SDK registry tag the build bundles is the key etny-pynithy's CI
+    pushes under: the member name in lower case, the mainnets' being bloxberg
+    and polygon, Amoy's amoy."""
+    assert BlockchainNetworks.BLOXBERG_MAINNET.trustedzone_tag == "bloxberg"
+    assert BlockchainNetworks.POLYGON_MAINNET.trustedzone_tag == "polygon"
+    assert BlockchainNetworks.BLOXBERG_TESTNET.trustedzone_tag == "bloxberg_testnet"
+    assert BlockchainNetworks.ETHEREUM_SEPOLIA_UNSAFE.trustedzone_tag == "ethereum_sepolia_unsafe"
+    assert BlockchainNetworks.POLYGON_AMOY.trustedzone_tag == "amoy"
+    assert BlockchainNetworks.POLYGON_AMOY_UNSAFE.trustedzone_tag == "amoy_unsafe"
+
+
 def test_mainnets_are_cas_provisioned():
     assert BlockchainNetworks.BLOXBERG_MAINNET.cas_provisioned
     assert BlockchainNetworks.POLYGON_MAINNET.cas_provisioned

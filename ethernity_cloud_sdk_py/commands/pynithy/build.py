@@ -578,12 +578,14 @@ def main():
     print(f"\u276f\u276f Building trustedzone image")
     print()
 
-    run_command(
-        f"docker pull registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/{TRUSTED_ZONE_IMAGE}/trustedzone:{BLOCKCHAIN_NETWORK.lower()}"
+    # The tag etny-pynithy's CI refreshes when it registers the network's
+    # trustedzone (BlockchainNetworks.trustedzone_tag).
+    trustedzone_ref = (
+        "registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/"
+        f"{TRUSTED_ZONE_IMAGE}/trustedzone:{BLOCKCHAIN_CONFIG.trustedzone_tag}"
     )
-    run_command(
-        f"docker tag registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/{TRUSTED_ZONE_IMAGE}/trustedzone:{BLOCKCHAIN_NETWORK.lower()} localhost:5000/etny-trustedzone"
-    )
+    run_command(f"docker pull {trustedzone_ref}")
+    run_command(f"docker tag {trustedzone_ref} localhost:5000/etny-trustedzone")
 
     print()
     print(f"\u276f\u276f Pushing trustedzone image to local registry")

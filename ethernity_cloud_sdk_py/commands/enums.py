@@ -457,6 +457,16 @@ class BlockchainNetworks(Enum):
         return f"{self.network_type}_unsafe" if self.is_unsafe else self.network_type
 
     @property
+    def trustedzone_tag(self):
+        """The tag the network's trustedzone is published under in the SDK
+        registry (registry.ethernity.cloud:443/debuggingdelight/
+        ethernity-cloud-sdk-registry/<trusted_zone_image>/trustedzone:<tag>):
+        the network's key in etny-pynithy's v3/networks.yaml, which its CI
+        pushes (.gitlab/build.sh ETH_TZ_TAG). The key is the member name in
+        lower case, except the mainnets' and Polygon Amoy's (TRUSTEDZONE_TAGS)."""
+        return TRUSTEDZONE_TAGS.get(self.name, self.name.lower())
+
+    @property
     def runner_network(self):
         """(network name, network type) the runner knows this network by
         (RUNNER_NETWORKS): an -unsafe network is the runner's -unsafe type."""
@@ -544,6 +554,17 @@ UNSAFE_NETWORKS = {
     "LITVM_LITEFORGE_UNSAFE": "LITVM_LITEFORGE",
     "ETHEREUM_SEPOLIA_UNSAFE": "ETHEREUM_SEPOLIA",
     "POLYGON_AMOY_UNSAFE": "POLYGON_AMOY",
+}
+
+# The members whose etny-pynithy networks.yaml key is not the member name in
+# lower case (see `trustedzone_tag`): the two mainnets and Polygon Amoy. The
+# SDK registry's polygon_amoy tag holds a trustedzone of 2024 that no network
+# registers.
+TRUSTEDZONE_TAGS = {
+    "BLOXBERG_MAINNET": "bloxberg",
+    "POLYGON_MAINNET": "polygon",
+    "POLYGON_AMOY": "amoy",
+    "POLYGON_AMOY_UNSAFE": "amoy_unsafe",
 }
 
 # The (network name, network type) each member is in the runner's network
