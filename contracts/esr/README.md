@@ -29,11 +29,13 @@ encrypt state, stage for pin     pin the blob              state[enclave][key]
 
 | Function | Who calls it | Purpose |
 |---|---|---|
-| `commit(key, cid, expectedVersion)` | the enclave, paying its own gas | direct write (self-paid path) |
-| `commitFor(enclave, key, cid, expectedVersion, relayNonce, signature)` | any relayer (the node), paying | write a commit the enclave *signed*; recorded under the recovered signer |
-| `commitDigest(enclave, key, cid, expectedVersion, relayNonce)` | off-chain | the exact digest the enclave signs; the SDK and the node derive the signature the same way the contract verifies it |
-| `relayNonce(enclave)` | off-chain | per-enclave nonce; each `commitFor` consumes the next one (replay-safe) |
+| `commit(key, cid, expectedVersion, nonce)` | the enclave, paying its own gas | direct write (self-paid path); `nonce` 0 lets the registry assign the next idempotency nonce, a non-zero value must be exactly `getNonce(enclave, key) + 1` |
+| `commitFor(enclave, key, cid, expectedVersion, relayNonce, nonce, signature)` | any relayer (the node), paying | write a commit the enclave *signed*; recorded under the recovered signer |
+| `commitDigest(enclave, key, cid, expectedVersion, relayNonce, nonce)` | off-chain | the exact digest the enclave signs, domain-separated by chain id and contract address; the SDK, the node, the trustedzone and the validators ask the contract for it rather than recomputing it |
+| `relayNonce(enclave, key)` | off-chain | the relay nonce of that (enclave, key); each `commitFor` to the key consumes the next one (replay-safe), and different keys relay independently |
+| `getNonce(enclave, key)` | off-chain | the last idempotency nonce accepted for (enclave, key), 0 when none; the next commit may pin `getNonce() + 1` |
 | `getState(enclave, key)` / `getVersion(...)` / `exists(...)` | clients | read the pointer, version, timestamp |
+| `entryCount()` / `entryAt(i)` / `getEntriesFrom(i, n)` / `commitSeq()` | replicators | enumerate every (enclave, key) entry and resume from the global commit sequence |
 
 The relay path is the default the SDK uses. `commit()` remains for a self-paid
 fallback; both attribute the write to the enclave.
@@ -76,8 +78,9 @@ signature**, never `msg.sender`, so a relayer can only publish exactly what the
 enclave signed — it cannot write under another enclave's address or change a
 signed commit. `commit()` writes under `msg.sender` directly. Either way one
 enclave physically cannot overwrite another's slot, and `expectedVersion` gives
-optimistic concurrency and replay protection. The per-enclave `relayNonce` blocks
-replay of a relayed commit.
+optimistic concurrency and replay protection. The per-(enclave, key) `relayNonce`
+blocks replay of a relayed commit, and the signature-bound idempotency `nonce`
+lets a pinned commit apply at most once.
 
 Everything therefore reduces to one question: **is the enclave identity key secret?**
 
