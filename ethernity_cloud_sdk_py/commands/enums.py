@@ -532,6 +532,8 @@ SESSION_REGISTRY_ADDRESSES = {
     "LITVM_LITEFORGE": "0xfA70B5Df7C773A21164cAc5413704117e4dEaB76",
     # Bound to Sepolia's ECImageRegistryV3 of 2026-10-14, the same way.
     "ETHEREUM_SEPOLIA": "0xDbB249E108d19fC1691483Bf897bA8BA0dA99c06",
+    # Bound to Amoy's ECImageRegistryV3 of 2026-10-28, the same way.
+    "POLYGON_AMOY": "0x059662030fEeB4Ea8Fc7b05951A578d527a827e5",
 }
 
 # The -unsafe variants: networks whose enclaves run without a CAS on platforms

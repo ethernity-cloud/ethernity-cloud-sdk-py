@@ -31,22 +31,22 @@ services:
 """
 
 
-def test_bloxberg_testnet_is_cas_provisioned():
+def test_a_testnet_with_a_session_registry_is_cas_provisioned():
     """The plain "testnet" type; CAS provisioning follows the SessionRegistry
     being configured, not a special type name."""
-    net = BlockchainNetworks.BLOXBERG_TESTNET
-    assert net.network_type == "testnet"
-    assert net.cas_provisioned
-    assert BlockchainNetworks.get_session_registry_address("BLOXBERG_TESTNET").startswith("0x")
-    assert BlockchainNetworks.get_validator_registry_address("BLOXBERG_TESTNET").startswith("0x")
+    for name in ("BLOXBERG_TESTNET", "LITVM_LITEFORGE", "ETHEREUM_SEPOLIA", "POLYGON_AMOY"):
+        net = BlockchainNetworks[name]
+        assert net.network_type == "testnet"
+        assert net.cas_provisioned
+        assert BlockchainNetworks.get_session_registry_address(name).startswith("0x")
+        assert BlockchainNetworks.get_validator_registry_address(name).startswith("0x")
 
 
 def test_a_testnet_without_a_session_registry_self_signs():
-    for name in ("POLYGON_AMOY", "IOTEX_TESTNET"):
-        net = BlockchainNetworks[name]
-        assert net.network_type == "testnet"
-        assert not net.cas_provisioned
-        assert BlockchainNetworks.get_session_registry_address(name) == ""
+    net = BlockchainNetworks.IOTEX_TESTNET
+    assert net.network_type == "testnet"
+    assert not net.cas_provisioned
+    assert BlockchainNetworks.get_session_registry_address("IOTEX_TESTNET") == ""
 
 
 def test_mainnets_are_cas_provisioned():
