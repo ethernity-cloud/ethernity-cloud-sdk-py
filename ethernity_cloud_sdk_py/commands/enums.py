@@ -100,7 +100,7 @@ class BlockchainNetworks(Enum):
         "mainnet", # Network type
         "0x439945BE73fD86fcC172179021991E96Beff3Cc4", # protocol contract address
         "0x689f3806874d3c8A973f419a4eB24e6fBA7E830F", # Image Registry Contract Address
-        "https://polygon-rpc.com",
+        "https://polygon-bor-rpc.publicnode.com",
         137,  # Chain ID for Polygon Mainnet
         True, # EIP 1559 SUPPORT
         200,  # Gas Price in Gwei
