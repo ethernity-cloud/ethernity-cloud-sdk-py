@@ -143,6 +143,10 @@ class MemSwift:
         ok, data = self.get_file_content_bytes(bucket, object_name)
         return (ok, data.decode("utf-8") if ok else None)
 
+    def is_object_in_bucket(self, bucket, object_name):
+        found = "%s/%s" % (bucket, object_name) in self._store
+        return found, "%s %s inside %s." % (object_name, "exists" if found else "doesn't exist", bucket)
+
     def create_bucket(self, *a, **k):
         return True
 
@@ -509,7 +513,8 @@ class MemRegistry:
         self._nonce[k] = self.relay_nonce(enclave, key_hash) + 1
         kh = self._kh(key_hash)
         if not entry:
-            self._refs.append([str(enclave), kh])
+            # Stored in the EIP-55 spelling web3 decodes an address[] output to.
+            self._refs.append([_checksum_address(_address_bytes(enclave)), kh])
         self._seq += 1
         # One transaction per landing; the log index counts the landings
         # already recorded at the head block.

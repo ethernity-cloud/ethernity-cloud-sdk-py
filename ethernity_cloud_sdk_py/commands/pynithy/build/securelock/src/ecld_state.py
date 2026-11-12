@@ -45,6 +45,7 @@ import base64
 import hashlib
 import io
 import json
+import logging
 import os
 import time
 
@@ -85,6 +86,18 @@ _task_writes = {}
 # commits to the same key within one task sign sequential relay nonces even
 # while the node is still relaying the earlier ones.
 _task_relay_nonces = {}
+# A session step's hold: between begin_step() and stage_step_commits() every
+# authorization _send_commit signs is appended here and nothing is written;
+# the step's output stages them as session.commit.<n>.<key16>.<relayNonce>.json
+# and discard_step_commits() drops them. None while no step is open (a plain
+# task, the fence): the authorization is then staged at once.
+_held = None
+# (_task_ledger, _task_nonces, _task_writes, _task_relay_nonces) as they were
+# at begin_step, restored by discard_step_commits().
+_held_memos = None
+# The resumption points of the keys the fence re-committed, by key-hash hex:
+# (acl, data, version, cid) as the chain shows them since the fence landed.
+_fence_points = {}
 
 
 def _ledger_record(key, version, cid, state):
@@ -146,6 +159,11 @@ def task_caller():
     return _task_caller
 
 
+def configured():
+    """True once configure() wired a registry address and a bucket."""
+    return bool(_contract_address) and _swift is not None
+
+
 def _norm_addr(addr):
     return addr.lower() if isinstance(addr, str) else None
 
@@ -183,15 +201,26 @@ def restamp_ledger_caller(trusted_caller):
     sound layer -- the trustedzone (a separate enclave) is the authoritative
     judge, and the caller is ALSO bound into each commit's CID (signed).
     """
-    trusted = _norm_addr(trusted_caller)
-    tampered = False
     if not _esr_evidence:
         return False
+    tampered = _restamp(_esr_evidence, trusted_caller)
     try:
-        signer_addr = StateRegistry()._signer().address
+        _write_ledger()
+    except Exception as e:
+        logging.error(f"esr.authorizations.json not restaged: {e}")
+    return tampered
+
+
+def _restamp(records, trusted_caller):
+    """Overwrites callerUsed of every owned record with the trusted caller
+    and enclave with the signer's address; True when a callerUsed differed."""
+    trusted = _norm_addr(trusted_caller)
+    tampered = False
+    try:
+        signer_addr = StateRegistry()._signer().address.lower()
     except Exception:
         signer_addr = None
-    for entry in _esr_evidence:
+    for entry in records:
         if not entry.get("owned"):
             continue
         prior = _norm_addr(entry.get("callerUsed"))
@@ -200,13 +229,106 @@ def restamp_ledger_caller(trusted_caller):
         entry["callerUsed"] = trusted or ""
         if signer_addr:
             entry["enclave"] = signer_addr
-    try:
-        ledger = json.dumps(_esr_evidence, separators=(",", ":")).encode("utf-8")
-        _swift.put_file_content(
-            _bucket, "esr.authorizations.json", "", io.BytesIO(ledger))
-    except Exception:
-        pass  # best-effort restage; the trustedzone still adjudicates
     return tampered
+
+
+def _put(name, data):
+    """Writes `data` to the order's bucket as `name`; raises on a refused put."""
+    ok, message = _swift.put_file_content(_bucket, name, "", io.BytesIO(data))
+    if not ok:
+        raise RuntimeError(f"could not write {name} to the bucket: {message}")
+
+
+def _records_json(records):
+    return json.dumps(records, separators=(",", ":")).encode("utf-8")
+
+
+def _write_ledger():
+    """esr.authorizations.json: the compact JSON array of every staged
+    authorization in staging order."""
+    _put("esr.authorizations.json", _records_json(_esr_evidence))
+
+
+def _commit_file_name(auth, prefix):
+    return f"{prefix}.{auth['keyHash'][2:18]}.{auth['relayNonce']}.json"
+
+
+def _stage_commit(auth, prefix="esr.commit"):
+    """Appends `auth` to the ledger, rewrites esr.authorizations.json and
+    writes the authorization as <prefix>.<key16>.<relayNonce>.json for the
+    node to relay; applies it to the local registry when one is installed."""
+    _esr_evidence.append(auth)
+    _write_ledger()
+    _put(_commit_file_name(auth, prefix), _records_json(auth))
+    _apply_locally(auth)
+
+
+def _apply_locally(auth):
+    # LOCAL TESTING: with no node to relay commitFor, apply the commit to the
+    # local registry now so get()/get_version() reflect it. No-op in the real
+    # enclave (hook is None) -- there the node applies it on-chain.
+    if _local_commit_apply is not None:
+        _local_commit_apply(auth["enclave"], bytes.fromhex(auth["keyHash"][2:]), auth["cid"],
+                            int(auth["expectedVersion"]), int(auth["nonce"]))
+
+
+def begin_step():
+    """Opens a session step's hold: the authorizations signed from now on
+    are held until stage_step_commits() or dropped by discard_step_commits()."""
+    global _held, _held_memos
+    _held = []
+    _held_memos = (dict(_task_ledger), dict(_task_nonces), dict(_task_writes), dict(_task_relay_nonces))
+
+
+def stage_step_commits(n, trusted_caller):
+    """Stages the held authorizations with session output `n`: restamped with
+    the trusted caller as restamp_ledger_caller restamps the ledger, each
+    written as session.commit.<n>.<key16>.<relayNonce>.json (the record's
+    compact JSON) in signing order, appended to the ledger, which
+    esr.authorizations.json is rewritten from, and applied to the local
+    registry when one is installed; the hold then reopens for the next
+    step. Returns (names, records, tampered); ([], [], False) while no step
+    is open."""
+    if _held is None:
+        return [], [], False
+    records = _held
+    tampered = _restamp(records, trusted_caller)
+    names = []
+    for auth in records:
+        name = _commit_file_name(auth, f"session.commit.{int(n)}")
+        _put(name, _records_json(auth))
+        names.append(name)
+    _esr_evidence.extend(records)
+    begin_step()
+    _write_ledger()
+    for auth in records:
+        _apply_locally(auth)
+    return names, [dict(auth) for auth in records], tampered
+
+
+def flush_held_commits(trusted_caller):
+    """A session closing before any output: the held authorizations are
+    staged as a plain task's, each as esr.commit.<key16>.<relayNonce>.json
+    with the ledger rewritten, and the hold closes. Returns tampered."""
+    global _held, _held_memos
+    if _held is None:
+        return False
+    records, _held, _held_memos = _held, None, None
+    tampered = _restamp(records, trusted_caller)
+    for auth in records:
+        _stage_commit(auth)
+    return tampered
+
+
+def discard_step_commits():
+    """Drops the held authorizations and restores _task_ledger, _task_nonces,
+    _task_writes and _task_relay_nonces to their values at begin_step, so
+    the dropped commits leave no trace; the hold stays open."""
+    global _held, _task_ledger, _task_nonces, _task_writes, _task_relay_nonces
+    if _held is None:
+        return
+    _held = []
+    _task_ledger, _task_nonces, _task_writes, _task_relay_nonces = (dict(m) for m in _held_memos)
 
 
 def _owner_op(key, mutator):
@@ -319,6 +441,7 @@ def configure(identity_priv, swift_stream_service, bucket, contract_address,
     """
     global _identity_priv, _swift, _bucket, _contract_address, _web3, _esr_evidence
     global _task_ledger, _task_nonces, _task_writes, _task_relay_nonces, _task_caller
+    global _held, _held_memos, _fence_points
     _identity_priv = identity_priv
     _swift = swift_stream_service
     _bucket = bucket
@@ -329,6 +452,9 @@ def configure(identity_priv, swift_stream_service, bucket, contract_address,
     _task_writes = {}
     _task_relay_nonces = {}
     _esr_evidence = []
+    _held = None
+    _held_memos = None
+    _fence_points = {}
     _task_caller = _norm_addr(caller)
 
 
@@ -370,6 +496,16 @@ MAX_COMMITS_PER_TASK = 256
 # has to fetch from the network as they arrive.
 STATE_STAGE_WAIT_SECONDS = 120
 STATE_STAGE_POLL_SECONDS = 2
+
+# The fence (RESERVATION-DESIGN.md section 2): getEntriesFrom is paged by
+# ENTRIES_PAGE entries; StateCommitted logs are read in ranges of at most
+# LOG_RANGE_BLOCKS blocks (public RPCs cap a log read's range); a re-commit
+# is looked for every FENCE_POLL_SECONDS and re-signed on a landing that
+# moved the key, for FENCE_LANDING_WAIT_SECONDS per key.
+ENTRIES_PAGE = 500
+LOG_RANGE_BLOCKS = 40000
+FENCE_POLL_SECONDS = 2
+FENCE_LANDING_WAIT_SECONDS = 120
 
 
 class StateLimitError(RuntimeError):
@@ -670,16 +806,22 @@ class StateRegistry:
             _ledger_record(key, 0, None, data)
         return data
 
-    def _read_container(self, key: str, default=None):
-        """(acl, data, version, cid) for `key`; NO permission check here."""
+    def _read_container(self, key: str, default=None, block_identifier=None):
+        """(acl, data, version, cid) for `key`; NO permission check here.
+        `block_identifier` pins the chain reads to a block; the chain head
+        when None."""
         if default is None:
             default = {}
         contract = self._contract()
+        kh = _key_hash(key)
         cid, version, _updated = contract.functions.getState(
-            self.wallet_address, _key_hash(key)).call()
+            self.wallet_address, kh).call(block_identifier=block_identifier)
         own = _task_writes.get(key)
         if own is not None and own[2] > int(version or 0):
             return own
+        fenced = _fence_points.get(kh.hex())
+        if fenced is not None and fenced[2] >= int(version or 0):
+            return fenced
         if not version or not cid:
             return None, default, 0, None
         if not looks_like_cid(cid):
@@ -700,7 +842,7 @@ class StateRegistry:
             # tampered with or torn apart. Compare against the RAW chain value
             # (not the task memo): the blob we fetched is the chain's cid.
             chain_nonce = int(contract.functions.getNonce(
-                self.wallet_address, _key_hash(key)).call())
+                self.wallet_address, kh).call(block_identifier=block_identifier))
             blob_nonce = int(stored.get("nonce") or 0)
             if blob_nonce != chain_nonce:
                 raise RuntimeError(
@@ -777,9 +919,10 @@ class StateRegistry:
         The nonce check re-runs on every retry against the freshly read state,
         so a racing commit that consumed the same nonce fails this one.
         """
-        if len(_esr_evidence) >= MAX_COMMITS_PER_TASK:
+        made = len(_esr_evidence) + len(_held or [])
+        if made >= MAX_COMMITS_PER_TASK:
             raise StateLimitError(
-                f"this task already made {len(_esr_evidence)} state commits -- "
+                f"this task already made {made} state commits -- "
                 f"the per-run limit is {MAX_COMMITS_PER_TASK}. Batch your "
                 f"writes (one commit can update a whole object) or split the "
                 f"work across tasks.")
@@ -870,12 +1013,29 @@ class StateRegistry:
     def _publish(self, key: str, blob: bytes, cid: str):
         """Drop the blob + our CID in the bucket for the node to pin.
 
-        put_file_content sizes its upload via object_data.getbuffer(), so it
-        needs a BufferedIO object -- raw bytes/str raise AttributeError and
-        every commit() died here before anything reached the node.
+        The node pins every state.<name>.enc whose state.<name>.cid names its
+        bytes' CID; a refused put raises.
         """
-        _swift.put_file_content(_bucket, f"state.{key}.enc", "", io.BytesIO(blob))
-        _swift.put_file_content(_bucket, f"state.{key}.cid", "", io.BytesIO(cid.encode("utf-8")))
+        _put(f"state.{key}.enc", blob)
+        _put(f"state.{key}.cid", cid.encode("utf-8"))
+
+    def _fetch_cid(self, cid: str) -> bytes:
+        """The state object `cid`, from state.<cid>.enc as the node stages it,
+        checked against the CID; looked for every STATE_STAGE_POLL_SECONDS
+        for up to STATE_STAGE_WAIT_SECONDS."""
+        deadline = time.monotonic() + STATE_STAGE_WAIT_SECONDS
+        while True:
+            ok, data = _swift.get_file_content_bytes(_bucket, f"state.{cid}.enc")
+            if ok and data:
+                if unixfs_cid(data) == cid:
+                    return data
+                raise RuntimeError(
+                    f"State object state.{cid}.enc does not match its CID -- refusing to use it")
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"Could not read state object {cid}: not staged within "
+                    f"{STATE_STAGE_WAIT_SECONDS} s")
+            time.sleep(STATE_STAGE_POLL_SECONDS)
 
     def _fetch(self, key: str, cid: str) -> bytes:
         """Read a state object back, verifying it against the on-chain CID.
@@ -926,44 +1086,59 @@ class StateRegistry:
         as the attested check on the node. Cost is not the securelock's concern
         and nothing it could write about cost would be trusted anyway.
 
-        Two artifacts are staged, both carrying only signature-bound fields:
+        Outside a session step two artifacts are staged at once, both carrying
+        only signature-bound fields:
           - esr.commit.<key16>.<relayNonce>.json -- the single authorization
             for the node to relay; per (enclave, key) the relay nonces are
             strictly sequential, and different keys relay independently;
           - esr.authorizations.json  -- the append-only ledger of EVERY commit
             this order, which the trustedzone adjudicates over so no commit can
             escape the cumulative gas accounting by never being seen.
+        Inside a step (begin_step) the authorization is held for the step's
+        output, which stages it as session.commit.<n>.<key16>.<relayNonce>.json.
         """
-        contract = self._contract()
-        acct = self._signer()
-        enclave = acct.address
-
         # Relay nonce is PER (enclave, key): same-key commits are strictly
         # serialized network-wide, different keys relay in parallel. Merge the
         # chain value with this task's own staged commits so a second commit
         # to the same key in ONE task signs the next number even before (or
         # while) the node relays the first.
         kh_hex = key_hash.hex()
-        chain_rn = int(contract.functions.relayNonce(enclave, key_hash).call())
+        chain_rn = int(self._contract().functions.relayNonce(
+            self._signer().address, key_hash).call())
         relay_nonce = max(chain_rn, int(_task_relay_nonces.get(kh_hex, 0)))
+        auth = self._sign_commit(key_hash, cid, expected_version, relay_nonce,
+                                 int(nonce or 0), owner_addr)
+        if _held is not None:
+            _held.append(auth)
+        else:
+            _stage_commit(auth)
+        _task_relay_nonces[kh_hex] = relay_nonce + 1
+        return {"relayed": _held is None, "relayNonce": relay_nonce}
+
+    def _sign_commit(self, key_hash: bytes, cid: str, expected_version: int,
+                     relay_nonce: int, nonce: int, owner_addr: str = None):
+        """The signed authorization record of one commitFor: the nine fields
+        of session-commits.json, the addresses lower-case."""
+        contract = self._contract()
+        acct = self._signer()
+        enclave = acct.address
         # The idempotency nonce is SIGNATURE-BOUND (part of the digest): the
         # relaying node can only broadcast, or not, exactly what was signed --
         # it cannot alter the nonce the registry will record. 0 = no guard,
         # preserve the stored value. NOTE: the recorded nonce is PUBLIC on-chain.
         digest = contract.functions.commitDigest(
-            enclave, key_hash, cid, expected_version, relay_nonce,
-            int(nonce or 0)).call()
+            enclave, key_hash, cid, expected_version, relay_nonce, int(nonce)).call()
 
         from eth_account.messages import encode_defunct
         signature = acct.sign_message(encode_defunct(digest)).signature
 
-        auth = {
-            "enclave": enclave,
+        return {
+            "enclave": enclave.lower(),
             "keyHash": "0x" + key_hash.hex(),
             "cid": cid,
-            "expectedVersion": expected_version,
-            "relayNonce": relay_nonce,
-            "nonce": int(nonce or 0),
+            "expectedVersion": int(expected_version),
+            "relayNonce": int(relay_nonce),
+            "nonce": int(nonce),
             "signature": "0x" + signature.hex(),
             # IMPERSONATION GUARD (see the trustedzone's re-adjudication):
             # `callerUsed` is the caller this commit ran under; `owned` marks a
@@ -978,26 +1153,118 @@ class StateRegistry:
             "owned": bool(owner_addr),
         }
 
-        # Append to the order-wide ledger (the trustedzone's adjudication input).
-        _esr_evidence.append(auth)
-        ledger = json.dumps(_esr_evidence, separators=(",", ":")).encode("utf-8")
-        _swift.put_file_content(
-            _bucket, "esr.authorizations.json", "", io.BytesIO(ledger))
+    # -- the fence ------------------------------------------------------
 
-        # Stage the individually-relayable authorization for the node. The
-        # filename carries the key prefix so commits to different keys within
-        # one task never collide, and the per-key relay order stays explicit.
-        blob = json.dumps(auth, separators=(",", ":")).encode("utf-8")
-        _swift.put_file_content(
-            _bucket, f"esr.commit.{kh_hex[:16]}.{relay_nonce}.json", "",
-            io.BytesIO(blob))
-        _task_relay_nonces[kh_hex] = relay_nonce + 1
+    def _logs(self, key_hash, from_block, to_block):
+        """The identity's StateCommitted logs of `key_hash` (every key when
+        None) in [from_block, to_block], read in ranges of LOG_RANGE_BLOCKS."""
+        event = self._contract().events.StateCommitted
+        filters = {"enclave": self.wallet_address}
+        if key_hash is not None:
+            filters["key"] = key_hash
+        logs = []
+        lo = from_block
+        while lo <= to_block:
+            hi = min(lo + LOG_RANGE_BLOCKS - 1, to_block)
+            logs.extend(event.get_logs(argument_filters=filters, from_block=lo, to_block=hi))
+            lo = hi + 1
+        return logs
 
-        # LOCAL TESTING: with no node to relay commitFor, apply the commit to the
-        # local registry now so get()/get_version() reflect it. No-op in the real
-        # enclave (hook is None) -- there the node applies it on-chain.
-        if _local_commit_apply is not None:
-            _local_commit_apply(enclave, key_hash, cid, expected_version,
-                                int(nonce or 0))
+    def _keys(self):
+        """The key hashes of the identity's entries, from getEntriesFrom."""
+        contract = self._contract()
+        wallet = self.wallet_address.lower()
+        keys, start = [], 0
+        while True:
+            enclaves, hashes, _cids, _versions, _updated, total = contract.functions.getEntriesFrom(
+                start, ENTRIES_PAGE).call()
+            keys.extend(kh for enclave, kh in zip(enclaves, hashes) if str(enclave).lower() == wallet)
+            start += ENTRIES_PAGE
+            if start >= int(total) or not enclaves:
+                return keys
 
-        return {"relayed": True, "relayNonce": relay_nonce}
+    def _log_at_bound(self, key_hash, bound, head):
+        """The key's last StateCommitted at or before `bound`, or None when
+        its first commit landed after the bound. The version at the bound is
+        the lowest version logged after it minus one (the current version
+        when nothing landed after it); the walk back from the bound stops at
+        that version's log."""
+        after = self._logs(key_hash, bound + 1, head)
+        if after:
+            wanted = min(int(log.args.version) for log in after) - 1
+        else:
+            wanted = int(self._contract().functions.getVersion(self.wallet_address, key_hash).call())
+        if wanted == 0:
+            return None
+        hi = bound
+        while hi >= 0:
+            lo = max(0, hi - LOG_RANGE_BLOCKS + 1)
+            for log in self._logs(key_hash, lo, hi):
+                if int(log.args.version) == wanted:
+                    return log
+            hi = lo - 1
+        return None
+
+    def fence(self, bound: int):
+        """Re-commits, at its state as of block `bound`, every key of the
+        identity the task caller may write as of the bound (its container's
+        ACL names the caller as owner or write member): the data and ACL of
+        the key's last StateCommitted at or before the bound, re-wrapped with
+        nonce getNonce + 1 as a new CID the node pins, signed on the key's
+        current version and relay nonce and staged at once as
+        esr.commit.<key16>.<relayNonce>.json, whether or not a step is open
+        and outside the order ledger (esr.authorizations.json holds the
+        steps' records); re-signed on fresh values whenever a landing moved
+        the key until a StateCommitted with the fence's CID lands. The
+        re-committed keys then read from the fence's state. Returns the
+        fence's ledger: the landing record of each key re-committed."""
+        if _task_caller is None:
+            return []
+        contract = self._contract()
+        head = int(_web3.eth.block_number)
+        ledger = []
+        for kh in self._keys():
+            log = self._log_at_bound(kh, int(bound), head)
+            if log is None:
+                continue
+            stored = json.loads(_decrypt(self._fetch_cid(log.args.cid)).decode("utf-8"))
+            acl, data = _unwrap(stored)
+            if acl is None or (_task_caller != _norm_addr(acl.get("owner"))
+                               and _task_caller not in _acl_members(acl, "write")):
+                continue
+            ledger.append(self._fence_key(contract, kh, acl, data, head))
+        return ledger
+
+    def _fence_key(self, contract, key_hash, acl, data, since_block):
+        kh_hex = key_hash.hex()
+        wallet = self.wallet_address
+        deadline = time.monotonic() + FENCE_LANDING_WAIT_SECONDS
+        record = None
+        while True:
+            if record is None:
+                version = int(contract.functions.getVersion(wallet, key_hash).call())
+                relay_nonce = int(contract.functions.relayNonce(wallet, key_hash).call())
+                nonce = int(contract.functions.getNonce(wallet, key_hash).call()) + 1
+                stored = _wrap(acl, data, committed_by=_task_caller, nonce=nonce)
+                blob = _encrypt(json.dumps(stored, separators=(",", ":")).encode("utf-8"))
+                cid = unixfs_cid(blob)
+                _put(f"state.fence.{kh_hex[:16]}.enc", blob)
+                _put(f"state.fence.{kh_hex[:16]}.cid", cid.encode("utf-8"))
+                record = self._sign_commit(key_hash, cid, version, relay_nonce, nonce,
+                                           _norm_addr(acl.get("owner")))
+                _put(_commit_file_name(record, "esr.commit"), _records_json(record))
+                _task_relay_nonces[kh_hex] = relay_nonce + 1
+                _apply_locally(record)
+            landed = [log for log in self._logs(key_hash, since_block + 1, int(_web3.eth.block_number))
+                      if int(log.args.version) > version]
+            if any(log.args.cid == cid for log in landed):
+                _fence_points[kh_hex] = (acl, data, version + 1, cid)
+                return record
+            if landed:
+                record = None
+            elif time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"fence: the re-commit of key {kh_hex[:16]} did not land within "
+                    f"{FENCE_LANDING_WAIT_SECONDS} s")
+            else:
+                time.sleep(FENCE_POLL_SECONDS)

@@ -83,6 +83,35 @@ local `build.bat` (untracked — `*.bat` is gitignored), the call sits before
 `py -m build`, which keeps a regression out of `dist/` and therefore out of
 `twine upload`. Any CI system can do the same with the docker one-liner above.
 
+## The securelock's session runtime (`test_f_*.py`)
+
+`f_session_support.py` loads the securelock sources afresh and stands in for
+the securelock app (the trustedzone objects it verifies, the objects it
+pushes) over esr_local's MemSwift. `test_f_securelock_probe.py` reproduces
+`heartbeat.json`'s beats and ready plaintext from `securelock_probe.py` and
+runs the heartbeat thread (the ready object before any beat, the busy edges,
+the idle tail, a tick overrun by a put skipped). `test_f_securelock_boot.py`
+reads the template's wiring from `securelock.py.tmpl` (the boot order, the
+transfer exit, the tail after a reported failure, a refused put raising, the
+signed prefix of a verified object). `test_f_session_commits.py` signs with
+`session-commits.json`'s ESR wallet over the real `commitDigest` and checks
+the step's `session.commit.<n>.<key16>.<relayNonce>.json` files, the output
+envelope and `esr.authorizations.json` byte for byte, the fence's file kept
+as `esr.commit.*.json`, and an `ecld-test` run unchanged.
+`test_f_session_transfer.py` stages the `transfer` and `close` controls
+around a blocking handler, the idle tail decoded after the cut.
+`test_f_ecld_state_fence.py` places commits on
+esr_local's chain around `session-fence.json`'s bound and runs the fence,
+with the signal verified under `capability-record.json`'s trustedzone key.
+`test_f_fence_window_expiry.py` runs the fence wait's window: a reserved
+order (`session.config` `reserved` true) ends with a `SYSTEM_ERROR` result
+when no fence arrives within `READY_WINDOW_SECONDS`, an unreserved one
+waits for nothing. `test_f_session_hold_exits.py` checks the boot commits
+staged as `esr.commit.*.json` on every exit with a result before an output
+and `_task_ledger` restored by `discard_step_commits`.
+`test_f_probe_start_refused.py` compiles `start_probe` from the template:
+a refused ready put leaves `self.probe` None.
+
 ## The execution object
 
 `test_execution.py` runs `commands/execution.py` against the

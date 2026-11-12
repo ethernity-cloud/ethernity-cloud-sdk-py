@@ -34,6 +34,7 @@ from swift_stream_service import SwiftStreamService
 # (a lazy import inside a function is invisible to the freeze and would fail
 # only at runtime, inside the enclave, where it cannot be diagnosed).
 import esr_wallet
+import securelock_probe
 # Suppress pkg_resources warning if using web3
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="web3")
@@ -79,6 +80,13 @@ class EtnySecureLock:
         self.trustedzone_public_key_pem = ''
         self.trustedzone_image_hash = ''
         self.trustedzone_composer_hash = ''
+        self.task_binding = None
+        # The ready object and heartbeat (securelock_probe), started once the
+        # trustedzone bound the task; None without a binding.
+        self.probe = None
+        # Set by execute() when the transfer control ended the session: no
+        # result is written.
+        self.transferred = False
     @staticmethod
     def generate_cert_from_mrenclave():
         logging.info("Generating self-signed certificate based on MR_ENCLAVE (no CAS available)")
@@ -173,20 +181,59 @@ class EtnySecureLock:
                 if key in os.environ:
                     continue
                 os.environ[key] = re.sub(r'\n', '', value.strip())
-    def validate_client_payload(self):
-        payload_data = self.__get_file_content_and_decrypt(self.payload)
-        input_data = self.__get_file_content_and_decrypt(self.input)
-        max_retries = 5
+    def load_order_metadata(self, max_retries: int = 5):
+        """The order and its DO request from the PoX contract, in up to
+        max_retries attempts; the last failure is the task's SYSTEM_ERROR."""
         for attempt in range(max_retries):
             try:
                 self.get_do_request_metadata()
-                break
+                return
             except Exception as e:
                 if attempt == max_retries - 1:
                     self.task_code = TaskStatus.SYSTEM_ERROR
                     self.task_result = f'Failed to fetch metadata after {max_retries} attempts: {str(e)}'
-                    self.is_valid_client_data = False
-                    return
+                    raise ValueError(self.task_result)
+
+    def prepare_task(self):
+        """Before the payload wait: the order metadata, the trustedzone's
+        certificate and the task binding, so a result can be reported and
+        the heartbeat's AAD exists before any payload arrives."""
+        self.load_order_metadata()
+        self.__get_trustedzone_public_key()
+        self.wait_for_task_binding()
+        self.__load_task_binding()
+
+    def wait_for_task_binding(self, timeout: int = 3600):
+        """Waits for task.securelock, which the trustedzone stages ahead of
+        payload.securelock, or for the payload without it: a payload present
+        with no binding comes from a trustedzone that writes none."""
+        for _ in range(timeout):
+            if self.swift_stream_service.is_object_in_bucket(self.etny_bucket, 'task.securelock')[0]:
+                return
+            if self.swift_stream_service.is_object_in_bucket(self.etny_bucket, self.payload)[0]:
+                return
+            time.sleep(1)
+
+    def start_probe(self):
+        """The ready object and the heartbeat of a bound task. The probe is
+        kept only once its ready object is written: a refused put raises
+        with self.probe still None, so no idle tail is beaten under a key the
+        trustedzone never received."""
+        if not self.task_binding:
+            return
+        probe = securelock_probe.SecurelockProbe(
+            self, self.task_binding['challenge'], self.task_binding['order_id'])
+        probe.start()
+        self.probe = probe
+
+    def end_probe(self):
+        """The heartbeat's idle tail; the process exits after it."""
+        if self.probe is not None:
+            self.probe.stop()
+
+    def validate_client_payload(self):
+        payload_data = self.__get_file_content_and_decrypt(self.payload)
+        input_data = self.__get_file_content_and_decrypt(self.input)
         # Assume is_valid_client_data is False by default; we'll set to True only if all checks pass.
 
         def validate_checksum(metadata_obj, data, owner, error_code, error_msg):
@@ -617,9 +664,10 @@ class EtnySecureLock:
         # pushed unchanged. Without a binding (older trustedzone) the bare
         # data is signed, which that trustedzone verifies.
         if not self.trustedzone_public_key_pem:
-            # A failure before execute() (the client-data check) reaches here
-            # with neither the trustedzone's certificate, which the result is
-            # encrypted to, nor the task binding it is signed over.
+            # Reached only when prepare_task failed before it read the
+            # trustedzone's certificate, which the result is encrypted to, and
+            # the task binding it is signed over; every later path holds both
+            # from prepare_task.
             self.__get_trustedzone_public_key()
             self.__load_task_binding()
         binding = getattr(self, "task_binding", None)
@@ -670,8 +718,15 @@ class EtnySecureLock:
             from etny_session_exec import run_session
             logging.info('Interactive session mode')
             task_result = run_session(self)
+            if task_result is None:
+                self.transferred = True
+                return
         else:
+            if self.probe is not None:
+                self.probe.busy(securelock_probe.PHASE_TASK)
             task_result = execute_task_v3(self.payload_data, self.input_data)
+            if self.probe is not None:
+                self.probe.idle()
 
         self.task_code = str(task_result[0])
         self.task_result = task_result[1]
@@ -823,8 +878,6 @@ class EtnySecureLock:
                 f"No attested task caller supplied "
                 f"({e.__class__.__name__}); treating task as anonymous")
 
-        self.__load_task_binding()
-
     def __load_task_binding(self):
         # Task binding: the order id and enclave challenge the trustedzone
         # generated for this task, forwarded as task.securelock + .sig. When
@@ -832,7 +885,8 @@ class EtnySecureLock:
         # the code are signed over "<challenge>:<order_id>:" and the envelope
         # carries both, so the trustedzone can refuse a result captured from
         # any other run. Absent with an older trustedzone, which then verifies
-        # the bare result as before.
+        # the bare result as before. Loaded once, by prepare_task: the probe
+        # beats under the binding it was started with.
         self.task_binding = None
         try:
             task = json.loads(self.get_and_verify_trustedzone_object('task.securelock'))
@@ -846,14 +900,15 @@ class EtnySecureLock:
                 f"No task binding supplied ({e.__class__.__name__}); "
                 f"result will not be bound")
 
-    def get_and_verify_trustedzone_object(self, object_name: str) -> str:
-        """Decrypt a trustedzone-pushed object and verify its signature --
-        the same trust checks the payload/input handoff gets. Raises on any
-        failure so the session never consumes unauthenticated data."""
+    def get_and_verify_trustedzone_object(self, object_name: str, signed_prefix: str = '') -> str:
+        """Decrypt a trustedzone-pushed object and verify its signature over
+        signed_prefix + the data -- the same trust checks the payload/input
+        handoff gets. Raises on any failure so the session never consumes
+        unauthenticated data."""
         data = self.__get_file_content_and_decrypt(object_name)
         sig_hex = self.__get_file_content_and_decrypt(object_name + '.sig')
         if not crypto.verify_signature(self.trustedzone_public_key,
-                                       data.encode('utf-8'),
+                                       (signed_prefix + data).encode('utf-8'),
                                        bytes.fromhex(sig_hex)):
             raise ValueError(f"trustedzone signature invalid for {object_name}")
         return data
@@ -876,7 +931,7 @@ class EtnySecureLock:
         data with our private key, encrypts the signature, and uploads both to
         storage in separate files. The prefix binds the signature to a context
         (the task binding, for the result and code) without changing the
-        uploaded data.
+        uploaded data. A refused put raises.
         """
         # Encrypt the data
         encrypted_input = crypto.encrypt_with_pub_key(self.trustedzone_public_key_pem, file_data.encode('utf-8'))
@@ -895,15 +950,17 @@ class EtnySecureLock:
         # Upload encrypted data
         self.swift_stream_service.create_bucket(self.etny_bucket)
         data_io = io.BytesIO(encrypted_input_base64)
-        status, _ = self.swift_stream_service.put_file_content(self.etny_bucket, data_file_name, "", data_io)
-        if status:
-            logging.info(f'File {data_file_name} encrypted and saved to swift stream successfully')
+        status, message = self.swift_stream_service.put_file_content(self.etny_bucket, data_file_name, "", data_io)
+        if not status:
+            raise RuntimeError(f'could not write {data_file_name} to the bucket: {message}')
+        logging.info(f'File {data_file_name} encrypted and saved to swift stream successfully')
 
         # Upload encrypted signature
         sig_io = io.BytesIO(encrypted_sig_base64)
-        status_sig, _ = self.swift_stream_service.put_file_content(self.etny_bucket, sig_file_name, "", sig_io)
-        if status_sig:
-            logging.info(f'Signature file {sig_file_name} encrypted and saved to swift stream successfully')
+        status_sig, message = self.swift_stream_service.put_file_content(self.etny_bucket, sig_file_name, "", sig_io)
+        if not status_sig:
+            raise RuntimeError(f'could not write {sig_file_name} to the bucket: {message}')
+        logging.info(f'Signature file {sig_file_name} encrypted and saved to swift stream successfully')
 
     def __get_trustedzone_public_key(self):
         logging.info('Getting the public key of the trusted zone enclave')
@@ -930,7 +987,8 @@ def _report_failure(app, exc):
     those and builds the signed transaction. Guarded throughout -- this runs
     while already handling a failure, so it must never raise or hang. If the
     enclave died before it had enough state (no app, no keys), there is nothing
-    publishable and we exit quietly.
+    publishable and we exit quietly. The heartbeat's idle tail follows the
+    result, as on every exit path.
     """
     if app is None:
         logging.error("cannot report failure: enclave died before initialization")
@@ -946,6 +1004,10 @@ def _report_failure(app, exc):
         logging.info(f"failure reported (task_code={app.task_code})")
     except Exception as report_exc:
         logging.error(f"could not report the failure result: {report_exc}")
+    try:
+        app.end_probe()
+    except Exception as tail_exc:
+        logging.error(f"could not write the heartbeat's idle tail: {tail_exc}")
 
 
 if __name__ == '__main__':
@@ -1029,6 +1091,12 @@ if __name__ == '__main__':
 
         app = EtnySecureLock(cert_pem, private_key_pem, swiftStreamClient)
 
+        # The order metadata, the trustedzone's certificate and the task
+        # binding come before the payload wait, so the ready object and the
+        # heartbeat are up while the payload is still on its way.
+        app.prepare_task()
+        app.start_probe()
+
         logging.info('Waiting for payload and input')
         app.wait_for_payload_and_input()
 
@@ -1042,7 +1110,16 @@ if __name__ == '__main__':
 
         app.execute()
 
+        if app.transferred:
+            # The transfer control ended the session: nothing more is
+            # written, and the process ends after the heartbeat's idle tail
+            # without waiting on the handler thread the control cut.
+            logging.info('Service transferred; exiting without a result')
+            app.end_probe()
+            os._exit(0)
+
         app.save_result()
+        app.end_probe()
 
         logging.info('Finished the execution')
     except Exception as e:
