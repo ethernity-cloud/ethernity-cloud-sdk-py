@@ -10,7 +10,7 @@ pragma solidity ^0.8.20;
 ///         genuine enclave (CAS-provisioned on mainnet). The contract does NOT
 ///         verify SGX attestation; trust derives from that key's secrecy.
 ///
-///         Two ways to commit, both authored BY the enclave:
+///         Three ways to commit, all authored BY the enclave:
 ///           - commit(...)     : the enclave sends its own tx (msg.sender is the
 ///                               enclave; the enclave pays gas).
 ///           - commitFor(...)  : the enclave SIGNS the commit, and any relayer
@@ -19,6 +19,16 @@ pragma solidity ^0.8.20;
 ///                               the relayer cannot forge, alter, or misattribute
 ///                               a commit -- it can only choose to broadcast, or
 ///                               not, exactly what the enclave signed.
+///           - commitForBatch(...): several commits one enclave SIGNED, submitted
+///                               by any relayer in one transaction. Each entry is
+///                               applied exactly as commitFor applies one, in
+///                               order, with its own StateCommitted; the first
+///                               entry that reverts reverts the whole batch with
+///                               BatchEntryFailed(index, reason), and an entry
+///                               whose frame runs out of gas reverts it with
+///                               BatchEntryOutOfGas(index), so either every
+///                               entry lands or none does. One transaction's
+///                               intrinsic gas covers all of its entries.
 ///
 ///         Reference copy of the contract described in
 ///         "Design Proposal: Enclave State Registry (ESR) — Smart Contract"
@@ -37,9 +47,12 @@ pragma solidity ^0.8.20;
 ///
 ///         Backward compatibility: every pre-existing function keeps its exact
 ///         signature and behaviour. The additions are new view functions, a new
-///         `seq` field appended to StateCommitted, and internal bookkeeping.
-///         Entries committed to an OLDER deployment are readable there but only
-///         become enumerable here once (re)committed to this contract.
+///         `seq` field appended to StateCommitted, internal bookkeeping, and
+///         commitForBatch with its Commit struct and its three errors (EmptyBatch,
+///         BatchEntryFailed, BatchEntryOutOfGas); no function, event or storage
+///         slot declared before them changes. Entries committed to an OLDER
+///         deployment are readable there but only become enumerable here once
+///         (re)committed to this contract.
 contract EnclaveStateRegistry {
     struct StateEntry {
         string  cid;        // IPFS CID of the encrypted state blob
@@ -62,6 +75,17 @@ contract EnclaveStateRegistry {
     struct EntryRef {
         address enclave;
         bytes32 key;
+    }
+
+    /// @dev One entry of commitForBatch: the arguments of commitFor except the
+    ///      enclave, which the batch names once for all of its entries.
+    struct Commit {
+        bytes32 key;
+        string  newCID;
+        uint256 expectedVersion;
+        uint256 relayNonce;
+        uint256 nonce;
+        bytes   signature;
     }
 
     // enclave (author) => application key => entry
@@ -108,6 +132,17 @@ contract EnclaveStateRegistry {
     error BadSignature();
     error RelayNonceMismatch(uint256 expected, uint256 actual);
     error NonceOutOfOrder(uint256 stored, uint256 given);
+    error EmptyBatch();
+    /// @dev commitForBatch: entry `index` refused with `reason`, the revert
+    ///      data commitFor gives for that entry alone (one of RelayNonceMismatch,
+    ///      BadSignature, VersionMismatch, NonceOutOfOrder and EmptyCID, ABI
+    ///      encoded); no entry of the batch is applied.
+    error BatchEntryFailed(uint256 index, bytes reason);
+    /// @dev commitForBatch: the call applying entry `index` failed with no
+    ///      revert data. commitFor refuses with one of the errors above on every
+    ///      path, so its frame ran out of gas: the batch needs more gas than the
+    ///      transaction gave it, and no entry refused. No entry is applied.
+    error BatchEntryOutOfGas(uint256 index);
 
     /// @notice Direct commit: the enclave sends and pays for its own transaction.
     /// @param key             App-defined key (e.g. keccak256(familyId)).
@@ -165,6 +200,43 @@ contract EnclaveStateRegistry {
 
         unchecked { _relayNonce[enclave][key] = expectedNonce + 1; }
         _commit(enclave, key, newCID, expectedVersion, nonce);
+    }
+
+    /// @notice Several relayed commits of one enclave in one transaction, each
+    ///         entry applied in calldata order exactly as commitFor applies one:
+    ///         its relay nonce is checked against the storage the entries before
+    ///         it left (so a key's consecutive relay nonces share a batch when
+    ///         they are in order), its signer recovered and required to be
+    ///         `enclave`, the relay nonce advanced and _commit run, with one
+    ///         StateCommitted per entry. All or nothing: the first entry that
+    ///         refuses reverts the batch with BatchEntryFailed(index, reason),
+    ///         `reason` that entry's own revert data; an entry whose commitFor
+    ///         frame runs out of gas reverts it with BatchEntryOutOfGas(index),
+    ///         since its empty revert data is no refusal of the entry. Either
+    ///         way no entry is applied. A batch pays one transaction's
+    ///         intrinsic gas for all of its entries, which is what a relayer
+    ///         bundling an order's commits while the gas price is above the
+    ///         order's cap saves.
+    /// @dev    Each entry is applied through an external call to commitFor on
+    ///         this contract, which reads nothing from msg.sender; the call's
+    ///         revert data is caught whole and returned with the entry's index,
+    ///         and empty revert data (the frame ran out of gas; the caller keeps
+    ///         a 64th of its gas, enough to revert) as BatchEntryOutOfGas.
+    ///         The contract bounds the length below (EmptyBatch) only; the
+    ///         block gas limit bounds it above.
+    /// @param enclave The enclave every entry is attributed to; each entry's
+    ///                signature must recover to it.
+    /// @param commits The entries, applied in this order.
+    function commitForBatch(address enclave, Commit[] calldata commits) external {
+        if (commits.length == 0) revert EmptyBatch();
+        for (uint256 i = 0; i < commits.length; i++) {
+            Commit calldata c = commits[i];
+            try this.commitFor(enclave, c.key, c.newCID, c.expectedVersion, c.relayNonce, c.nonce, c.signature) {
+            } catch (bytes memory reason) {
+                if (reason.length == 0) revert BatchEntryOutOfGas(i);
+                revert BatchEntryFailed(i, reason);
+            }
+        }
     }
 
     /// @notice The exact digest an enclave must sign for commitFor. Exposed so

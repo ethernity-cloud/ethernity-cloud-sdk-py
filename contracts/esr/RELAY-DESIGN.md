@@ -34,10 +34,35 @@ the signed digest, so the relayer can only broadcast *exactly* what was signed.
 
 Proven live on Bloxberg: tampered CID/key/version and relayer-impersonation all
 revert `BadSignature`; a consumed nonce reverts `RelayNonceMismatch`; a legit
-relay lands under the enclave with the node paying.
+relay lands under the enclave with the node paying. The instances per network
+are in README.md.
 
-  bloxberg testnet  0xF76469A5659670B6ade366dE635e6463aaB8f3D8  (legacy-gas)
-  litvm liteforge   0xEF434486C0dbA37A9EaC8Ffe9A91190788D42054  (EIP-1559)
+### 1b. The contract: `commitForBatch`
+
+`commitForBatch(enclave, commits[])` relays several commits of one enclave in
+one transaction. Any relayer sends it; each entry `{key, newCID,
+expectedVersion, relayNonce, nonce, signature}` is applied in calldata order
+exactly as `commitFor` applies one (the relay nonce checked against what the
+entries before it left, the signer recovered and required to be `enclave`, the
+relay nonce advanced, the state written) and emits its own `StateCommitted`.
+The batch is all or nothing: the first entry that refuses reverts the whole
+transaction with `BatchEntryFailed(index, reason)`, `reason` that entry's own
+revert data (`RelayNonceMismatch`, `BadSignature`, `VersionMismatch`,
+`NonceOutOfOrder` or `EmptyCID`); an entry whose `commitFor` frame runs out of
+gas reverts it with `BatchEntryOutOfGas(index)` instead, since the empty
+revert data of a starved frame is no refusal (the batch needs more gas than
+the transaction gave it); an empty batch reverts `EmptyBatch`. In every case
+no entry is applied. The gas reason: a batch pays one transaction's intrinsic
+21,000 gas for all of its entries and its later entries find the slots the
+earlier ones wrote warm, which is what a node bundling an order's commits
+while the gas price is above the order's cap saves; the external self-call
+that gives the index costs about 2,520 gas per entry (on the local Hardhat
+network a one-entry batch of a key's first commit is 269,999 gas against
+267,477 for the same commit through `commitFor`, and every further first
+commit in the batch about 238,050). Same-key entries go in relay-nonce order,
+which is the order the securelock signs them in. The trustedzone's
+landed-commit check and the validators' proof read one `StateCommitted` per
+entry, as from single transactions.
 
 ### 2. Streaming commits with a per-order gas cap
 
@@ -174,6 +199,15 @@ base fee is rejected). The commit builder detects the chain's fee model
 ## Status
 
 - [x] `commitFor` contract — deployed both chains, security-proven live
+- [x] `commitForBatch` in the contract (pox-smart-contract-litvm
+      `EnclaveStateRegistry.sol`, this directory's copy,
+      `test/EnclaveStateRegistry.test.js`)
+- [ ] `commitForBatch` registry deployed per network with PoX 1.2
+      (`deploy/08-deploy-esr.js`; compiled for paris, as every contract
+      deployed on bloxberg is); the addresses in `commands/enums.py`
+- [ ] node: bundle an order's commits with `commitForBatch` above the cap,
+      drop the key `BatchEntryFailed.index` names and resubmit the rest,
+      resend with more gas on `BatchEntryOutOfGas`
 - [x] securelock: pure sign + stage per-nonce auth + order-wide ledger (no gas math)
 - [x] trustedzone: independent re-price over the whole ledger, terminate on breach
 - [~] node: relay staged auths + pay + running total + refuse over-budget

@@ -31,6 +31,7 @@ encrypt state, stage for pin     pin the blob              state[enclave][key]
 |---|---|---|
 | `commit(key, cid, expectedVersion, nonce)` | the enclave, paying its own gas | direct write (self-paid path); `nonce` 0 lets the registry assign the next idempotency nonce, a non-zero value must be exactly `getNonce(enclave, key) + 1` |
 | `commitFor(enclave, key, cid, expectedVersion, relayNonce, nonce, signature)` | any relayer (the node), paying | write a commit the enclave *signed*; recorded under the recovered signer |
+| `commitForBatch(enclave, commits[])` | any relayer (the node), paying | several commits the enclave *signed* in one transaction, each entry `{key, newCID, expectedVersion, relayNonce, nonce, signature}` applied in order exactly as `commitFor` applies one, with its own `StateCommitted`; all or nothing: the first entry that refuses reverts the batch with `BatchEntryFailed(index, reason)`, `reason` that entry's own error (`RelayNonceMismatch`, `BadSignature`, `VersionMismatch`, `NonceOutOfOrder` or `EmptyCID`); an entry whose `commitFor` frame runs out of gas reverts it with `BatchEntryOutOfGas(index)` instead (the batch needs more gas; no entry refused); an empty batch reverts `EmptyBatch` |
 | `commitDigest(enclave, key, cid, expectedVersion, relayNonce, nonce)` | off-chain | the exact digest the enclave signs, domain-separated by chain id and contract address; the SDK, the node, the trustedzone and the validators ask the contract for it rather than recomputing it |
 | `relayNonce(enclave, key)` | off-chain | the relay nonce of that (enclave, key); each `commitFor` to the key consumes the next one (replay-safe), and different keys relay independently |
 | `getNonce(enclave, key)` | off-chain | the last idempotency nonce accepted for (enclave, key), 0 when none; the next commit may pin `getNonce() + 1` |
@@ -40,19 +41,46 @@ encrypt state, stage for pin     pin the blob              state[enclave][key]
 The relay path is the default the SDK uses. `commit()` remains for a self-paid
 fallback; both attribute the write to the enclave.
 
+`commitForBatch` is the relay path for several commits at once. A batch pays
+one transaction's intrinsic gas (21,000) for all of its entries, and an entry
+finds the registry slots the entries before it wrote already warm, so a node
+whose gas price is above an order's cap can bundle the order's commits (the
+chain-cost allowance of pox-smart-contract-litvm `PRICING-DESIGN.md` §5). A
+batch is one enclave's. Its entries are checked against the storage as the
+entries before them leave it, so a key's consecutive relay nonces land in one
+batch when they are in order; the securelock signs them consecutively, so they
+bundle as signed. Because the batch is all or nothing, a relayer that gets
+`BatchEntryFailed` knows from its `index` which entry refused and can resubmit
+the rest without that key's commits, and one that gets `BatchEntryOutOfGas`
+resends the same batch with more gas, since no entry refused. The node agent
+(mvp-pox-node `etny-node.py`) relays each commit through `commitFor` on its
+own; its bundling through `commitForBatch` is an open item of
+RELAY-DESIGN.md's status list. Readers of `StateCommitted` (the trustedzone's
+landed-commit check, the validators' proof, replicators) see one event per
+entry, as from single transactions.
+
 ## Deployed instances
 
 | Network | Address |
 |---|---|
-| bloxberg mainnet | `0xF76469A5659670B6ade366dE635e6463aaB8f3D8` |
-| bloxberg testnet | `0xF76469A5659670B6ade366dE635e6463aaB8f3D8` |
-| LitVM LiteForge (4441) | `0xEF434486C0dbA37A9EaC8Ffe9A91190788D42054` |
-| polygon / amoy / iotex / sepolia | *not deployed* |
+| bloxberg mainnet | `0x4Bf5cDE3BFD73dd10B707f8B123Ba631D2EBEAD2` |
+| bloxberg testnet | `0x0Ea1728EAE108FD3B9340ae91451348E2Cc6b4E4` |
+| LitVM LiteForge (4441) | `0x709052Fe77Af543d3d9FE2Ac06a15c635c8D4Be5` |
+| Ethereum Sepolia (11155111) | `0x9927809B61122B2af3f3b3A3303875e0687b8eE3` |
+| Polygon Amoy (80002) | `0x1DC58496ed1cA66FD1E0b51fA28A9E7451970843` |
+| polygon / iotex | *not deployed* |
+
+These instances carry `commit`, `commitFor` and the enumeration, not
+`commitForBatch`; the registry is immutable, so the batch is on a new instance
+per network, deployed together with PoX 1.2 (pox-smart-contract-litvm
+`deploy/08-deploy-esr.js`; the contract is compiled for paris, as every
+contract deployed on bloxberg is, since bloxberg's EVM rejects PUSH0), whose
+address then replaces the row above in `commands/enums.py`.
 
 Bloxberg mainnet and testnet are the **same chain** (both chainId 8995, both
 reachable via `core.bloxberg.org` and `bloxberg.ethernity.cloud`) — they are
-separated by different *protocol* contract addresses, not different networks, so
-both point at the one deployment.
+separated by different *protocol* contract addresses, not different networks,
+and each has an ESR of its own.
 
 All function selectors were verified present against the deployed bytecode after
 deploy, and the full relay flow (sign → relay → attribute under the enclave;
@@ -65,6 +93,7 @@ mismatch fails silently against a live contract.
 | Question | Decision | Why |
 |---|---|---|
 | Node-relayed commits (`commitFor`) | **yes, default** | The enclave signs; the node pays. Removes the funding step entirely and makes a published dApp autonomous. The signature binds every field, so the node cannot forge a commit. |
+| Batched relays (`commitForBatch`) | **yes, all or nothing** | One transaction's intrinsic gas for several commits when the gas price is above an order's cap. Each entry is applied exactly as `commitFor` applies one, so the signatures, relay nonces and events are the single path's; a batch that reverts leaves no entry applied and names the failing index (`BatchEntryFailed`, or `BatchEntryOutOfGas` when that entry's frame ran out of gas rather than refusing), so the relayer never has to work out which half landed. |
 | Per-order gas cap on relayed commits | **node + trustedzone enforce** | The node refuses to relay past a per-order budget; the attested trustedzone independently re-prices the whole signed ledger and terminates the order (`ESR_GAS_LIMIT_EXCEEDED`) if breached — so a hostile payload cannot drain an operator, and nobody is trusted on cost. |
 | `string cid` vs `bytes32` multihash | **keep `string`** | ABI-compatible with the live deployment and its commit history. The `bytes32` gas win is real but small and only works cleanly for CIDv0. |
 | Immutable / ownerless | **yes** | An upgrade admin who could rewrite state would invalidate the entire trust model. To change it, deploy a new instance and re-commit (state is per-enclave and re-committable). |
