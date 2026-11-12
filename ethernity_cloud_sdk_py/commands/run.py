@@ -25,12 +25,23 @@ funded key (it pays for the order):
     2. ENC_PRIVATE_KEY (.config/.env) -- encrypted; decrypted with ECLD_KEY_PASSWORD
                                      or an interactive prompt
 
+The execution object (commands/execution.py, tests/spec/execution-spec.json)
+comes from .config.json's EXECUTION block, the EXEC_* variables of the
+environment over it, and the flags over both: --mode, --duration-hours (or
+--duration), --parallelism, --max-cu, --headroom, --expected-inputs,
+--keep-open, --renew, --max-renewals, --expected-commits. It is validated
+before the runner is constructed and passed nested as resources["execution"],
+with the flat resources["duration"] a runner before PoX 1.2 reads.
+--relays-per-hour replaces the default execution.relays_per_hour computes;
+the runner takes neither until it carries the execution object.
+
 Usage, from the project root (where .config.json lives):
 
     ecld-run 'hello("World")'
     ecld-run --file payload.py
     ecld-run --input data.json 'process(___etny_data_set___)'
-    ecld-run --network BLOXBERG_TESTNET --task-price 3 'esr_increment()'
+    ecld-run --network BLOXBERG_TESTNET --task-price 2.5 'esr_increment()'
+    ecld-run --mode session --expected-inputs 5 --duration-hours 2 'serve()'
     ecld-run --json 'hello("World")'      # machine-readable result
 
 Exit code 0 on a SUCCESS task result, 1 otherwise.
@@ -41,7 +52,10 @@ import json
 import os
 import sys
 import time
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
+
+from ethernity_cloud_sdk_py.commands import execution
 
 
 # The runner queries the image registry with the PROTOCOL version ("v3"), not
@@ -164,17 +178,82 @@ def _resolve_private_key(cfg):
         raise RuntimeError(f"could not decrypt ENC_PRIVATE_KEY (wrong password?): {e}")
 
 
-def _build_resources(args):
-    """The resources object run() expects; --flags override the defaults."""
+def _task_price(text):
+    """--task-price in tokens: a non-negative decimal. A whole number is passed
+    as an int, a fractional one as the Decimal it was given (a runner before
+    PoX 1.2 takes whole tokens only)."""
+    try:
+        price = Decimal(text.strip())
+    except (InvalidOperation, ValueError, AttributeError):
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number")
+    if not price.is_finite() or price < 0:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a non-negative number")
+    return int(price) if price == price.to_integral_value() else price
+
+
+# (flag dest, execution key) of every execution flag, in schema order.
+EXECUTION_FLAGS = (
+    ("mode", "mode"),
+    ("duration_hours", "durationHours"),
+    ("parallelism", "parallelism"),
+    ("max_cu", "maxCu"),
+    ("headroom", "headroomPercent"),
+    ("expected_inputs", "session.expectedInputs"),
+    ("keep_open", "session.keepOpen"),
+    ("renew", "session.renew"),
+    ("max_renewals", "session.maxRenewals"),
+    ("expected_commits", "esr.expectedCommits"),
+)
+
+
+def _build_execution(args, cfg, env):
+    """The run's execution object: .config.json's EXECUTION block, the EXEC_*
+    variables of `env` over it, the flags over both; validated. A stored
+    session or esr block that is not an object is left as stored, so the
+    check names it instead of a variable or flag replacing it. Raises
+    execution.ExecutionError with the schema's message."""
+    block = cfg.read_execution() if cfg is not None else execution.complete({})
+    if not isinstance(block, dict):
+        raise execution.ExecutionError("execution must be an object")
+    for key, value in execution.from_env(env).items():
+        if not isinstance(value, dict):
+            block[key] = value
+        elif isinstance(block.get(key), dict):
+            block[key].update(value)
+    for dest, dotted in EXECUTION_FLAGS:
+        given = getattr(args, dest)
+        if given is None:
+            continue
+        parts = dotted.split(".")
+        target = block if len(parts) == 1 else block.get(parts[0])
+        if isinstance(target, dict):
+            target[parts[-1]] = execution.parse_value(dotted, given)
+    return execution.validate(block)
+
+
+def _build_resources(args, run_execution):
+    """The resources object run() expects: the flat keys from the flags, the
+    validated execution nested, and its durationHours as the flat duration a
+    runner before PoX 1.2 reads."""
     return {
         "taskPrice": args.task_price,
         "cpu": args.cpu,
         "memory": args.memory,
         "storage": args.storage,
         "bandwidth": args.bandwidth,
-        "duration": args.duration,
+        "duration": run_execution["durationHours"],
         "validators": args.validators,
+        "execution": run_execution,
     }
+
+
+def _relays_per_hour(args, run_execution, cfg):
+    """--relays-per-hour when given, else the default for this execution and
+    the project's ESR setting."""
+    if args.relays_per_hour is not None:
+        return args.relays_per_hour
+    esr_enabled = bool(cfg.read_esr().get("enabled")) if cfg is not None else False
+    return execution.relays_per_hour(run_execution, esr_enabled)
 
 
 def _ipfs_api_url(url):
@@ -207,7 +286,17 @@ def _print_progress(runner, timeout):
     return runner.get_state()
 
 
-def main(argv=None):
+def _positive_int(text):
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an integer")
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"{text!r} is not >= 1")
+    return value
+
+
+def build_parser():
     parser = argparse.ArgumentParser(
         prog="ecld-run",
         description="Submit a payload to the Ethernity Cloud network and print the result "
@@ -247,13 +336,46 @@ def main(argv=None):
                         help="runner log level: ERROR|WARNING|INFO|DEBUG (default: ERROR)")
     parser.add_argument("--json", action="store_true", help="print the full result as JSON")
     # Resource flags (run()'s resources object).
-    parser.add_argument("--task-price", type=int, default=3, help="price in tokens (default: 3)")
+    parser.add_argument("--task-price", type=_task_price, default=3,
+                        help="price in tokens (default: 3); a fractional price, e.g. 2.5, is passed as "
+                             "given and needs a PoX 1.2 runner: runner-py 0.5.29 cannot encode it into "
+                             "the request, and on a network with an ERC-20 token it sends the approve "
+                             "transaction before failing there")
     parser.add_argument("--cpu", type=int, default=1)
     parser.add_argument("--memory", type=int, default=1)
     parser.add_argument("--storage", type=int, default=10)
     parser.add_argument("--bandwidth", type=int, default=1)
-    parser.add_argument("--duration", type=int, default=1)
     parser.add_argument("--validators", type=int, default=1)
+    # Execution flags (resources["execution"]): each overrides the EXEC_*
+    # variable and the .config.json EXECUTION key of the same name; values are
+    # parsed as EXEC_* strings are (the two boolean flags take no value) and
+    # checked against the schema.
+    ex = parser.add_argument_group("execution",
+                                   "override .config.json's EXECUTION block and the EXEC_* variables")
+    ex.add_argument("--mode", choices=("task", "session"), help="task: one payload run per order; "
+                    "session: the order stays open for inputs")
+    ex.add_argument("--duration-hours", "--duration", dest="duration_hours", metavar="HOURS",
+                    help="the order duration, 1-65535")
+    ex.add_argument("--parallelism", metavar="N", help="orders opened at once, each its own enclave")
+    ex.add_argument("--max-cu", dest="max_cu", metavar="MILLI_CU",
+                    help="the largest node paid for, in thousandths of a CU; 0 = any node")
+    ex.add_argument("--headroom", metavar="PERCENT", help="margin over the quoted price, 0-100")
+    ex.add_argument("--expected-inputs", dest="expected_inputs", metavar="N",
+                    help="inputs the dApp expects to send per session, 1-256")
+    ex.add_argument("--keep-open", dest="keep_open", action=argparse.BooleanOptionalAction, default=None,
+                    help="keep the session open until the dApp closes it")
+    ex.add_argument("--renew", action=argparse.BooleanOptionalAction, default=None,
+                    help="open a new order on another node when the session expires with inputs pending")
+    ex.add_argument("--max-renewals", dest="max_renewals", metavar="N", help="renewals allowed")
+    ex.add_argument("--expected-commits", dest="expected_commits", metavar="N",
+                    help="state commits the dApp expects to relay per order, 0-100")
+    ex.add_argument("--relays-per-hour", dest="relays_per_hour", type=_positive_int, metavar="N",
+                    help="relays the order needs per hour (default: 1 + expected inputs, + 10 with ESR)")
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     # dotenv, if present, so ENC_PRIVATE_KEY / NETWORK_* are available.
@@ -309,6 +431,12 @@ def main(argv=None):
         trustedzone = None
 
     try:
+        run_execution = _build_execution(args, cfg, os.environ)
+    except execution.ExecutionError as e:
+        parser.error(str(e))
+    relays_per_hour = _relays_per_hour(args, run_execution, cfg)
+
+    try:
         private_key = _resolve_private_key(cfg)
     except RuntimeError as e:
         print(f"ecld-run: {e}", file=sys.stderr)
@@ -319,6 +447,8 @@ def main(argv=None):
     print(f"trustedzone: {trustedzone if trustedzone else '(runner default)'}")
     print(f"payload   : {code!r}")
     print(f"input     : {'<empty>' if input_data is None else repr(input_data[:80])}")
+    print(f"execution : {json.dumps(run_execution)}")
+    print(f"relays/h  : {relays_per_hour}")
 
     # ---- drive the runner ----
     try:
@@ -355,7 +485,7 @@ def main(argv=None):
             runner.set_storage_ipfs(_ipfs_api_url(args.ipfs), ipfs_token)
         runner.connect()
 
-        resources = _build_resources(args)
+        resources = _build_resources(args, run_execution)
         print(f"resources : {resources}")
         print("submitting order... (this places an on-chain request and costs gas)")
 

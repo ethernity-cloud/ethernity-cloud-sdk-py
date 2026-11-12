@@ -175,7 +175,18 @@ The sdk has been tested on the following operating systems:
   `--network`/`--securelock`/`--trustedzone`; the signing key is
   `ECLD_PRIVATE_KEY` (plaintext) or the encrypted `ENC_PRIVATE_KEY` unlocked with
   `ECLD_KEY_PASSWORD` (or an interactive prompt). Resources are tunable with
-  `--task-price`/`--cpu`/`--memory`/`--storage`/`--bandwidth`/`--duration`/`--validators`.
+  `--task-price`/`--cpu`/`--memory`/`--storage`/`--bandwidth`/`--validators`;
+  `--task-price` takes a fractional price in tokens (`2.5`), passed as given;
+  it needs a PoX 1.2 runner: runner-py 0.5.29 cannot encode a fractional
+  price into its request (`uint256 taskPrice`), and on a network with an
+  ERC-20 token it sends the `approve` transaction first and fails at the
+  request, so until that runner use whole tokens.
+  The execution object (below) comes from `.config.json`, the `EXEC_*`
+  variables over it, and the flags `--mode`, `--duration-hours` (`--duration`),
+  `--parallelism`, `--max-cu`, `--headroom`, `--expected-inputs`,
+  `--keep-open` / `--no-keep-open`, `--renew` / `--no-renew`,
+  `--max-renewals`, `--expected-commits` over both;
+  `--relays-per-hour` replaces its computed default.
   `--input <file>` / `--input-text <string>` send the task's input dataset, read
   as `___etny_data_set___` (`ecld.input`); it travels encrypted, and the
   trustedzone checks it against the sha256 the request carries.
@@ -184,6 +195,53 @@ The sdk has been tested on the following operating systems:
   its result. (`python src/ethernity_task.py`
   remains available as a scriptable template if you prefer driving the runner yourself.)
   `--unsafe` runs the network's `-unsafe` variant (see below).
+
+- **Execution (how an order runs)**: `ecld-init` writes an `EXECUTION` block to
+  `.config.json` with every key of the execution object
+  (`tests/spec/execution-spec.json`, shared with the runners and the JS SDK):
+  ```json
+  "EXECUTION": {
+    "mode": "task",
+    "durationHours": 1,
+    "parallelism": 1,
+    "maxCu": 0,
+    "headroomPercent": 25,
+    "session": { "expectedInputs": 1, "keepOpen": false, "renew": false, "maxRenewals": 0 },
+    "esr": { "expectedCommits": 0 }
+  }
+  ```
+  `mode` is `task` (one payload run per order) or `session` (the order stays
+  open for inputs); `durationHours` the order duration, 1-65535;
+  `parallelism` the orders opened at once, each its own enclave; `maxCu` the
+  largest node paid for, in thousandths of a CU, 0 = any node;
+  `headroomPercent` the margin over the quoted price, 0-100;
+  `session.expectedInputs` the inputs the dApp expects to send, 1-256;
+  `session.keepOpen` keeps the session open until the dApp closes it;
+  `session.renew` opens a new order on another node when the session expires
+  with inputs pending, `session.maxRenewals` (>= 1 when renewing) bounding
+  the renewals; `esr.expectedCommits` the state commits the dApp expects to
+  relay per order, 0-100. Unattended, each key is `ECLD_EXEC_<KEY>` (`ECLD_EXEC_MODE`,
+  `ECLD_EXEC_DURATION_HOURS`, `ECLD_EXEC_SESSION_EXPECTED_INPUTS`, ... the
+  `EXEC_*` names below with the `ECLD_` prefix); interactively the step asks
+  for the mode and the duration, the session keys in mode `session` and
+  `esr.expectedCommits` with ESR enabled. A missing key takes its default;
+  strings are parsed into numbers and booleans before the check; an unknown
+  key, or a value outside its bounds, is refused with the schema's message
+  (`execution.durationHours must be an integer between 1 and 65535`). The
+  session block is accepted in both modes and applied in mode `session`.
+  `ecld-publish` exports the block to `src/.env` as `EXEC_MODE`,
+  `EXEC_DURATION_HOURS`, `EXEC_PARALLELISM`, `EXEC_MAX_CU`,
+  `EXEC_HEADROOM_PERCENT`, `EXEC_SESSION_EXPECTED_INPUTS`,
+  `EXEC_SESSION_KEEP_OPEN`, `EXEC_SESSION_RENEW`, `EXEC_SESSION_MAX_RENEWALS`
+  and `EXEC_ESR_EXPECTED_COMMITS`, which `src/ethernity_task.py` reads back
+  (`execution.from_env(os.environ)`) and passes nested as
+  `resources["execution"]`, with `durationHours` also as the flat `duration`
+  a runner before PoX 1.2 reads. The relays an order needs per hour of its
+  duration default to `1 + expectedInputs` rows, plus 10 commits with ESR
+  enabled (`execution.relays_per_hour`); `ecld-info execution` prints the
+  block and that number, and `ecld-run --relays-per-hour N` replaces it. The
+  runner takes the nested object and the relay rate once it carries the
+  PoX 1.2 execution object; until then they are inert for `runner.run`.
 
 - **The testnets and their unsafe networks**: `Bloxberg Testnet` (`BLOXBERG_TESTNET`),
   `LitVM LiteForge` (`LITVM_LITEFORGE`) and `Ethereum Sepolia` (`ETHEREUM_SEPOLIA`)
@@ -229,6 +287,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from ethernity_cloud_runner_py.runner import EthernityCloudRunner  # type: ignore
+from ethernity_cloud_sdk_py.commands import execution
 from ethernity_cloud_sdk_py.commands.private_key import PrivateKeyManager
 
 
@@ -249,14 +308,21 @@ def execute_task() -> None:
     runner.set_public_intake()
     runner.connect()
 
+    # The execution object from the EXEC_* variables ecld-publish exported
+    # (ethernity_cloud_sdk_py.commands.execution; see "Execution" above):
+    # nested, and its durationHours as the flat duration a runner before
+    # PoX 1.2 reads. A runner before PoX 1.2 takes whole tokens only as
+    # taskPrice; a fractional price (2.5) needs a PoX 1.2 runner.
+    execution_config = execution.validate(execution.from_env(os.environ))
     resources = {
         "taskPrice": 8,
         "cpu": 1,
         "memory": 1,
         "storage": 1,
         "bandwidth": 1,
-        "duration": 1,
+        "duration": execution_config["durationHours"],
         "validators": 1,
+        "execution": execution_config,
     }
     # run(resources, securelock, protocol version, code, node, trustedzone):
     # the version is the protocol's, "v3", under which the image registry keys

@@ -7,6 +7,7 @@ import getpass
 from pathlib import Path
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks, dAppTypes, TemplateConfig
 from ethernity_cloud_sdk_py.commands.config import Config, config
+from ethernity_cloud_sdk_py.commands import execution
 from ethernity_cloud_sdk_py.commands.cli_env import env_str, env_bool, non_interactive, die, resolve
 from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
 
@@ -167,6 +168,94 @@ def configure_esr():
     print(f"ESR enabled: contract {address}")
     print("State commits are relayed and paid by the node -- nothing to fund.")
     print("The registry address will be baked into the enclave image at ecld-build.")
+
+
+# The ecld-init prompt of each execution key that is asked for interactively;
+# the other keys come from their ECLD_EXEC_* variable or keep their value.
+EXECUTION_PROMPTS = (
+    ("durationHours", "Order duration in hours (1-65535)"),
+    ("session.expectedInputs", "Inputs the dApp expects to send per session (1-256)"),
+    ("session.keepOpen", "Keep the session open until the dApp closes it? (true/false)"),
+    ("session.renew", "Renew the session on another node when it expires with inputs pending? (true/false)"),
+    ("session.maxRenewals", "Renewals allowed (>= 1 when renewing)"),
+    ("esr.expectedCommits", "State commits the dApp expects to relay per order (0-100)"),
+)
+
+
+def _prompt_execution_value(block, dotted, question):
+    """One execution value asked interactively; an empty reply keeps the
+    block's value. The reply is parsed as an EXEC_* string is."""
+    current = block
+    for part in dotted.split("."):
+        current = current[part]
+    shown = ("true" if current else "false") if isinstance(current, bool) else str(current)
+    reply = input(f"{question} (default is {shown}): ").strip()
+    if reply == "":
+        return
+    target = block
+    parts = dotted.split(".")
+    for part in parts[:-1]:
+        target = target[part]
+    target[parts[-1]] = execution.parse_value(dotted, reply)
+
+
+def configure_execution():
+    """The execution step: writes a complete EXECUTION block (every key of
+    tests/spec/execution-spec.json) to .config.json.
+
+    Each key takes its ECLD_EXEC_* variable when set (ECLD_EXEC_MODE,
+    ECLD_EXEC_DURATION_HOURS, ... the EXEC_* names of execution.ENV_KEYS with
+    the ECLD_ prefix), else, interactively, the answer to its prompt, else the
+    value already stored, else the default. The session keys are asked only in
+    mode "session" and esr.expectedCommits only with ESR enabled; a stored
+    block, or a value, outside the schema ends the run with the schema's
+    message.
+    """
+    block = config.read_execution()
+    if not isinstance(block, dict):
+        die("execution must be an object")
+    esr_enabled = bool(config.read_esr().get("enabled"))
+    env = {env_key: env_str("ECLD_" + env_key) for env_key, _ in execution.ENV_KEYS}
+    from_env = {dotted for env_key, dotted in execution.ENV_KEYS if env[env_key] is not None}
+    for env_key, dotted in execution.ENV_KEYS:
+        if env[env_key] is not None:
+            print(f"{dotted} [ECLD_{env_key} -> {env[env_key]}]")
+    for key in ("session", "esr"):
+        if not isinstance(block[key], dict):
+            die(f"execution.{key} must be an object")
+    for key, value in execution.from_env(env).items():
+        if isinstance(value, dict):
+            block[key].update(value)
+        else:
+            block[key] = value
+
+    if not non_interactive():
+        print()
+        if "mode" not in from_env:
+            block["mode"] = prompt_options(
+                f"How does the dApp run its orders? (default is {block['mode']}): ",
+                ["task", "session"],
+                block["mode"],
+            )
+        for dotted, question in EXECUTION_PROMPTS:
+            if dotted in from_env:
+                continue
+            if dotted.startswith("session.") and block["mode"] != "session":
+                continue
+            if dotted == "session.maxRenewals" and not block["session"]["renew"]:
+                continue
+            if dotted == "esr.expectedCommits" and not esr_enabled:
+                continue
+            _prompt_execution_value(block, dotted, question)
+
+    try:
+        block = execution.validate(block)
+    except execution.ExecutionError as e:
+        die(str(e))
+    config.write_execution(block)
+    relays = execution.relays_per_hour(block, esr_enabled)
+    print(f"Execution: mode {block['mode']}, {block['durationHours']} h, parallelism {block['parallelism']}, "
+          f"{relays} relays/hour expected; ecld-run --help lists the flags that override it per run.")
 
 
 def print_intro():
@@ -385,7 +474,8 @@ def main():
     config.write("PREDECESSOR_HASH_SECURELOCK", "")
 
     configure_esr()
-    
+    configure_execution()
+
     print()
     print(
         """=================================================================================================================

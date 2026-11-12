@@ -1,5 +1,7 @@
 import json
 
+from ethernity_cloud_sdk_py.commands import execution
+
 # Default (disabled) Enclave State Registry block. Additive and optional: a
 # .config.json without an "ESR" key behaves exactly as before ESR existed.
 ESR_DEFAULTS = {
@@ -85,6 +87,18 @@ class Config:
 
     def write_esr(self, esr):
         return self.write("ESR", esr)
+
+    def read_execution(self):
+        """The EXECUTION block, complete: its string values parsed per key
+        (execution.parse_block) over execution.DEFAULTS (a .config.json
+        without the key describes a one-hour task). Unknown keys are kept, so
+        execution.validate() on the result names them; an absent or partial
+        block is filled from the defaults; a block that is not an object is
+        returned as stored, for validate() to name."""
+        return execution.complete(execution.parse_block(self.config.get("EXECUTION")))
+
+    def write_execution(self, block):
+        return self.write("EXECUTION", block)
 
 
 config = None

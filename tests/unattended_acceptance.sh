@@ -79,6 +79,9 @@ assert c['ESR']['contract_address'].startswith('0x1111'), c
 # The unattended default: the publish runs its own IPFS node, no API and no token.
 assert c['IPFS_ENDPOINT'] == '', c
 assert c['IPFS_TOKEN'] == '', c
+# The execution step writes the complete block, every key at its default.
+from ethernity_cloud_sdk_py.commands import execution
+assert c['EXECUTION'] == execution.DEFAULTS, c
 print('init config OK')
 "
 test -f src/serverless/backend.py || fail "template not scaffolded"
@@ -220,6 +223,25 @@ assert run({"enabled": False}) == ""
 print("ESR relay summary OK")
 PY
 echo "ESR unattended funding OK"
+
+step "7. EXEC_* export to src/.env through write_env"
+"$PY" - <<'PY'
+import os
+from ethernity_cloud_sdk_py.commands import execution
+from ethernity_cloud_sdk_py.commands import publish as P
+P.current_dir = os.getcwd()
+P.config.load()
+env_file = "src/.env.acceptance"
+# What the publish does beside the five runtime variables.
+for key, value in execution.to_env(P.config.read_execution()).items():
+    P.write_env(key, value, env_file)
+lines = dict(line.rstrip("\n").split("=", 1) for line in open(env_file))
+assert lines == execution.to_env(execution.DEFAULTS), lines
+assert list(lines) == [key for key, _ in execution.ENV_KEYS], list(lines)
+assert execution.validate(execution.from_env(lines)) == execution.DEFAULTS
+os.remove(env_file)
+print("EXEC_* export OK")
+PY
 
 echo
 echo "ALL UNATTENDED ACCEPTANCE CHECKS PASSED"

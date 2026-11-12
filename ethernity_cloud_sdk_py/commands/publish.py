@@ -5,6 +5,8 @@ import getpass
 from dotenv import load_dotenv
 from pathlib import Path
 from ethernity_cloud_sdk_py.commands.config import Config, config
+from ethernity_cloud_sdk_py.commands import execution
+from ethernity_cloud_sdk_py.commands.cli_env import die
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.private_key import PrivateKeyManager
 from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
@@ -120,6 +122,13 @@ def main():
     VERSION = config.read("VERSION")
     WALLET_ADDRESS = config.read("WALLET_ADDRESS")
     IPFS_HASH = config.read("IPFS_HASH")
+
+    # The EXECUTION block is exported to src/.env after the publish; a block
+    # outside the schema ends the run here, before anything reaches the chain.
+    try:
+        execution.validate(config.read_execution())
+    except execution.ExecutionError as e:
+        die(str(e))
 
     spinner = Spinner()
 
@@ -330,6 +339,10 @@ def main():
         write_env("NETWORK_NAME", NETWORK_NAME)
         write_env("NETWORK_TYPE", NETWORK_TYPE)
         write_env("TRUSTED_ZONE_IMAGE", config.read("TRUSTED_ZONE_IMAGE"))
+        # The EXECUTION block of .config.json as the EXEC_* variables
+        # templates/src/ethernity_task.py reads (execution.ENV_KEYS).
+        for key, value in execution.to_env(config.read_execution()).items():
+            write_env(key, value)
 
         if private_key == 'y':
             write_env("ENC_PRIVATE_KEY", ENC_PRIVATE_KEY)

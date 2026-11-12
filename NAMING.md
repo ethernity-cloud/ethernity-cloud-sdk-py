@@ -65,3 +65,31 @@ aliases; new examples, the developer guide, and the build lint all use the
   now names `ecld.onInput` first, legacy second.
 - **build lint** treats `ecld.input` as a taint source for
   `eval`/`exec`/`compile`, exactly like `___etny_data_set___`.
+
+## The execution object's names
+
+The execution object (`tests/spec/execution-spec.json`, shared with the
+runners and the JS SDK) has one spelling per surface, in schema order:
+
+| Key | `.config.json` (`EXECUTION` block) | `src/.env` (exported by `ecld-publish`) | `ecld-init` env | `ecld-run` flag |
+|---|---|---|---|---|
+| mode | `mode` | `EXEC_MODE` | `ECLD_EXEC_MODE` | `--mode` |
+| duration | `durationHours` | `EXEC_DURATION_HOURS` | `ECLD_EXEC_DURATION_HOURS` | `--duration-hours` (`--duration`) |
+| parallelism | `parallelism` | `EXEC_PARALLELISM` | `ECLD_EXEC_PARALLELISM` | `--parallelism` |
+| node cap | `maxCu` | `EXEC_MAX_CU` | `ECLD_EXEC_MAX_CU` | `--max-cu` |
+| price margin | `headroomPercent` | `EXEC_HEADROOM_PERCENT` | `ECLD_EXEC_HEADROOM_PERCENT` | `--headroom` |
+| session inputs | `session.expectedInputs` | `EXEC_SESSION_EXPECTED_INPUTS` | `ECLD_EXEC_SESSION_EXPECTED_INPUTS` | `--expected-inputs` |
+| keep open | `session.keepOpen` | `EXEC_SESSION_KEEP_OPEN` | `ECLD_EXEC_SESSION_KEEP_OPEN` | `--keep-open` / `--no-keep-open` |
+| renew | `session.renew` | `EXEC_SESSION_RENEW` | `ECLD_EXEC_SESSION_RENEW` | `--renew` / `--no-renew` |
+| renewals | `session.maxRenewals` | `EXEC_SESSION_MAX_RENEWALS` | `ECLD_EXEC_SESSION_MAX_RENEWALS` | `--max-renewals` |
+| ESR commits | `esr.expectedCommits` | `EXEC_ESR_EXPECTED_COMMITS` | `ECLD_EXEC_ESR_EXPECTED_COMMITS` | `--expected-commits` |
+
+The module is `ethernity_cloud_sdk_py.commands.execution`: `DEFAULTS`,
+`SCHEMA`, `ENV_KEYS` (the `EXEC_*` list above), `validate()`, `normalize()`
+(a legacy flat `duration` becomes `execution.durationHours`), `parse_block()`
+and `from_env()` (strings parsed into numbers and booleans before the check),
+`to_env()` and `relays_per_hour()` (`1 + session.expectedInputs`, + 10 with
+ESR enabled). An error names the key in the `.config.json` spelling,
+`execution.session.expectedInputs must be an integer between 1 and 256`, on
+every surface. The JS SDK's `execution.js` uses the same keys, the same
+`EXEC_*` list and the same messages.

@@ -35,13 +35,19 @@ enforcing on every release.
 What it checks:
 
 1. `ecld-init` driven entirely by `ECLD_*` env vars, including the opt-in ESR
-   step — then asserts `.config.json` and the scaffolded backend.
+   step — then asserts `.config.json` (the ESR block, the complete default
+   `EXECUTION` block) and the scaffolded backend.
 2. The ESR build gate fails fast on an unresolved registry address.
 3. `ecld-test`: `--expect` match, env-driven run, non-zero exit on mismatch,
    non-zero exit on task failure, and `CONFIG_ERROR` (32) when a required
    enclave value is empty.
 4. `ecld-publish` errors actionably (naming `ECLD_PRIVATE_KEY`) instead of
    prompting when no wallet is configured.
+5. The ESR identity wallet derivation and address capture.
+6. The publish summary of the relay model: the identity address, no funding.
+7. The `EXEC_*` export `ecld-publish` writes to `src/.env`, through
+   `write_env` directly: the ten variables of `execution.ENV_KEYS` in order,
+   reading back as the block they came from.
 
 Requirements: **bash + python3 + the SDK's dependencies**. No docker daemon,
 no network, no wallet, no SGX — nothing is built or published.
@@ -76,3 +82,16 @@ The suite exits non-zero on the first failure, so gate the build on it. In the
 local `build.bat` (untracked — `*.bat` is gitignored), the call sits before
 `py -m build`, which keeps a regression out of `dist/` and therefore out of
 `twine upload`. Any CI system can do the same with the docker one-liner above.
+
+## The execution object
+
+`test_execution.py` runs `commands/execution.py` against the
+`execution-spec.json` copy: the defaults and the schema rows, the three
+normalization cases, the ten validation cases with their exact messages, the
+`EXEC_*` parsing (`from_env`) and export (`to_env`), and the relays-per-hour
+default. `test_init_execution.py` drives `ecld-init` as
+`unattended_acceptance.sh` does and asserts the complete `EXECUTION` block it
+writes, the `ECLD_EXEC_*` parsing and the schema's message on a bad value;
+`test_run_task.py` covers `ecld-run`'s fractional `--task-price`, the
+execution flags over the `EXEC_*` variables over the `.config.json` block,
+and the nested `execution` the runner receives beside the flat `duration`.

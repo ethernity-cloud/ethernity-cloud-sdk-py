@@ -9,6 +9,9 @@ Reads your project's identity from .config.json (or --name / --ipfs) and reports
   SECURELOCK    the executor enclave's Image Registry record
   ESR           registry address, total keys, and -- with --enclave <wallet> --
                 this enclave's state keys and recent StateCommitted events
+  EXECUTION     the project's execution object (.config.json EXECUTION block,
+                tests/spec/execution-spec.json) and the relays per hour its
+                orders need
 
 Subcommands (default: the full summary):
   ecld-info                         full summary of the current project
@@ -16,6 +19,7 @@ Subcommands (default: the full summary):
   ecld-info trustedzone             just the trustedzone registration
   ecld-info securelock              just the securelock registration
   ecld-info esr [state|list|...]    the ESR section / detailed ESR queries
+  ecld-info execution               just the execution section (no chain)
 
 ESR inspection lives under the `esr` subcommand:
   ecld-info esr address
@@ -38,6 +42,8 @@ import argparse
 import json
 import os
 import sys
+
+from ethernity_cloud_sdk_py.commands import execution
 
 IMAGE_REGISTRY_ABI = [
     {"name": "imageDetails", "stateMutability": "view", "type": "function",
@@ -255,6 +261,23 @@ def section_esr(w3, esr_addr, enclave_wallet, events_n):
     return out
 
 
+def section_execution(cfg):
+    """The project's execution object from .config.json's EXECUTION block
+    (an absent block is the defaults) with the relays per hour its orders
+    need, or the schema's message when the block is outside it."""
+    esr = cfg.get("ESR")
+    esr_enabled = bool(esr.get("enabled")) if isinstance(esr, dict) else False
+    try:
+        block = execution.validate(execution.parse_block(cfg.get("EXECUTION")))
+    except execution.ExecutionError as e:
+        return {"error": str(e)}
+    return {
+        "execution": block,
+        "esr_enabled": esr_enabled,
+        "relays_per_hour": execution.relays_per_hour(block, esr_enabled),
+    }
+
+
 # ---- ESR detailed queries (also exposed as `ecld-esr`) ----------------------
 
 def _esr_contract(w3, esr_addr):
@@ -379,6 +402,29 @@ def _print_full(info):
         elif e.get("recent_commits_error"):
             print("  (could not read commits: %s)" % e["recent_commits_error"])
 
+    _print_execution(info.get("execution", {}))
+
+
+def _print_execution(x):
+    print("EXECUTION")
+    if x.get("error"):
+        print("  %s" % x["error"])
+        return
+    b = x["execution"]
+    print("  mode:         %s   duration: %s h   parallelism: %s"
+          % (b["mode"], b["durationHours"], b["parallelism"]))
+    print("  max cu:       %s%s   headroom: %s%%"
+          % (b["maxCu"], " (any node)" if b["maxCu"] == 0 else " thousandths of a CU", b["headroomPercent"]))
+    s = b["session"]
+    print("  session:      expected inputs %s   keep open %s   renew %s   max renewals %s%s"
+          % (s["expectedInputs"], "yes" if s["keepOpen"] else "no", "yes" if s["renew"] else "no",
+             s["maxRenewals"], "" if b["mode"] == "session" else "   (applied in mode session)"))
+    print("  esr:          expected commits %s   (ESR %s)"
+          % (b["esr"]["expectedCommits"], "enabled" if x["esr_enabled"] else "disabled"))
+    print("  relays/hour:  %s   (1 + expected inputs rows%s)"
+          % (x["relays_per_hour"],
+             ", + %d commits with ESR" % execution.ESR_RELAYS_PER_HOUR if x["esr_enabled"] else ""))
+
 
 # ---- argument parsing -------------------------------------------------------
 
@@ -408,6 +454,7 @@ def build_parser():
     esr.add_argument("--contract"); esr.add_argument("--rpc")
     esr.add_argument("--enclave"); esr.add_argument("--events", type=int, default=10)
     _add_esr_subs(esr, common)
+    sub.add_parser("execution", parents=[common], help="just the execution section (reads no chain)")
     return p
 
 
@@ -439,6 +486,14 @@ def _run(args):
         _emit(obj, args.json)
         return 0
 
+    if getattr(args, "section", None) == "execution":
+        x = section_execution(cfg)
+        if args.json:
+            print(json.dumps(x, indent=2, default=str))
+        else:
+            _print_execution(x)
+        return 0 if "error" not in x else 1
+
     net_name, details, esr_addr = _resolve_network(args.network, cfg)
     w3 = _w3(details.rpc_url)
     ipfs = getattr(args, "ipfs", None) or cfg.get("IPFS_HASH")
@@ -461,6 +516,7 @@ def _run(args):
         "securelock": section_registration(w3, details, "securelock", ipfs, name),
         "esr": section_esr(w3, esr_addr, getattr(args, "enclave", None),
                            getattr(args, "events", 10)),
+        "execution": section_execution(cfg),
     }
     if args.json:
         print(json.dumps(info, indent=2, default=str))

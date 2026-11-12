@@ -7,7 +7,8 @@ warnings.filterwarnings("ignore")
 
 
 from ethernity_cloud_runner_py.runner import EthernityCloudRunner
-from ethernity_cloud_sdk_py.commands.private_key import PrivateKeyManager 
+from ethernity_cloud_sdk_py.commands import execution
+from ethernity_cloud_sdk_py.commands.private_key import PrivateKeyManager
 
 code = "hello('World!')"
 
@@ -63,14 +64,23 @@ def execute_task(code) -> None:
     runner.set_public_intake()
     runner.connect()
 
+    # The execution object: the EXEC_* variables ecld-publish exported to
+    # src/.env from .config.json's EXECUTION block (tests/spec/
+    # execution-spec.json), parsed and checked; an unset variable takes its
+    # default. It is passed nested, and its durationHours as the flat
+    # "duration" a runner before PoX 1.2 reads.
+    execution_config = execution.validate(execution.from_env(os.environ))
+
     resources = {
+        # tokens; a runner before PoX 1.2 takes whole tokens only
         "taskPrice": 3,
         "cpu": 1,
         "memory": 1,
         "storage": 10,
         "bandwidth": 1,
-        "duration": 1,
+        "duration": execution_config["durationHours"],
         "validators": 1,
+        "execution": execution_config,
     }
 
     trustedzone_enclave = os.getenv("TRUSTED_ZONE_IMAGE")

@@ -68,14 +68,19 @@ entry, as from single transactions.
 | LitVM LiteForge (4441) | `0x709052Fe77Af543d3d9FE2Ac06a15c635c8D4Be5` |
 | Ethereum Sepolia (11155111) | `0x9927809B61122B2af3f3b3A3303875e0687b8eE3` |
 | Polygon Amoy (80002) | `0x1DC58496ed1cA66FD1E0b51fA28A9E7451970843` |
+| Polygon Amoy (80002), batch instance | `0xaC497CDC433519D03a450E8bBa71dE2bf4C380DD` — referenced by nothing until the coupled switch |
 | polygon / iotex | *not deployed* |
 
-These instances carry `commit`, `commitFor` and the enumeration, not
-`commitForBatch`; the registry is immutable, so the batch is on a new instance
-per network, deployed together with PoX 1.2 (pox-smart-contract-litvm
-`deploy/08-deploy-esr.js`; the contract is compiled for paris, as every
-contract deployed on bloxberg is, since bloxberg's EVM rejects PUSH0), whose
-address then replaces the row above in `commands/enums.py`.
+The instances the securelocks commit to carry `commit`, `commitFor` and the
+enumeration, not `commitForBatch`; the registry is immutable, so the batch is
+on a new instance per network, deployed together with PoX 1.2
+(pox-smart-contract-litvm `deploy/08-deploy-esr.js`; the contract is compiled
+for paris, as every contract deployed on bloxberg is, since bloxberg's EVM
+rejects PUSH0). The Amoy batch instance is deployed and referenced by nothing:
+`commands/enums.py`, `ecld-init`'s per-network default, the trustedzone's
+networks.yaml, the agent's and the runners' tables move to it in one coupled
+switch, one commit per repo, and until then every Amoy securelock commits to
+`0x1DC58496...` and the trustedzone's landed check reads that instance.
 
 Bloxberg mainnet and testnet are the **same chain** (both chainId 8995, both
 reachable via `core.bloxberg.org` and `bloxberg.ethernity.cloud`) — they are

@@ -32,6 +32,8 @@ Run `ecld-init` and answer **yes** at the Enclave State Registry step, or add th
 
 Leave `contract_address` empty. `ecld-build` fills in the correct registry for your network automatically. There is nothing else to configure — no wallet, no funding, no keys.
 
+One number sizes the node's relay budget for your commits: `esr.expectedCommits` in the `EXECUTION` block of `.config.json` (`ecld-init` asks for it when ESR is enabled; `ECLD_EXEC_ESR_EXPECTED_COMMITS` unattended, `EXEC_ESR_EXPECTED_COMMITS` in `src/.env`, `ecld-run --expected-commits N`), the state commits you expect one order to relay, 0 to 100. The enclave refuses a run past 256 commits (`MAX_COMMITS_PER_TASK`). With ESR enabled an order is expected to relay 10 commits per hour on top of its rows, which is what `ecld-info execution` shows as `relays/hour`.
+
 ## Using it in your backend
 
 ```python
