@@ -1,0 +1,462 @@
+{
+  "description": "Decision C8 (the validators' liveness check; PRICING-PLAN.md section 11, RESERVATION-DESIGN.md section 2): the message a running order's trustedzone posts every minute to the members that follow the order, the text its task wallet signs and the EIP-191 digest, the JSON body, POST /validator/live and its answers; the follower count and the draw from the order id; the window a message is taken in and the judging of a minute; the follower-to-follower query and signed reply over the peer channel (MSG_LIVE_QUERY 7, MSG_LIVE_REPLY 8). The two messages are signed by the task wallet of result-v5.json's session example for its order; the node and the minute (t0 / 60) are capability-record.json's, whose validator signs the reply.",
+  "generator": "spec/make/liveness-message.js",
+  "parameters": {
+    "periodSecs": 60,
+    "misses": 5,
+    "targetPercent": 51,
+    "minFollowers": 3,
+    "rule": "the Liveness parameters of every deployment row (ethernity-cas pox_client.rs TESTNET_LIVENESS): a message every 60 s, five consecutive confirmed misses, 51 % of the seated set and at least three followers. minute is floor(unix seconds / 60) whatever periodSecs says."
+  },
+  "message": {
+    "tag": "etny-live",
+    "signedTextLayout": "etny-live|<orderId>|<minute>|<node lower-case 0x hex>|<final 0 or 1>",
+    "signedTextRule": "the tag, the order id in decimal, the minute (floor(unix seconds / 60) on the sender's clock) in decimal, the node (the DP request's dproc) as 0x and 40 lower-case hex digits whatever case the body spells it in, and 1 for the order's last message or 0 otherwise, joined with |; no terminator.",
+    "digestRule": "EIP-191 personal sign: keccak256(\"\\x19Ethereum Signed Message:\\n\" || decimal byte length of the text || the UTF-8 text); ethers hashMessage / signMessage, the trustedzone's walletSigner.signMessage, ethernity-cas transcript_rows::personal_sign_digest.",
+    "signature": {
+      "scheme": "secp256k1 ECDSA by the order's task wallet (the wallet its etny-sw row attested), RFC 6979 deterministic k, low-s, recoverable",
+      "serializedRule": "65 bytes r || s || v as 0x-prefixed 130 hex characters, v the recovery id plus 27 (27 or 28); this is the body's sig field"
+    },
+    "body": {
+      "keys": [
+        "order",
+        "minute",
+        "node",
+        "final",
+        "sig"
+      ],
+      "rule": "a JSON object of at most 1024 bytes with exactly these five keys: order the order id as a decimal string (digits only, not empty, at most u64), minute a non-negative integer (a JSON number, at most u64), node 0x followed by 40 hex digits in either case, final a boolean, sig 0x followed by 130 hex digits. Any other body, key set, type or spelling is refused with 400 (liveness.rs parse_message).",
+      "maxBytes": 1024
+    },
+    "sender": "the order's trustedzone, to each member that follows the order, over the REST channel to that member's REST interface (plain HTTP/1.1, the one GET /validator/time is served on; the message's and the answers' signatures carry the integrity): every 60 s from its idle points and from a timer while the payload runs, and one last message with final true once it has signed the result."
+  },
+  "taskWallet": {
+    "address": "0x40680ca06d992501822586eb6bf65db227f105d8",
+    "source": "result-v5.json session.taskWalletPrivateKey, the task wallet of its session example (order 4101)",
+    "swRow": "a member follows the order once the order's etny-sw row names this wallet: key etny-sw, value v1:<orderId>:<taskWallet>:<sigDerHex>, the trustedzone's ECDSA secp384r1 / SHA-256 DER signature over etny-sw|<orderId>|<taskWallet>; the DP request's dproc is the node every message must name."
+  },
+  "examples": {
+    "minute": {
+      "name": "minute",
+      "orderId": 4101,
+      "minute": 29362080,
+      "node": "0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe",
+      "final": false,
+      "signedText": "etny-live|4101|29362080|0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe|0",
+      "digest": "0x4f7bf016c9c66d3026725c7e29d2f26fa8bf304bf197789a200ec70f8d8c9fd6",
+      "signature": {
+        "r": "0xae1315da812a5d8dcc6eaa8f7fd9d3e02c3bd9f18161c996f4da47649c95cb1a",
+        "s": "0x6e7992ced7188efdf212d78eecd63ad420423270df48db663f8444e9d29e0ac8",
+        "v": 27,
+        "serialized": "0xae1315da812a5d8dcc6eaa8f7fd9d3e02c3bd9f18161c996f4da47649c95cb1a6e7992ced7188efdf212d78eecd63ad420423270df48db663f8444e9d29e0ac81b"
+      },
+      "body": {
+        "order": "4101",
+        "minute": 29362080,
+        "node": "0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe",
+        "final": false,
+        "sig": "0xae1315da812a5d8dcc6eaa8f7fd9d3e02c3bd9f18161c996f4da47649c95cb1a6e7992ced7188efdf212d78eecd63ad420423270df48db663f8444e9d29e0ac81b"
+      },
+      "bodyJson": "{\"order\":\"4101\",\"minute\":29362080,\"node\":\"0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe\",\"final\":false,\"sig\":\"0xae1315da812a5d8dcc6eaa8f7fd9d3e02c3bd9f18161c996f4da47649c95cb1a6e7992ced7188efdf212d78eecd63ad420423270df48db663f8444e9d29e0ac81b\"}",
+      "recovered": "0x40680ca06d992501822586eb6bf65db227f105d8"
+    },
+    "final": {
+      "name": "final",
+      "orderId": 4101,
+      "minute": 29362081,
+      "node": "0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe",
+      "final": true,
+      "signedText": "etny-live|4101|29362081|0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe|1",
+      "digest": "0x6858f280e37be9a350c3ad7c8d3e0a323176d42dfcb2476ff1a7ef446a964181",
+      "signature": {
+        "r": "0xe523ef7ad0e536f7418990ec9ce3518a7f7e2e465e11e4aa86013b64c6c30d5f",
+        "s": "0x1f0b19134dbc34270d96614cec7f6131bc868ad9f663fd87716271615e66753b",
+        "v": 28,
+        "serialized": "0xe523ef7ad0e536f7418990ec9ce3518a7f7e2e465e11e4aa86013b64c6c30d5f1f0b19134dbc34270d96614cec7f6131bc868ad9f663fd87716271615e66753b1c"
+      },
+      "body": {
+        "order": "4101",
+        "minute": 29362081,
+        "node": "0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe",
+        "final": true,
+        "sig": "0xe523ef7ad0e536f7418990ec9ce3518a7f7e2e465e11e4aa86013b64c6c30d5f1f0b19134dbc34270d96614cec7f6131bc868ad9f663fd87716271615e66753b1c"
+      },
+      "bodyJson": "{\"order\":\"4101\",\"minute\":29362081,\"node\":\"0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe\",\"final\":true,\"sig\":\"0xe523ef7ad0e536f7418990ec9ce3518a7f7e2e465e11e4aa86013b64c6c30d5f1f0b19134dbc34270d96614cec7f6131bc868ad9f663fd87716271615e66753b1c\"}",
+      "recovered": "0x40680ca06d992501822586eb6bf65db227f105d8"
+    },
+    "rule": "the minute example is a message of a running order; the final example, one minute later with final true, is its last: the follow ends at it and no later minute is judged. The minute flag and the final flag are in the signed text, so a message moved to another minute or with the flag flipped recovers to another address."
+  },
+  "livenessRsTestVector": {
+    "privateKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "wallet": "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a",
+    "orderId": 7,
+    "node": "0xabababababababababababababababababababab",
+    "minute": 29362080,
+    "minuteMessage": {
+      "signedText": "etny-live|7|29362080|0xabababababababababababababababababababab|0",
+      "digest": "0xd773fea30d7c20ccdbbd679396c3755b68c99208de0ece2e4d3ee5d08f717ed4",
+      "sig": "0xbce28f4152be861c145a568056b9a9d4ded083caa80fe439c251d14000f08f29567768c54c35c23b5d2ec7146e036439d6667934a46a46daee4b3b64c42d77cb1c"
+    },
+    "finalMessage": {
+      "signedText": "etny-live|7|29362081|0xabababababababababababababababababababab|1",
+      "digest": "0x51cfd33ca9c232f42ac3f603ac74d57d8ed93d8011e06b8f3d5a80038511272f",
+      "sig": "0xe9b03813da18c0ab7a89651a120012f234c51b772c379a08eeb7422db747922d6a8447255dfccdc2c0bc94f08e1499b45dc2660844d9a0b021a715e7e53329eb1b"
+    },
+    "rule": "the vector the liveness.rs tests hold (KEY, WALLET, NODE, MINUTE, DIGEST, SIG, SIG_FINAL), reproduced here with ethers; the generator refuses to write the fixture when they differ."
+  },
+  "endpoint": {
+    "method": "POST",
+    "path": "/validator/live",
+    "requestBody": "{\"order\":\"4101\",\"minute\":29362080,\"node\":\"0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe\",\"final\":false,\"sig\":\"0xae1315da812a5d8dcc6eaa8f7fd9d3e02c3bd9f18161c996f4da47649c95cb1a6e7992ced7188efdf212d78eecd63ad420423270df48db663f8444e9d29e0ac81b\"}",
+    "checks": "in this order: the body parses as a message (else 400); the member follows the order (else 404); the message names the order's node (else 403); the minute is inside the window around the member's clock (else 403); the signature recovers to the order's task wallet (else 403). A refused message is not recorded.",
+    "answers": [
+      {
+        "status": 200,
+        "body": "{\"recorded\":true,\"order\":\"4101\",\"minute\":29362080,\"final\":false}",
+        "when": "the message is recorded for the minute it names; final is true when it was the order's last message, which ends the follow"
+      },
+      {
+        "status": 400,
+        "body": "{\"error\":\"the message has exactly the keys order, minute, node, final and sig\"}",
+        "when": "the body is not a message: not JSON, not an object, another key set, a wrong type or spelling, or more than 1024 bytes; the reason is parse_message's"
+      },
+      {
+        "status": 404,
+        "body": "{\"error\":\"order 4101 is not followed by this member\"}",
+        "when": "this member follows no such order: it is not among the order's followers, the order's etny-sw row is not read yet, or the follow ended (a final message, the order closed, its settlementOutcome set)"
+      },
+      {
+        "status": 403,
+        "body": "{\"error\":\"the message names another node than the order's, 0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe\"}",
+        "when": "the node differs from the order's DP request's dproc"
+      },
+      {
+        "status": 403,
+        "body": "{\"error\":\"the minute is outside the window around this member's minute 29362080\"}",
+        "when": "the minute is more than 2 behind or more than 1 ahead of the member's floor(unix seconds / 60)"
+      },
+      {
+        "status": 403,
+        "body": "{\"error\":\"signed by 0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a, not by the order's task wallet\"}",
+        "when": "the signature recovers to a wallet other than the order's task wallet; a signature that recovers to no address answers {\"error\":\"the signature recovers to no wallet\"}"
+      }
+    ]
+  },
+  "followers": {
+    "countRule": "k = min(n, max(3, ceil(0.51 x n))) over n seated members (liveness.rs follower_count; min_followers 3, target_percent 51)",
+    "table": [
+      {
+        "n": 1,
+        "k": 1
+      },
+      {
+        "n": 2,
+        "k": 2
+      },
+      {
+        "n": 3,
+        "k": 3
+      },
+      {
+        "n": 4,
+        "k": 3
+      },
+      {
+        "n": 5,
+        "k": 3
+      },
+      {
+        "n": 6,
+        "k": 4
+      },
+      {
+        "n": 7,
+        "k": 4
+      },
+      {
+        "n": 99,
+        "k": 51
+      },
+      {
+        "n": 100,
+        "k": 51
+      },
+      {
+        "n": 101,
+        "k": 52
+      }
+    ],
+    "drawRule": "the seated addresses sorted ascending as 20-byte values with duplicates dropped; start = keccak256(uint256 orderId) mod n; the followers are the k members at indexes (start + j) mod n for j = 0..k-1, in that order; every member and the trustedzone draw the same set from the same seated set whatever order they hold it in.",
+    "example": {
+      "orderId": 3964,
+      "seatedAsListed": [
+        "0x0707070707070707070707070707070707070707",
+        "0x0303030303030303030303030303030303030303",
+        "0x0505050505050505050505050505050505050505",
+        "0x0404040404040404040404040404040404040404",
+        "0x0606060606060606060606060606060606060606",
+        "0x0202020202020202020202020202020202020202",
+        "0x0101010101010101010101010101010101010101",
+        "0x0404040404040404040404040404040404040404"
+      ],
+      "sorted": [
+        "0x0101010101010101010101010101010101010101",
+        "0x0202020202020202020202020202020202020202",
+        "0x0303030303030303030303030303030303030303",
+        "0x0404040404040404040404040404040404040404",
+        "0x0505050505050505050505050505050505050505",
+        "0x0606060606060606060606060606060606060606",
+        "0x0707070707070707070707070707070707070707"
+      ],
+      "n": 7,
+      "k": 4,
+      "hash": "0x8fd19304417d963cc886410cf6e6fb152594e25280d0d6cd5302fa17a0ec31d1",
+      "hashRule": "keccak256 of the order id as a 32-byte big-endian unsigned integer",
+      "start": 1,
+      "indexes": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "followers": [
+        "0x0202020202020202020202020202020202020202",
+        "0x0303030303030303030303030303030303030303",
+        "0x0404040404040404040404040404040404040404",
+        "0x0505050505050505050505050505050505050505"
+      ]
+    }
+  },
+  "window": {
+    "lateMinutes": 2,
+    "earlyMinutes": 1,
+    "rule": "a message is taken when its minute is at most 2 behind and at most 1 ahead of the receiver's floor(unix seconds / 60): minute + 2 >= now and minute <= now + 1; a minute further off is refused with 403 (Reject::OutsideWindow).",
+    "nowMinute": 29362080,
+    "cases": [
+      {
+        "minute": 29362077,
+        "offset": -3,
+        "taken": false
+      },
+      {
+        "minute": 29362078,
+        "offset": -2,
+        "taken": true
+      },
+      {
+        "minute": 29362079,
+        "offset": -1,
+        "taken": true
+      },
+      {
+        "minute": 29362080,
+        "offset": 0,
+        "taken": true
+      },
+      {
+        "minute": 29362081,
+        "offset": 1,
+        "taken": true
+      },
+      {
+        "minute": 29362082,
+        "offset": 2,
+        "taken": false
+      }
+    ]
+  },
+  "judging": {
+    "judgeAfterMinutes": 2,
+    "minutesPerTick": 4,
+    "dueRule": "a follow starts in the minute the member read the order's etny-sw row; from the first unjudged minute, minute M is judged once now_minute >= M + 2, at most 4 minutes per tick, each once. A minute this member did not receive is asked of the other followers over the peer channel (MSG_LIVE_QUERY) until one answers received; a minute no follower received is a confirmed miss.",
+    "dueCases": [
+      {
+        "nowMinute": 29362080,
+        "due": []
+      },
+      {
+        "nowMinute": 29362081,
+        "due": []
+      },
+      {
+        "nowMinute": 29362082,
+        "due": [
+          29362080
+        ]
+      },
+      {
+        "nowMinute": 29362083,
+        "due": [
+          29362080,
+          29362081
+        ]
+      },
+      {
+        "nowMinute": 29362100,
+        "due": [
+          29362080,
+          29362081,
+          29362082,
+          29362083
+        ]
+      }
+    ],
+    "missesRule": "misses are counted only after the first received minute, so an enclave that never sent is never voted on; a received minute (here or at a follower asked) resets the count; at 5 consecutive confirmed misses, with no final message, the member sends CasCapacity.voteLiveness(orderId) once (after a pre-flight; where the row votes nothing or names no CasCapacity the verdict is logged); the quorum calls invalidateLive through the settlement contract. The follow ends at the final message, when the order stops running or when its settlementOutcome is set.",
+    "timeline": [
+      {
+        "minute": 29362080,
+        "received": false,
+        "countedMiss": false,
+        "misses": 0,
+        "voteDue": false
+      },
+      {
+        "minute": 29362081,
+        "received": false,
+        "countedMiss": false,
+        "misses": 0,
+        "voteDue": false
+      },
+      {
+        "minute": 29362082,
+        "received": true,
+        "countedMiss": false,
+        "misses": 0,
+        "voteDue": false
+      },
+      {
+        "minute": 29362083,
+        "received": false,
+        "countedMiss": true,
+        "misses": 1,
+        "voteDue": false
+      },
+      {
+        "minute": 29362084,
+        "received": false,
+        "countedMiss": true,
+        "misses": 2,
+        "voteDue": false
+      },
+      {
+        "minute": 29362085,
+        "received": false,
+        "countedMiss": true,
+        "misses": 3,
+        "voteDue": false
+      },
+      {
+        "minute": 29362086,
+        "received": false,
+        "countedMiss": true,
+        "misses": 4,
+        "voteDue": false
+      },
+      {
+        "minute": 29362087,
+        "received": false,
+        "countedMiss": true,
+        "misses": 5,
+        "voteDue": true
+      }
+    ],
+    "voteLiveness": {
+      "signature": "voteLiveness(uint256)",
+      "selector": "0x8e54d69f",
+      "calldata": "0x8e54d69f0000000000000000000000000000000000000000000000000000000000001005"
+    }
+  },
+  "peer": {
+    "channel": "the mutually attested CAS peer connection between two seated members (peer_channel::send_live_query); the query is unsigned, the reply is signed by the answering member's wallet since it is counted toward an on-chain vote. A reply that answers another order or minute, or recovers to another wallet than the follower asked, counts for nothing (liveness.rs verify_reply). A member answers received false for a minute it does not hold and for an order it does not follow.",
+    "query": {
+      "tag": 7,
+      "totalBytes": 17,
+      "layout": [
+        {
+          "offset": 0,
+          "bytes": 1,
+          "field": "tag",
+          "value": "0x07",
+          "decimal": 7
+        },
+        {
+          "offset": 1,
+          "bytes": 8,
+          "field": "order",
+          "encoding": "uint64 big-endian",
+          "value": "0x0000000000001005",
+          "decimal": 4101
+        },
+        {
+          "offset": 9,
+          "bytes": 8,
+          "field": "minute",
+          "encoding": "uint64 big-endian",
+          "value": "0x0000000001c007a0",
+          "decimal": 29362080
+        }
+      ],
+      "hex": "0x0700000000000010050000000001c007a0"
+    },
+    "reply": {
+      "tag": 8,
+      "totalBytes": 83,
+      "layout": [
+        {
+          "offset": 0,
+          "bytes": 1,
+          "field": "tag",
+          "value": "0x08",
+          "decimal": 8
+        },
+        {
+          "offset": 1,
+          "bytes": 8,
+          "field": "order",
+          "encoding": "uint64 big-endian",
+          "value": "0x0000000000001005",
+          "decimal": 4101
+        },
+        {
+          "offset": 9,
+          "bytes": 8,
+          "field": "minute",
+          "encoding": "uint64 big-endian",
+          "value": "0x0000000001c007a0",
+          "decimal": 29362080
+        },
+        {
+          "offset": 17,
+          "bytes": 1,
+          "field": "received",
+          "encoding": "u8, 1 received or 0 not; any other value refuses the reply",
+          "value": "0x01",
+          "boolean": true
+        },
+        {
+          "offset": 18,
+          "bytes": 65,
+          "field": "sig",
+          "encoding": "r || s || v over digest",
+          "value": "0xdbfa975a810a21087f71076e3dbf54ce0281d4cbaea1c8ec19b0eaf73fea9ca0118da91a6a17ab2e9ffbdaada52a2c80d724cfadc8cfefbbd52653ff95f108f11c"
+        }
+      ],
+      "hex": "0x0800000000000010050000000001c007a001dbfa975a810a21087f71076e3dbf54ce0281d4cbaea1c8ec19b0eaf73fea9ca0118da91a6a17ab2e9ffbdaada52a2c80d724cfadc8cfefbbd52653ff95f108f11c",
+      "digestDomain": "ethernity-cas/live-reply/v1",
+      "digestRule": "keccak256(\"ethernity-cas/live-reply/v1\" || order uint64 big-endian || minute uint64 big-endian || received u8), 44 preimage bytes; signed directly, with no EIP-191 prefix.",
+      "preimageHex": "0x65746865726e6974792d6361732f6c6976652d7265706c792f763100000000000010050000000001c007a001",
+      "digest": "0x18af9246c8a2a16b4e001b53bc73c71dccc15c7335c30c171059324100ad14e2",
+      "signature": {
+        "r": "0xdbfa975a810a21087f71076e3dbf54ce0281d4cbaea1c8ec19b0eaf73fea9ca0",
+        "s": "0x118da91a6a17ab2e9ffbdaada52a2c80d724cfadc8cfefbbd52653ff95f108f1",
+        "v": 28,
+        "serialized": "0xdbfa975a810a21087f71076e3dbf54ce0281d4cbaea1c8ec19b0eaf73fea9ca0118da91a6a17ab2e9ffbdaada52a2c80d724cfadc8cfefbbd52653ff95f108f11c",
+        "serializedRecoveryIdForm": "0xdbfa975a810a21087f71076e3dbf54ce0281d4cbaea1c8ec19b0eaf73fea9ca0118da91a6a17ab2e9ffbdaada52a2c80d724cfadc8cfefbbd52653ff95f108f101",
+        "vRule": "the last byte is the recovery id plus 27 (27 or 28, ethers) or the bare recovery id (0 or 1, the CAS's cas_identity::sign_recoverable); the verifier (validator_gov::recover_address) subtracts 27 from a byte of 27 or more, so both forms recover to the same address"
+      },
+      "signer": "0x2a0707de23c2c09d6ff7fadbde34c06cdb0e6278",
+      "signerSource": "capability-record.json validator.privateKey, the validator identity of its time statements",
+      "recovered": "0x2a0707de23c2c09d6ff7fadbde34c06cdb0e6278"
+    }
+  }
+}

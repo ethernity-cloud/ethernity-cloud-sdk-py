@@ -1,5 +1,16 @@
 # Tests
 
+## `spec/` — the shared fixtures, byte for byte
+
+`tests/spec/` holds copies of `pox-smart-contract-litvm/spec/*.json` and
+`spec/metadata-keys.md` with that directory's `MANIFEST.sha256` (the
+`sha256sum` text format). The copies are made with a plain file copy, never
+re-serialised, and `.gitattributes` exempts them from line-ending conversion.
+`test_spec_manifest.py` hashes every copy against the manifest and, when a
+`pox-smart-contract-litvm` checkout sits beside this repository, compares the
+bytes with the source. Regenerate the source fixtures there (`spec/make/`,
+`manifest.js` last), then copy the changed files and the manifest here.
+
 ## `e2e_testnet_cas.sh` — the CAS-attested testnet, end to end
 
 Builds a securelock with this SDK, publishes it against the ethernity-cas

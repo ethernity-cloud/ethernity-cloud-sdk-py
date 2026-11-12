@@ -1,0 +1,113 @@
+{
+  "description": "Plan amendment 9 (heartbeat): the fixed-width record a securelock overwrites every second, encrypted with AES-256-GCM under the per-order key it announced in securelock.ready, nonce derived from the sequence number, AAD binding the beat to the order; two beats (idle, busy), the object names of both stacks and the securelock.ready plaintext.",
+  "generator": "spec/make/heartbeat.js",
+  "order": {
+    "orderId": 4101,
+    "challenge": "k7p2x9qv4m1zr8t3hw6n",
+    "challengeRule": "the enclave challenge the trustedzone forwarded in task.securelock, the same value the securelock binds its result signatures with"
+  },
+  "record": {
+    "layout": "ecld-hb|v1|<seq 10 digits>|<busy 1 digit>|<runs 6 digits>|<phase 1 char>",
+    "plaintextBytes": 32,
+    "widths": {
+      "tag": {
+        "chars": 7,
+        "value": "ecld-hb"
+      },
+      "version": {
+        "chars": 2,
+        "value": "v1"
+      },
+      "seq": {
+        "chars": 10,
+        "encoding": "decimal, zero-padded on the left"
+      },
+      "busy": {
+        "chars": 1,
+        "encoding": "0 idle, 1 payload running"
+      },
+      "runs": {
+        "chars": 6,
+        "encoding": "decimal, zero-padded on the left: payload runs started since boot"
+      },
+      "phase": {
+        "chars": 1,
+        "encoding": "B before the payload, T task payload, S session, E idle tail before exit"
+      }
+    },
+    "rules": [
+      "seq starts at seq0 of securelock.ready and increases by one per beat, never reused under one key",
+      "busy turns 1 at the start of a payload run (task start or session input delivery) and 0 at its output; a payload that blocks the event loop leaves the last beat at 1",
+      "runs increments when busy turns 1; two idle beats with different runs values mean a payload ran between them",
+      "the object is overwritten in place once per second, so its size never changes"
+    ]
+  },
+  "key": {
+    "hex": "e9f428505b33058eefba6e28a26df7567a517ba9d59696745d7680271693f595",
+    "bytes": 32,
+    "rule": "32 random bytes drawn by the securelock at boot, hex in securelock.ready; per order, never reused"
+  },
+  "nonce": {
+    "bytes": 12,
+    "rule": "seq as a big-endian unsigned integer in the low-order 8 bytes, the 4 leading bytes zero"
+  },
+  "aad": {
+    "value": "k7p2x9qv4m1zr8t3hw6n:4101:securelock.heartbeat",
+    "rule": "<challenge>:<order_id>:securelock.heartbeat, UTF-8; the same AAD in both stacks (no .securelock suffix in the AAD)"
+  },
+  "cipher": "AES-256-GCM, 128-bit tag",
+  "body": {
+    "layout": "nonce (12) || ciphertext (32) || tag (16) = 60 bytes, stored base64 (80 characters)",
+    "readerRule": "take the nonce from the first 12 bytes, decrypt with the key and AAD, then require the plaintext seq to equal the nonce value"
+  },
+  "objects": {
+    "nodenithy": {
+      "heartbeat": "securelock.heartbeat.securelock",
+      "ready": "securelock.ready.securelock",
+      "readySignature": "securelock.ready.sig.securelock"
+    },
+    "pynithy": {
+      "heartbeat": "securelock.heartbeat",
+      "ready": "securelock.ready",
+      "readySignature": "securelock.ready.sig"
+    },
+    "rule": "the JS securelock appends .securelock to every object it writes, the Python one writes the bare name; the trustedzone of each stack reads its own stack's names"
+  },
+  "beats": {
+    "idle": {
+      "seq": 17,
+      "busy": 0,
+      "runs": 2,
+      "phase": "T",
+      "plaintext": "ecld-hb|v1|0000000017|0|000002|T",
+      "plaintextHex": "0x65636c642d68627c76317c303030303030303031377c307c3030303030327c54",
+      "nonceHex": "0x000000000000000000000011",
+      "ciphertextHex": "0xd76b4f67a90308d1c3c45d47c7133d292f2266191b5cbba8cef98990f7b64ce0",
+      "tagHex": "0x03b6293c8afdc8a83061e6f626d02b3b",
+      "bodyBytes": 60,
+      "bodyBase64": "AAAAAAAAAAAAAAAR12tPZ6kDCNHDxF1HxxM9KS8iZhkbXLuozvmJkPe2TOADtik8iv3IqDBh5vYm0Cs7"
+    },
+    "busy": {
+      "seq": 18,
+      "busy": 1,
+      "runs": 3,
+      "phase": "T",
+      "plaintext": "ecld-hb|v1|0000000018|1|000003|T",
+      "plaintextHex": "0x65636c642d68627c76317c303030303030303031387c317c3030303030337c54",
+      "nonceHex": "0x000000000000000000000012",
+      "ciphertextHex": "0x2a5e975273c3ba713ddea3c26f20c399d24fb2291376cd5e61f7a9ef730d3f0b",
+      "tagHex": "0xd198f5b90baf0500d4dd3cb1502de8cb",
+      "bodyBytes": 60,
+      "bodyBase64": "AAAAAAAAAAAAAAASKl6XUnPDunE93qPCbyDDmdJPsikTds1eYfep73MNPwvRmPW5C68FANTdPLFQLejL"
+    }
+  },
+  "ready": {
+    "plaintext": "{\"order_id\":4101,\"key\":\"e9f428505b33058eefba6e28a26df7567a517ba9d59696745d7680271693f595\",\"seq0\":1}",
+    "fields": {
+      "order_id": 4101,
+      "key": "e9f428505b33058eefba6e28a26df7567a517ba9d59696745d7680271693f595",
+      "seq0": 1
+    },
+    "rule": "compact JSON, keys in the order order_id, key, seq0, no whitespace (Python: separators=(\",\", \":\")); encrypted for the trustedzone and signed with the securelock key over \"<challenge>:<order_id>:securelock.ready:\" + plaintext, as session.ready is"
+  }
+}

@@ -125,8 +125,9 @@ class TaskStatus:
                                  # the registry within 5 blocks -- the node did not relay them.
                                  # The result is NOT trustworthy as persisted state; the
                                  # validator refunds the order.
-    ESR_COMMIT_LIMIT_EXCEEDED = 38  # More than 100 state commits in one run -- the per-run cap
-                                 # that bounds relayed transactions and the result size.
+    ESR_COMMIT_LIMIT_EXCEEDED = 38  # More than MAX_COMMITS_PER_TASK (256, ecld_state.py) state
+                                 # commits in one run -- the per-run cap that bounds relayed
+                                 # transactions and the result size.
     SECURITY_VIOLATION = 35      # A state commit was authorized under a caller other than the
                                  # task's submitter (the in-enclave ownership check was bypassed).
                                  # Set by the securelock when it detects a forged commit caller,
@@ -365,8 +366,9 @@ def Exec(payload_data, input_data, globals=None, locals=None):
         # Matched by name so non-ESR builds need no import.
         if type(e).__name__ == "StateNonceError":
             return TaskStatus.ESR_NONCE_VIOLATION, f"ESR_NONCE_VIOLATION: {e}"
-        # Over the per-run commit cap (100): the over-limit commit was NOT
-        # applied; the earlier commits stand and will be relayed.
+        # Over the per-run commit cap (MAX_COMMITS_PER_TASK, 256): the
+        # over-limit commit was NOT applied; the earlier commits stand and
+        # will be relayed.
         if type(e).__name__ == "StateLimitError":
             return (TaskStatus.ESR_COMMIT_LIMIT_EXCEEDED,
                     f"ESR_COMMIT_LIMIT_EXCEEDED: {e}")

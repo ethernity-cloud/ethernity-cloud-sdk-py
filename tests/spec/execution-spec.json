@@ -1,0 +1,313 @@
+{
+  "description": "The runner-side execution object (plan Phase A, \"execution object schema\"): keys, types, defaults and bounds, the normalization of a legacy flat resources object, and ten validation cases with the exact error messages both runners and both SDKs produce.",
+  "generator": "spec/make/execution-spec.js",
+  "schema": [
+    {
+      "key": "mode",
+      "type": "string",
+      "values": [
+        "task",
+        "session"
+      ],
+      "default": "task",
+      "meaning": "task: one payload run per order; session: the order stays open for inputs"
+    },
+    {
+      "key": "durationHours",
+      "type": "integer",
+      "min": 1,
+      "max": 65535,
+      "default": 1,
+      "meaning": "the order duration; the DO request _duration (uint16) and the escrow hours"
+    },
+    {
+      "key": "parallelism",
+      "type": "integer",
+      "min": 1,
+      "default": 1,
+      "meaning": "orders runTasks opens at once, each a DO request with its own enclave"
+    },
+    {
+      "key": "maxCu",
+      "type": "integer",
+      "min": 0,
+      "default": 0,
+      "meaning": "the largest node paid for, in thousandths of a CU; 0 = any node (the escrow is then bounded by CU_MAX_DEFAULT)"
+    },
+    {
+      "key": "headroomPercent",
+      "type": "integer",
+      "min": 0,
+      "max": 100,
+      "default": 25,
+      "meaning": "margin over the quoted price when the runner sizes maxPricePerCuHour"
+    },
+    {
+      "key": "session.expectedInputs",
+      "type": "integer",
+      "min": 1,
+      "max": 256,
+      "default": 1,
+      "meaning": "inputs the dApp expects to send; sizes relayCap as 1 + expectedInputs rows (the etny-sw row plus one etny-so per input); 256 is MAX_SESSION_MESSAGES"
+    },
+    {
+      "key": "session.keepOpen",
+      "type": "boolean",
+      "default": false,
+      "meaning": "keep the session open until the dApp closes it instead of closing after expectedInputs"
+    },
+    {
+      "key": "session.renew",
+      "type": "boolean",
+      "default": false,
+      "meaning": "open a new order on another node when the session expires with inputs pending"
+    },
+    {
+      "key": "session.maxRenewals",
+      "type": "integer",
+      "min": 0,
+      "default": 0,
+      "meaning": "renewals allowed; must be >= 1 when renew is true"
+    },
+    {
+      "key": "esr.expectedCommits",
+      "type": "integer",
+      "min": 0,
+      "max": 100,
+      "default": 0,
+      "meaning": "state commits the dApp expects to relay per order; sizes relayCap as expectedCommits x commitCost; bounded at 100 (the securelocks refuse a run past MAX_COMMITS_PER_TASK = 256 commits)"
+    }
+  ],
+  "defaults": {
+    "mode": "task",
+    "durationHours": 1,
+    "parallelism": 1,
+    "maxCu": 0,
+    "headroomPercent": 25,
+    "session": {
+      "expectedInputs": 1,
+      "keepOpen": false,
+      "renew": false,
+      "maxRenewals": 0
+    },
+    "esr": {
+      "expectedCommits": 0
+    }
+  },
+  "rules": [
+    "a missing execution object, or a missing key, takes the default; null is not a value",
+    "values are checked after parsing: the SDKs parse EXEC_* .env strings and the EXECUTION block of .config.json into numbers and booleans before validation",
+    "unknown keys at any level are an error",
+    "the session block is accepted in both modes and applied in mode \"session\" only, so a configuration written by ecld-init carries every key",
+    "checks run in schema order and the first failing check names the error"
+  ],
+  "normalization": {
+    "rule": "a flat resources object keeps taskPrice, cpu, memory, storage, bandwidth and validators; duration moves to execution.durationHours; when both duration and execution.durationHours are given, execution.durationHours wins and duration is dropped",
+    "cases": [
+      {
+        "name": "legacy flat resources",
+        "input": {
+          "taskPrice": 10,
+          "cpu": 1,
+          "memory": 1,
+          "storage": 40,
+          "bandwidth": 1,
+          "duration": 2,
+          "validators": 1
+        },
+        "output": {
+          "resources": {
+            "taskPrice": 10,
+            "cpu": 1,
+            "memory": 1,
+            "storage": 40,
+            "bandwidth": 1,
+            "validators": 1
+          },
+          "execution": {
+            "mode": "task",
+            "durationHours": 2,
+            "parallelism": 1,
+            "maxCu": 0,
+            "headroomPercent": 25,
+            "session": {
+              "expectedInputs": 1,
+              "keepOpen": false,
+              "renew": false,
+              "maxRenewals": 0
+            },
+            "esr": {
+              "expectedCommits": 0
+            }
+          }
+        }
+      },
+      {
+        "name": "nested execution",
+        "input": {
+          "taskPrice": 2.5,
+          "cpu": 1,
+          "memory": 1,
+          "storage": 40,
+          "bandwidth": 1,
+          "validators": 1,
+          "execution": {
+            "mode": "session",
+            "durationHours": 3,
+            "session": {
+              "expectedInputs": 5
+            }
+          }
+        },
+        "output": {
+          "resources": {
+            "taskPrice": 2.5,
+            "cpu": 1,
+            "memory": 1,
+            "storage": 40,
+            "bandwidth": 1,
+            "validators": 1
+          },
+          "execution": {
+            "mode": "session",
+            "durationHours": 3,
+            "parallelism": 1,
+            "maxCu": 0,
+            "headroomPercent": 25,
+            "session": {
+              "expectedInputs": 5,
+              "keepOpen": false,
+              "renew": false,
+              "maxRenewals": 0
+            },
+            "esr": {
+              "expectedCommits": 0
+            }
+          }
+        }
+      },
+      {
+        "name": "both duration and execution.durationHours",
+        "input": {
+          "taskPrice": 10,
+          "cpu": 1,
+          "memory": 1,
+          "storage": 40,
+          "bandwidth": 1,
+          "duration": 2,
+          "validators": 1,
+          "execution": {
+            "durationHours": 4
+          }
+        },
+        "output": {
+          "resources": {
+            "taskPrice": 10,
+            "cpu": 1,
+            "memory": 1,
+            "storage": 40,
+            "bandwidth": 1,
+            "validators": 1
+          },
+          "execution": {
+            "mode": "task",
+            "durationHours": 4,
+            "parallelism": 1,
+            "maxCu": 0,
+            "headroomPercent": 25,
+            "session": {
+              "expectedInputs": 1,
+              "keepOpen": false,
+              "renew": false,
+              "maxRenewals": 0
+            },
+            "esr": {
+              "expectedCommits": 0
+            }
+          }
+        }
+      }
+    ]
+  },
+  "validationCases": [
+    {
+      "name": "mode outside the two values",
+      "input": {
+        "mode": "batch"
+      },
+      "error": "execution.mode must be \"task\" or \"session\""
+    },
+    {
+      "name": "durationHours below 1",
+      "input": {
+        "durationHours": 0
+      },
+      "error": "execution.durationHours must be an integer between 1 and 65535"
+    },
+    {
+      "name": "durationHours not an integer",
+      "input": {
+        "durationHours": 1.5
+      },
+      "error": "execution.durationHours must be an integer between 1 and 65535"
+    },
+    {
+      "name": "parallelism below 1",
+      "input": {
+        "parallelism": 0
+      },
+      "error": "execution.parallelism must be an integer >= 1"
+    },
+    {
+      "name": "maxCu negative",
+      "input": {
+        "maxCu": -1
+      },
+      "error": "execution.maxCu must be an integer >= 0 (thousandths of a CU, 0 = any node)"
+    },
+    {
+      "name": "headroomPercent above 100",
+      "input": {
+        "headroomPercent": 101
+      },
+      "error": "execution.headroomPercent must be an integer between 0 and 100"
+    },
+    {
+      "name": "session.expectedInputs above 256",
+      "input": {
+        "mode": "session",
+        "session": {
+          "expectedInputs": 257
+        }
+      },
+      "error": "execution.session.expectedInputs must be an integer between 1 and 256"
+    },
+    {
+      "name": "unknown key (typo)",
+      "input": {
+        "paralelism": 2
+      },
+      "error": "execution has an unknown key \"paralelism\""
+    },
+    {
+      "name": "session.renew without renewals",
+      "input": {
+        "mode": "session",
+        "session": {
+          "renew": true,
+          "maxRenewals": 0
+        }
+      },
+      "error": "execution.session.maxRenewals must be >= 1 when execution.session.renew is true"
+    },
+    {
+      "name": "esr.expectedCommits above 100",
+      "input": {
+        "esr": {
+          "expectedCommits": 101
+        }
+      },
+      "error": "execution.esr.expectedCommits must be an integer between 0 and 100"
+    }
+  ]
+}

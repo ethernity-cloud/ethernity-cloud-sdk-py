@@ -1,1 +1,4 @@
 *.sh text eol=lf
+# Byte-identical copies of pox-smart-contract-litvm/spec, checked against
+# tests/spec/MANIFEST.sha256: no line-ending conversion on any platform.
+tests/spec/** -text
