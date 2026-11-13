@@ -265,12 +265,16 @@ class BlockchainNetworks(Enum):
         # (`cas_provisioned`).
         "0xE35991de1f2A435e29E70406FA2781b1AffCb168", # protocol contract address
         "0xAf8Ce29103E1f59feDD49688ff070Ffc2346AF1D", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-12)
-        "https://liteforge.rpc.caldera.xyz/infra-partner-http",
+        # The LiteForge HTTP RPC, hosted by Zeeve since 2026-11-12 (docs.litvm.com
+        # get-started-on-testnet/add-to-wallet); it refuses an eth_getLogs range
+        # wider than 3000 blocks.
+        "https://rpc.testnet.liteforge.zeeve.net/",
         4441,  # Chain ID for LitVM LiteForge
         True, # EIP 1559 SUPPORT
         2,   # Gas Price in Gwei
-        2,  # maxFeePerGas in Gwei -- LitVM base fee is ~1.56 gwei (low volatility);
-            # 2 gwei clears base*1.1 (=~1.7) with the priority fee at 0.
+        2,  # maxFeePerGas in Gwei -- the cap session_registry.fee_fields refuses
+            # above; the fee is the latest block's base fee * 1.1 + the priority
+            # fee, 0.011 gwei at the chain's 0.01 gwei base fee.
         0,    # maxPriorityFeePerGas in Gwei -- LitVM suggests 0 (no tip needed)
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
@@ -293,7 +297,8 @@ class BlockchainNetworks(Enum):
         "testnet", # Network type
         "0xE35991de1f2A435e29E70406FA2781b1AffCb168", # protocol contract address
         "0xAf8Ce29103E1f59feDD49688ff070Ffc2346AF1D", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-12)
-        "https://liteforge.rpc.caldera.xyz/infra-partner-http",
+        # The LiteForge HTTP RPC of LITVM_LITEFORGE, hosted by Zeeve since 2026-11-12.
+        "https://rpc.testnet.liteforge.zeeve.net/",
         4441,  # Chain ID for LitVM LiteForge
         True, # EIP 1559 SUPPORT
         2,   # Gas Price in Gwei

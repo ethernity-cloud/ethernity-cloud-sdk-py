@@ -45,6 +45,14 @@ import sys
 
 from ethernity_cloud_sdk_py.commands import execution
 
+# The ESR section reads an enclave's StateCommitted logs in eth_getLogs
+# ranges of at most LOG_RANGE_BLOCKS blocks, inclusive (the LitVM LiteForge
+# RPC hosted by Zeeve refuses a wider one: "eth_getLogs range exceeds 3000
+# blocks; split the range"), from the head back over at most
+# COMMITS_LOOKBACK_BLOCKS blocks.
+LOG_RANGE_BLOCKS = 3000
+COMMITS_LOOKBACK_BLOCKS = 500_000
+
 IMAGE_REGISTRY_ABI = [
     {"name": "imageDetails", "stateMutability": "view", "type": "function",
      "inputs": [{"type": "string"}], "outputs": [
@@ -239,11 +247,7 @@ def section_esr(w3, esr_addr, enclave_wallet, events_n):
         pass
     if enclave_wallet:
         try:
-            latest = w3.eth.block_number
-            flt = esr.events.StateCommitted.create_filter(
-                from_block=max(0, latest - 500_000), to_block="latest",
-                argument_filters={"enclave": Web3.to_checksum_address(enclave_wallet)})
-            logs = flt.get_all_entries()[-events_n:]
+            logs = _recent_commits(w3, esr, Web3.to_checksum_address(enclave_wallet), events_n)
             out["recent_commits"] = [{
                 "key_hash": "0x" + l["args"]["key"].hex(),
                 "version": int(l["args"]["version"]),
@@ -259,6 +263,23 @@ def section_esr(w3, esr_addr, enclave_wallet, events_n):
         out["recent_commits_note"] = (
             "pass --enclave <ESR wallet> to list this enclave's state commits")
     return out
+
+
+def _recent_commits(w3, esr, enclave, events_n):
+    """The enclave's last `events_n` StateCommitted logs within
+    COMMITS_LOOKBACK_BLOCKS of the chain head, oldest first. The logs are
+    read from the head backwards in ranges of LOG_RANGE_BLOCKS, stopping at
+    the range that completes the count."""
+    head = int(w3.eth.block_number)
+    floor = max(0, head - COMMITS_LOOKBACK_BLOCKS)
+    logs = []
+    hi = head
+    while hi >= floor and len(logs) < events_n:
+        lo = max(floor, hi - LOG_RANGE_BLOCKS + 1)
+        logs = esr.events.StateCommitted.get_logs(
+            argument_filters={"enclave": enclave}, from_block=lo, to_block=hi) + logs
+        hi = lo - 1
+    return logs[-events_n:]
 
 
 def section_execution(cfg):

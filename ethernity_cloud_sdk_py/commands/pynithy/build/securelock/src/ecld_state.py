@@ -499,11 +499,13 @@ STATE_STAGE_POLL_SECONDS = 2
 
 # The fence (RESERVATION-DESIGN.md section 2): getEntriesFrom is paged by
 # ENTRIES_PAGE entries; StateCommitted logs are read in ranges of at most
-# LOG_RANGE_BLOCKS blocks (public RPCs cap a log read's range); a re-commit
-# is looked for every FENCE_POLL_SECONDS and re-signed on a landing that
-# moved the key, for FENCE_LANDING_WAIT_SECONDS per key.
+# LOG_RANGE_BLOCKS blocks, inclusive (the LitVM LiteForge RPC hosted by Zeeve
+# refuses a wider eth_getLogs range: "eth_getLogs range exceeds 3000 blocks;
+# split the range"); a re-commit is looked for every FENCE_POLL_SECONDS and
+# re-signed on a landing that moved the key, for FENCE_LANDING_WAIT_SECONDS
+# per key.
 ENTRIES_PAGE = 500
-LOG_RANGE_BLOCKS = 40000
+LOG_RANGE_BLOCKS = 3000
 FENCE_POLL_SECONDS = 2
 FENCE_LANDING_WAIT_SECONDS = 120
 
