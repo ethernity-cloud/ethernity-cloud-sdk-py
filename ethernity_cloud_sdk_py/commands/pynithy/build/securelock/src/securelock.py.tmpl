@@ -487,10 +487,12 @@ class EtnySecureLock:
 
         def fault(reason):
             # TERMINAL: registry present -> a CAS quote is MANDATORY, so a
-            # MISSING quote is as damning as a wrong one. The operator provisioned this task through an
-            # impostor CAS. Recorded here and adjudicated in execute() before
-            # the payload runs -- the task then terminates with
-            # CAS_ATTESTATION_FAULT and the order is refunded.
+            # MISSING quote is as damning as a wrong one. Recorded here and
+            # adjudicated in execute() before the payload runs -- the task
+            # then ends with CAS_ATTESTATION_FAULT (40). The trustedzone
+            # adopts no refund code from the securelock (its SECURELOCK_CODES
+            # exclude 40), so the order ends as a dApp fault,
+            # SECURITY_VIOLATION (35), without a refund.
             logging.error(f'CAS ATTESTATION INVALID: {reason}')
             self.cas_attestation_fault = reason
 
@@ -692,14 +694,17 @@ class EtnySecureLock:
     def execute(self):
         # ADJUDICATE the CAS attestation verdict recorded at startup. An
         # INVALID CAS quote terminates the task before the payload runs; the
-        # failure reporter writes the CAS_ATTESTATION_FAULT result the
-        # trustedzone forwards on-chain -- the refundable operator-fault path.
+        # failure reporter writes the CAS_ATTESTATION_FAULT (40) result, which
+        # the trustedzone ends as a dApp fault (SECURITY_VIOLATION 35): a
+        # securelock code is never a refund code.
         if getattr(self, 'cas_attestation_fault', None):
             self.task_code = TaskStatus.CAS_ATTESTATION_FAULT
             self.task_result = (
                 f'CAS_ATTESTATION_FAULT: {self.cas_attestation_fault} -- the '
-                f'operator provisioned this task through a CAS that failed '
-                f'self-attestation; order terminated for refund.')
+                f'CAS this task was provisioned through failed the securelock\'s '
+                f'attestation check against ValidatorRegistry '
+                f'{self.validator_registry_address}; the trustedzone ends the '
+                f'order as a dApp fault.')
             raise ValueError(self.task_result)
         self.payload_data = self.__get_file_content_and_decrypt(self.payload)
         self.input_data = self.__get_file_content_and_decrypt(self.input)
