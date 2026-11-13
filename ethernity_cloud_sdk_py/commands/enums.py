@@ -120,9 +120,11 @@ class BlockchainNetworks(Enum):
         "Polygon Amoy", # Network display name
         "polygon", # Network short name
         "testnet", # Network type
-        # The separate-ERC20 EthernityImplementationV2 1.1 of 2026-10-28, on
-        # the storage and token of the previous implementation 0x1579b37C....
-        "0xB8f46D2B943fFbe2A061Ae8be087ef5055AD96A3", # protocol contract address
+        # The EthernityImplementationV2 1.2 of 2026-11-12, on the storage and
+        # token of the implementations 1.1 0xB8f46D2B... and 0x1579b37C....
+        # A DO request is escrowed by the implementation it was posted
+        # through, so only 1.2 is served.
+        "0x3Aa1A0d7A8A9DaE9e13345D3261afe86D67326A4", # protocol contract address
         "0x0C0f52ebd72cd2d2cBe94F385c9e23cec528b706", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-28)
         "https://polygon-amoy-bor-rpc.publicnode.com",
         80002,  # Chain ID for Polygon Amoy Testnet
@@ -148,7 +150,7 @@ class BlockchainNetworks(Enum):
         # self-sign from MR_ENCLAVE, the securelock registered as
         # <project>-unsafe (UNSAFE_NETWORKS), as BLOXBERG_TESTNET_UNSAFE.
         "testnet", # Network type
-        "0xB8f46D2B943fFbe2A061Ae8be087ef5055AD96A3", # protocol contract address
+        "0x3Aa1A0d7A8A9DaE9e13345D3261afe86D67326A4", # protocol contract address
         "0x0C0f52ebd72cd2d2cBe94F385c9e23cec528b706", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-28)
         "https://polygon-amoy-bor-rpc.publicnode.com",
         80002,  # Chain ID for Polygon Amoy Testnet
