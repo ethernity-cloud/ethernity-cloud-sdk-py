@@ -6,6 +6,10 @@ from ethernity_cloud_sdk_py.commands import run
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 
 V3_IMAGE_REGISTRY = "0xa372a6e1Eb7Fcf343AF6b91E809b900C55001CD1"
+POX_1_2_IMPLEMENTATION = "0x7E7C6eB435E3687CfDfe18C09C0340eb70567d7b"
+VALIDATOR_REGISTRY_R3 = "0xc346BfFC83f318FbbC34987cEF85716a3f7dCcB0"
+SESSION_REGISTRY = "0x78f0c5E92E7A9Ec2f2A36A4509ED4a75D0f9463B"
+ESR = "0x0Ea1728EAE108FD3B9340ae91451348E2Cc6b4E4"
 
 
 def test_the_unsafe_testnet_shares_the_testnet_chain_and_contracts():
@@ -27,6 +31,29 @@ def test_the_unsafe_testnet_has_no_cas():
     assert BlockchainNetworks.get_session_registry_address("BLOXBERG_TESTNET_UNSAFE") == ""
     assert BlockchainNetworks.get_validator_registry_address("BLOXBERG_TESTNET_UNSAFE") == ""
     assert unsafe.template_image["Pynithy"].trusted_zone_image == "etny-pynithy-testnet-unsafe"
+
+
+def test_the_bloxberg_testnet_posts_to_the_pox_1_2_under_registry_r3():
+    """Both testnet variants post to the 1.2 implementation of 2026-11-14, not
+    to the legacy proxy, which stays the token; the set that judges them is
+    the registry R3 of the same cut. The session registry, the image registry
+    and the ESR are the ones from before the cut."""
+    for name in ("BLOXBERG_TESTNET", "BLOXBERG_TESTNET_UNSAFE"):
+        member = BlockchainNetworks[name]
+        assert member.protocol_contract_address == POX_1_2_IMPLEMENTATION, name
+        assert member.image_registry_contract_address == V3_IMAGE_REGISTRY, name
+        assert BlockchainNetworks.get_esr_contract_address(name) == ESR, name
+    assert BlockchainNetworks.get_validator_registry_address("BLOXBERG_TESTNET") == VALIDATOR_REGISTRY_R3
+    assert BlockchainNetworks.get_session_registry_address("BLOXBERG_TESTNET") == SESSION_REGISTRY
+
+
+def test_the_bloxberg_mainnet_keeps_its_own_pox():
+    """Mainnet is the same chain as the testnet (8995), served by its own PoX
+    0x549A6E06..., which the testnet's move to 1.2 leaves as it is."""
+    mainnet = BlockchainNetworks.BLOXBERG_MAINNET
+    assert mainnet.chain_id == BlockchainNetworks.BLOXBERG_TESTNET.chain_id == 8995
+    assert mainnet.protocol_contract_address == "0x549A6E06BB2084100148D50F51CF77a3436C3Ae7"
+    assert mainnet.image_registry_contract_address == "0x15D73a742529C3fb11f3FA32EF7f0CC3870ACA31"
 
 
 def test_only_the_unsafe_members_are_unsafe():

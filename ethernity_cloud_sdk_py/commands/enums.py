@@ -45,7 +45,12 @@ class BlockchainNetworks(Enum):
         # this network, so the securelock is provisioned by the ethernity-cas
         # validator set exactly as on mainnet (see `cas_provisioned`).
         "testnet", # Network type
-        "0x02882F03097fE8cD31afbdFbB5D72a498B41112c", # protocol contract address
+        # The EthernityImplementationV2 1.2 of pox-smart-contract-litvm,
+        # deployed 2026-11-14 on its own EthernityCloudStorage 0xEE3aAa1A...
+        # (PRICING-PLAN.md section 9). The token stays the legacy proxy
+        # 0x02882F03..., which is also the old PoX: the orders placed through
+        # it stay on the legacy path and are not served by 1.2.
+        "0x7E7C6eB435E3687CfDfe18C09C0340eb70567d7b", # protocol contract address
         "0xa372a6e1Eb7Fcf343AF6b91E809b900C55001CD1", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-06)
         # The endpoint the runner, the node and the CAS validators use. The
         # public core.bloxberg.org lagged thousands of blocks and stalled
@@ -76,7 +81,7 @@ class BlockchainNetworks(Enum):
         # image ran, not that an enclave ran it. The securelock is registered
         # as <project>-unsafe (UNSAFE_NETWORKS).
         "testnet", # Network type
-        "0x02882F03097fE8cD31afbdFbB5D72a498B41112c", # protocol contract address
+        "0x7E7C6eB435E3687CfDfe18C09C0340eb70567d7b", # protocol contract address
         "0xa372a6e1Eb7Fcf343AF6b91E809b900C55001CD1", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-06)
         "https://bloxberg.ethernity.cloud",
         8995,  # Example Chain ID
@@ -525,8 +530,10 @@ ESR_CONTRACT_ADDRESSES = {
 # build-side on purpose: a rogue CAS must not choose the registry that judges
 # it. "" means no registry on that network; the enclave skips the check.
 VALIDATOR_REGISTRY_ADDRESSES = {
-    # The Phase 2 ValidatorRegistry of 2026-10-21 (ethernity-cas CAS-SETUP.md).
-    "BLOXBERG_TESTNET": "0x8CC8B1dc22f0E06193161CeC79d75987b0640e02",
+    # The registry R3 of 2026-11-14 (ethernity-cas CAS-SETUP.md "The cut of
+    # 2026-11-14 on bloxberg testnet"), seeded from the sealed Phase 2
+    # registry 0x8CC8B1dc... of 2026-10-21; its set judges the PoX 1.2 above.
+    "BLOXBERG_TESTNET": "0xc346BfFC83f318FbbC34987cEF85716a3f7dCcB0",
     "LITVM_LITEFORGE": "0xbE3759f327e8643fC5A1717fb2072A0dAcBAD29E",
     "ETHEREUM_SEPOLIA": "0x8ad24b3F406A41a0F8D3440021792EB203957F43",
     # Amoy's ValidatorRegistry R2 of 2026-11-12 (ethernity-cas CAS-SETUP.md

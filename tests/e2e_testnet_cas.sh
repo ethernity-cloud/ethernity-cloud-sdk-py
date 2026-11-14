@@ -36,7 +36,7 @@
 #                         platform the CAS refuses
 #   E2E_TASK_PRICE        tETNY offered per task, default 3
 #   E2E_VERDICT_TIMEOUT   seconds to wait for the CAS verdict, default 1200
-#   VALIDATOR_REGISTRY    default 0x8CC8B1dc22f0E06193161CeC79d75987b0640e02
+#   VALIDATOR_REGISTRY    default 0xc346BfFC83f318FbbC34987cEF85716a3f7dCcB0
 #   ECLD_CAS_ADDR         optional; names the CAS instead of resolving one
 set -euo pipefail
 
@@ -46,7 +46,7 @@ PROJECT="${E2E_PROJECT:-cas-e2e}"
 WORK="${E2E_WORKDIR:-$PWD/cas-e2e-work}"
 TASK_PRICE="${E2E_TASK_PRICE:-3}"
 VERDICT_TIMEOUT="${E2E_VERDICT_TIMEOUT:-1200}"
-VALIDATOR_REGISTRY="${VALIDATOR_REGISTRY:-0x8CC8B1dc22f0E06193161CeC79d75987b0640e02}"
+VALIDATOR_REGISTRY="${VALIDATOR_REGISTRY:-0xc346BfFC83f318FbbC34987cEF85716a3f7dCcB0}"
 RPC="${ETNY_WEB3_PROVIDER:-https://bloxberg.ethernity.cloud}"
 PY="${ECLD_TEST_PYTHON:-$(command -v python3 || command -v python)}"
 
