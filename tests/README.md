@@ -112,6 +112,44 @@ and `_task_ledger` restored by `discard_step_commits`.
 `test_f_probe_start_refused.py` compiles `start_probe` from the template:
 a refused ready put leaves `self.probe` None.
 
+## The build's image at the publish
+
+`test_build_records_securelock.py` runs `build.record_securelock_image` with
+the command runner replaced: `SECURELOCK_IMAGE_DIGEST` is the local
+registry's RepoDigest of the pushed securelock and `MRENCLAVE_SECURELOCK_SIGNED`
+the image's `/signed_mrenclave.txt`, and a build that can read neither
+fails. `test_local_registry.py` runs `LocalRegistry` over a recorded
+`subprocess.run`: the `ecld-registry-<project>` container over the tree,
+mounted read-only and published on the loopback interface at a port free
+there (`local_kubo.free_port`; the daemon under Docker Desktop does not reach
+a host port it assigns itself), refused without a build tree, removed when
+docker refuses the run, when it does not answer, and on `stop`, with the tags
+pulled from it, and `stop` raising nothing without a docker binary.
+`test_publish_build_gate.py` imports `publish.py` from a directory
+holding a `.config.json` (the module builds an ImageRegistry from it at
+import) and checks the local compose rendered against the registry's address
+while the shipped one keeps `localhost:5000`, the gate's exact messages on a
+tree serving another digest and on a measurement other than the recorded
+signed MRENCLAVE, the pass line, the registry removed and the Kubo released
+when `main` fails, is interrupted or completes and when the Kubo does not
+start or is interrupted while starting, the SIGTERM/SIGHUP handler `main`
+installs (`exit_on_interrupt`), the Kubo `serving` from the image's
+registration until its certificate is on chain (left serving by a publish
+that ends in between, serving nothing when the registration fails), and the
+message a build by an older SDK ends with. `test_local_kubo.py` covers the
+publish's Kubo over a recorded `subprocess.run`: its name, the address
+registered on chain, the API port of a kept node read from `docker port`,
+the takeover of the node a previous publish left (no `docker run`; a stopped
+one started with `docker start` first), which serves from the takeover on,
+the swarm port published when free, left unpublished when in use, and the run
+made again without it, with the notice, when docker refuses the port as
+already allocated, a run refused for another reason or twice leaving no
+container, a node started afresh whose API does not come up removed and a
+taken-over one left to `release`, `stop`, also without a docker binary,
+`release` stopping the container unless it serves a registered image, when it
+is kept with the notice naming it, and `exit_on_interrupt` making a SIGTERM
+or SIGHUP raise KeyboardInterrupt.
+
 ## The execution object
 
 `test_execution.py` runs `commands/execution.py` against the

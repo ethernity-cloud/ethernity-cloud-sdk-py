@@ -261,6 +261,35 @@ def start_local_registry():
     return True
 
 
+# The securelock as this build pushes it to the local registry.
+SECURELOCK_IMAGE = "localhost:5000/etny-securelock"
+
+
+def record_securelock_image():
+    """Record in .config.json which securelock this build pushed, for
+    ecld-publish to check the image its tree serves against before it
+    measures it: SECURELOCK_IMAGE_DIGEST, the digest of the pushed manifest
+    (`sha256:...`, docker's RepoDigest of the local registry's tag), and
+    MRENCLAVE_SECURELOCK_SIGNED, the /signed_mrenclave.txt the Dockerfile
+    wrote from the signature, 64 hex digits. The build fails when either
+    cannot be read: a publish of a build without them is refused."""
+    prefix = f"{SECURELOCK_IMAGE}@"
+    digests = get_command_output(
+        f'docker inspect {SECURELOCK_IMAGE} --format "{{{{range .RepoDigests}}}}{{{{println .}}}}{{{{end}}}}"') or ""
+    digest = next((line.strip()[len(prefix):] for line in digests.splitlines() if line.strip().startswith(prefix)), "")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        print(f"ERROR: docker records no digest of {SECURELOCK_IMAGE} after the push (got '{digests.strip()}').")
+        sys.exit(1)
+    signed = get_command_output("docker run --rm --entrypoint cat etny-securelock:latest /signed_mrenclave.txt") or ""
+    match = re.search(r"\b[a-fA-F0-9]{64}\b", signed)
+    if not match:
+        print(f"ERROR: the securelock image holds no signed MRENCLAVE in /signed_mrenclave.txt (got '{signed.strip()}').")
+        sys.exit(1)
+    config.write("SECURELOCK_IMAGE_DIGEST", digest)
+    config.write("MRENCLAVE_SECURELOCK_SIGNED", match.group(0))
+    return True
+
+
 def build_and_push_services(build_dir: str):
     """
     Scan build_dir/svc, build each service via its Dockerfile,
@@ -568,7 +597,11 @@ def main():
     print(f"\u276f\u276f Pushing securelock image to local registry")
     print()
 
-    run_command("docker push localhost:5000/etny-securelock")
+    run_command(f"docker push {SECURELOCK_IMAGE}")
+
+    record_securelock_image()
+    print(f"\t✔  Securelock image {config.read('SECURELOCK_IMAGE_DIGEST')}, "
+          f"signed MRENCLAVE {config.read('MRENCLAVE_SECURELOCK_SIGNED')}")
 
     # Return to the build directory
     os.chdir("..")

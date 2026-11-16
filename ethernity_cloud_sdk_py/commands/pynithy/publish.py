@@ -25,7 +25,8 @@ from ethernity_cloud_sdk_py.commands.pynithy import cas_resolver, session_regist
 import ethernity_cloud_sdk_py.commands.pynithy.run.public_key_service as public_key_service
 from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
 from ethernity_cloud_sdk_py.commands.pynithy.ipfs_client import IPFSClient
-from ethernity_cloud_sdk_py.commands.pynithy.local_kubo import LocalKubo, own_endpoint, PUBLIC_IPFS_API
+from ethernity_cloud_sdk_py.commands.pynithy.local_kubo import LocalKubo, exit_on_interrupt, own_endpoint, PUBLIC_IPFS_API
+from ethernity_cloud_sdk_py.commands.pynithy.local_registry import LocalRegistry
 from ethernity_cloud_sdk_py.commands.spinner import Spinner
 
 from pathlib import Path
@@ -121,6 +122,45 @@ def prompt_options(message, options, default_option):
             print(
                 f'\n\t\t\tInvalid option "{user_input}".\n\t\t\tPlease enter one of: {", ".join(options)}. Default value is: {default_option}\n'
             )
+
+def recorded_securelock_build():
+    """The securelock ecld-build recorded in .config.json: the digest of the
+    manifest it pushed (SECURELOCK_IMAGE_DIGEST) and the MRENCLAVE it signed
+    (MRENCLAVE_SECURELOCK_SIGNED). A build by an SDK older than these records
+    ends the publish here, before anything is started."""
+    digest = str(config.read("SECURELOCK_IMAGE_DIGEST") or "").strip()
+    signed = str(config.read("MRENCLAVE_SECURELOCK_SIGNED") or "").strip()
+    if not digest or not signed:
+        print("Error: this build records no SECURELOCK_IMAGE_DIGEST and MRENCLAVE_SECURELOCK_SIGNED.")
+        print("       The securelock was built by an SDK older than these records; run ecld-build with the current SDK, then publish again.")
+        exit(1)
+    return digest, signed
+
+
+def pull_build_images():
+    """Pull the local compose's images from the registry serving this build's
+    tree, so that the measurement and the harvest run the tree's images and
+    not a tag of the same name left in the docker image store."""
+    command = "docker-compose -f docker-compose.yml pull"
+    try:
+        subprocess.check_output(command, shell=True, cwd=build_dir, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        raise Exception(f"Error while executing {command}: {e.output.decode().strip()}")
+    return True
+
+
+def served_securelock_digest(image):
+    """The digest of the manifest `image` was pulled by (`sha256:...`), from
+    the RepoDigests docker records for it; "" when docker records none."""
+    try:
+        output = subprocess.check_output(
+            ["docker", "inspect", image, "--format", "{{range .RepoDigests}}{{println .}}{{end}}"],
+            stderr=subprocess.STDOUT).decode()
+    except subprocess.CalledProcessError:
+        return ""
+    prefix = f"{image}@"
+    return next((line.strip()[len(prefix):] for line in output.splitlines() if line.strip().startswith(prefix)), "")
+
 
 def extract_scone_hash(service):
     command = f"docker-compose -f docker-compose.yml run --rm -e SCONE_LOG=INFO -e SCONE_HASH=1 {service}"
@@ -247,11 +287,16 @@ def get_docker_server_info():
         return False
     except FileNotFoundError:
         return False
-def update_docker_compose_files(dest_dir: Path) -> bool:
+def update_docker_compose_files(dest_dir: Path, local_registry_host: str) -> bool:
     """
     1) Restore .tmpl → .yml
     2) Replace placeholders by blind text substitution (like sed)
     3) Merge in any services under src/serverless/svc/*/docker-compose.yml
+
+    docker-compose.yml, which the publish measures and harvests with, names
+    its images at `local_registry_host` (`127.0.0.1:<port>`, the registry
+    serving this build's tree); docker-compose-final.yml, the shipped one,
+    names them at localhost:5000, where a node's registry answers.
     """
 
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
@@ -308,13 +353,14 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
         # dest_dir = Path(...)
 
         def generate_compose_data(is_final: bool):
+            registry_host = 'localhost:5000' if is_final else local_registry_host
             data = {
                 'version': '3.2',
                 'services': {
                     'las': {
                         'container_name': 'las',
                         'privileged': True,
-                        'image': 'localhost:5000/etny-las',
+                        'image': f'{registry_host}/etny-las',
                         'restart': 'unless-stopped',
                         'ports': [
                             {
@@ -334,7 +380,7 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
                     'etny-securelock': {
                         'container_name': 'etny-securelock',
                         'privileged': True,
-                        'image': 'localhost:5000/etny-securelock',
+                        'image': f'{registry_host}/etny-securelock',
                         'entrypoint': "",
                         'command': ["/usr/local/bin/python", "/etny-securelock/securelock.py"],
                         'restart': 'on-failure',
@@ -343,7 +389,7 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
                     'etny-trustedzone': {
                         'container_name': 'etny-trustedzone',
                         'privileged': True,
-                        'image': 'localhost:5000/etny-trustedzone',
+                        'image': f'{registry_host}/etny-trustedzone',
                         'entrypoint': "",
                         'command': ["/usr/local/bin/python", "/etny-trustedzone/trustedzone.py"],
                         'restart': 'on-failure',
@@ -806,8 +852,13 @@ def update_cas_session():
         print("\n\tError:", error)
         exit(1)
 def main(private_key):
+    # A SIGTERM or SIGHUP ends the publish as Ctrl+C does, through the
+    # finally below.
+    exit_on_interrupt()
     spinner = Spinner()
+    recorded_build = recorded_securelock_build()
     image_registry.set_private_key(private_key)
+    project_name = config.read("PROJECT_NAME") or "publish"
     # Where the image goes. An IPFS API of the application's own
     # (ECLD_IPFS_ENDPOINT / ECLD_IPFS_TOKEN, else the stored IPFS_ENDPOINT /
     # IPFS_TOKEN; the token is sent verbatim as the Authorization header)
@@ -815,23 +866,31 @@ def main(private_key):
     # the bootnode, which holds the image until its certificate is on chain.
     ipfs_endpoint = os.environ.get("ECLD_IPFS_ENDPOINT", "").strip() or (config.read("IPFS_ENDPOINT") or "")
     ipfs_token = os.environ.get("ECLD_IPFS_TOKEN", "").strip() or (config.read("IPFS_TOKEN") or "")
-    local_kubo = None
-    if not own_endpoint(ipfs_endpoint):
-        local_kubo = LocalKubo(config.read("PROJECT_NAME") or "publish")
-        try:
-            spinner.spin_till_done("Starting the publish's IPFS node", local_kubo.start)
-        except Exception as e:
-            print(f"\t✖  {e}")
-            exit(1)
-        ipfs_client = IPFSClient(local_kubo.api_url, None)
-    else:
-        ipfs_client = IPFSClient(ipfs_endpoint, ipfs_token or None)
-    # The public API, for the pins a V1 registry needs (below); it takes a
-    # pin only with a token.
-    public_ipfs = IPFSClient(PUBLIC_IPFS_API, ipfs_token) if ipfs_token else None
+    # The publish's containers: its Kubo, and the registry serving this
+    # build's image tree, which the publish measures and harvests from
+    # (started by _publish once docker is checked). Both are started inside
+    # the try, so the finally reaches them when the publish ends, on success
+    # and on every failure path alike, an interrupt during the Kubo's start
+    # included: the registry is removed; the Kubo is released, which removes
+    # it unless it serves a registered image whose certificate is not on
+    # chain yet (`LocalKubo.release`), a node taken over from a previous
+    # publish included.
+    local_kubo = LocalKubo(project_name) if not own_endpoint(ipfs_endpoint) else None
+    local_registry = LocalRegistry(project_name, os.path.join(os.getcwd(), "build", "registry"))
     try:
-        _publish(private_key, spinner, ipfs_client, local_kubo, public_ipfs)
+        if local_kubo is not None:
+            # The spinner prints an exception the start raises and returns None.
+            if not spinner.spin_till_done("Starting the publish's IPFS node", local_kubo.start):
+                exit(1)
+            ipfs_client = IPFSClient(local_kubo.api_url, None)
+        else:
+            ipfs_client = IPFSClient(ipfs_endpoint, ipfs_token or None)
+        # The public API, for the pins a V1 registry needs (below); it takes a
+        # pin only with a token.
+        public_ipfs = IPFSClient(PUBLIC_IPFS_API, ipfs_token) if ipfs_token else None
+        _publish(private_key, spinner, ipfs_client, local_kubo, local_registry, recorded_build, public_ipfs)
     finally:
+        local_registry.stop()
         if local_kubo is not None:
             local_kubo.release()
 
@@ -856,7 +915,7 @@ def _pin_on_public_api(spinner, public_ipfs, cids):
             exit(1)
 
 
-def _publish(private_key, spinner, ipfs_client, local_kubo, public_ipfs=None):
+def _publish(private_key, spinner, ipfs_client, local_kubo, local_registry, recorded_build, public_ipfs=None):
 
     BLOCKCHAIN_NETWORK = config.read("BLOCKCHAIN_NETWORK")
     DAPP_TYPE = config.read("DAPP_TYPE")
@@ -878,7 +937,7 @@ def _publish(private_key, spinner, ipfs_client, local_kubo, public_ipfs=None):
     os.makedirs(build_dir, exist_ok=True)
     os.makedirs(certs_dir, exist_ok=True)
     run_dir = Path(__file__).resolve().parent / "run"
-    registry_path = os.path.join(current_dir, "build", "registry")
+    registry_path = local_registry.tree
     config.write("REGISTRY_PATH", registry_path)
 
     result = spinner.spin_till_done("Checking docker service", get_docker_server_info)
@@ -887,19 +946,42 @@ def _publish(private_key, spinner, ipfs_client, local_kubo, public_ipfs=None):
         print("Error: Docker version not found. Please install and run docker service.")
         exit(1)
 
-    if not spinner.spin_till_done("Updating docker composer files", update_docker_compose_files, build_dir):
+    if not spinner.spin_till_done("Serving this build's image tree", local_registry.start):
+        exit(1)
+
+    if not spinner.spin_till_done("Updating docker composer files", update_docker_compose_files, build_dir, local_registry.host):
         exit(1)
 
     os.chdir(build_dir)
 
-    try:
-        mrenclave_securelock = spinner.spin_till_done(
-            "Calculating enclave hash",
-            extract_scone_hash,
-            "etny-securelock")
-    except Exception as e:
-        print(f"Error: {e}")
+    if not spinner.spin_till_done("Pulling this build's images", pull_build_images):
         exit(1)
+
+    mrenclave_securelock = spinner.spin_till_done(
+        "Calculating enclave hash",
+        extract_scone_hash,
+        "etny-securelock")
+    if not mrenclave_securelock:
+        exit(1)
+
+    # ----- The measured image is this build's -----
+    # The local compose names the registry serving this project's own tree,
+    # so the measurement is of the image the publish uploads and registers,
+    # whatever the machine's localhost:5000 registry holds; the digest and
+    # the signed MRENCLAVE ecld-build recorded are checked against the tree's
+    # on every network.
+    recorded_digest, recorded_signed = recorded_build
+    served_digest = served_securelock_digest(local_registry.image("etny-securelock"))
+    if served_digest != recorded_digest:
+        print(f"Error: the securelock served by this build's image tree has digest {served_digest or 'none'}, "
+              f"not the SECURELOCK_IMAGE_DIGEST recorded at build ({recorded_digest}).")
+        print("       The tree does not hold the image ecld-build recorded. Refusing to publish; run ecld-build again.")
+        exit(1)
+    if mrenclave_securelock != recorded_signed:
+        print(f"Error: securelock runtime MRENCLAVE ({mrenclave_securelock}) != MRENCLAVE_SECURELOCK_SIGNED recorded at build ({recorded_signed}).")
+        print("       The measured enclave is not the one ecld-build signed. Refusing to publish; run ecld-build again.")
+        exit(1)
+    print(f"\t✔  The measured securelock is this build's image ({served_digest})")
 
     # ----- MRENCLAVE match-gate (mainnet) -----
     # The runtime enclave (measured just above via SCONE_HASH, with the same env
