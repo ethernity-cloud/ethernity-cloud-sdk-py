@@ -9,6 +9,10 @@ BASE_URL = "https://publickey.ethernity.cloud"
 # IPFS peer, which a posted row does not.
 CHAIN_ROW_GRACE_SECONDS = 180
 POLL_SECONDS = 5
+# How long one request to the service may take to connect and answer; a
+# request that stalls is given up and the loop polls again, instead of the
+# publish hanging on it.
+REQUEST_TIMEOUT_SECONDS = 30
 # A failed extraction is recorded against the hash with publicKey -1 and a
 # reason, and a new submission of the hash runs it again. The service answers
 # the old record for a moment after a submission, so a failed answer is taken
@@ -48,7 +52,12 @@ def submit_ipfs_hash(
         "template_version": template_version,
         "docker_composer_hash": docker_composer_hash,
     }
-    response = requests.post(url, json=payload)
+    try:
+        response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT_SECONDS)
+    except requests.RequestException as e:
+        print(f"Could not reach the certificate extraction service to submit {hhash}: {e}")
+        print("Please try again later")
+        exit(1)
     if response.status_code == 200:
         return response.json()
     else:
@@ -63,9 +72,13 @@ def _failed(answer):
 
 def check_ipfs_hash_status(hash):
     """The service's answer for the hash, or None while the service does not
-    know the hash yet (404)."""
+    know the hash yet (404) or while the request does not reach it or stalls
+    (REQUEST_TIMEOUT_SECONDS): the poll loop asks again after POLL_SECONDS."""
     url = f"{BASE_URL}/api/checkHash/{hash}"
-    response = requests.get(url)
+    try:
+        response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
+    except requests.RequestException:
+        return None
     if response.status_code == 200:
         return response.json()
     if response.status_code == 404:
