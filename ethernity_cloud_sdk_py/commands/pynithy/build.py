@@ -535,7 +535,7 @@ def main():
     # same debug re-sign. Values mirror publish.py's securelock_env.
     sign_flags = (
         f"--key=/enclave-key.pem --env --heap={MEMORY_TO_ALLOCATE_FORMATED} "
-        f"--stack=4M --dlopen=1 --extensions=/lib/libbinary-fs.so"
+        f"--stack=4M --tcs=64 --dlopen=1 --extensions=/lib/libbinary-fs.so"
     )
     # A CAS-provisioned securelock (mainnet, or a testnet with a
     # SessionRegistry) is signed --production: the CAS session admits

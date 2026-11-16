@@ -378,6 +378,9 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
                     'SCONE_LAS_ADDR': 'las',
                     'SCONE_CONFIG_ID': f"{securelock}/application",
                     'SCONE_HEAP': memory,
+                    # Enclave threads: twice the node's CPUs, at most the 64 TCS the
+                    # image is signed with; the node agent exports ETNY_SCONE_QUEUES.
+                    'SCONE_QUEUES': '${ETNY_SCONE_QUEUES:-4}',
                     'SCONE_LOG': 'FATAL',
                     'SCONE_STACK': '4M',
                     'SCONE_ALLOW_DLOPEN': '1',
@@ -388,6 +391,7 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
                     'SCONE_LAS_ADDR': 'las',
                     'SCONE_CONFIG_ID': f"{trustedzone}/application",
                     'SCONE_HEAP': '256M',
+                    'SCONE_QUEUES': '${ETNY_SCONE_QUEUES:-4}',
                     'SCONE_LOG': 'FATAL',
                     'SCONE_ALLOW_DLOPEN': '1',
                     'SCONE_EXTENSIONS_PATH': '/lib/libbinary-fs.so'
@@ -395,6 +399,7 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
             elif network_type == 'testnet':
                 securelock_env = {
                     'SCONE_HEAP': memory,
+                    'SCONE_QUEUES': '${ETNY_SCONE_QUEUES:-4}',
                     'SCONE_ALLOW_DLOPEN': '1',
                     'SCONE_EXTENSIONS_PATH': '/lib/libbinary-fs.so',
                     'SCONE_ALPINE': '1',
@@ -412,6 +417,7 @@ def update_docker_compose_files(dest_dir: Path) -> bool:
                     # dies with "MAC check failed" on every task. Keep this at 256M
                     # to match the on-chain-registered trustedzone identity.
                     'SCONE_HEAP': '256M',
+                    'SCONE_QUEUES': '${ETNY_SCONE_QUEUES:-4}',
                     'SCONE_ALLOW_DLOPEN': '1',
                     'SCONE_EXTENSIONS_PATH': '/lib/libbinary-fs.so',
                     'SCONE_ALPINE': '1',
