@@ -434,8 +434,8 @@ def _print_execution(x):
     b = x["execution"]
     print("  mode:         %s   duration: %s h   parallelism: %s"
           % (b["mode"], b["durationHours"], b["parallelism"]))
-    print("  max cu:       %s%s   headroom: %s%%"
-          % (b["maxCu"], " (any node)" if b["maxCu"] == 0 else " thousandths of a CU", b["headroomPercent"]))
+    print("  max gflops:   %s%s   headroom: %s%%"
+          % (b["maxGflops"], " (any node)" if b["maxGflops"] == 0 else " GFLOPS", b["headroomPercent"]))
     s = b["session"]
     print("  session:      expected inputs %s   keep open %s   renew %s   max renewals %s%s"
           % (s["expectedInputs"], "yes" if s["keepOpen"] else "no", "yes" if s["renew"] else "no",

@@ -28,10 +28,11 @@ funded key (it pays for the order):
 The execution object (commands/execution.py, tests/spec/execution-spec.json)
 comes from .config.json's EXECUTION block, the EXEC_* variables of the
 environment over it, and the flags over both: --mode, --duration-hours (or
---duration), --parallelism, --max-cu, --headroom, --expected-inputs,
+--duration), --parallelism, --max-gflops, --headroom, --expected-inputs,
 --keep-open, --renew, --max-renewals, --expected-commits. It is validated
 before the runner is constructed and passed nested as resources["execution"],
-with the flat resources["duration"] a runner before PoX 1.2 reads.
+with the flat resources["duration"] a runner before PoX 1.2 reads. An EXEC_*
+variable outside execution.ENV_KEYS and an unknown option are usage errors.
 --relays-per-hour replaces the default execution.relays_per_hour computes;
 the runner takes neither until it carries the execution object.
 
@@ -196,7 +197,7 @@ EXECUTION_FLAGS = (
     ("mode", "mode"),
     ("duration_hours", "durationHours"),
     ("parallelism", "parallelism"),
-    ("max_cu", "maxCu"),
+    ("max_gflops", "maxGflops"),
     ("headroom", "headroomPercent"),
     ("expected_inputs", "session.expectedInputs"),
     ("keep_open", "session.keepOpen"),
@@ -357,8 +358,8 @@ def build_parser():
     ex.add_argument("--duration-hours", "--duration", dest="duration_hours", metavar="HOURS",
                     help="the order duration, 1-65535")
     ex.add_argument("--parallelism", metavar="N", help="orders opened at once, each its own enclave")
-    ex.add_argument("--max-cu", dest="max_cu", metavar="MILLI_CU",
-                    help="the largest node paid for, in thousandths of a CU; 0 = any node")
+    ex.add_argument("--max-gflops", dest="max_gflops", metavar="GFLOPS",
+                    help="the largest node paid for, in GFLOPS (one CU is 100 GFLOPS); 0 = any node")
     ex.add_argument("--headroom", metavar="PERCENT", help="margin over the quoted price, 0-100")
     ex.add_argument("--expected-inputs", dest="expected_inputs", metavar="N",
                     help="inputs the dApp expects to send per session, 1-256")

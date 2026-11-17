@@ -76,7 +76,7 @@ runners and the JS SDK) has one spelling per surface, in schema order:
 | mode | `mode` | `EXEC_MODE` | `ECLD_EXEC_MODE` | `--mode` |
 | duration | `durationHours` | `EXEC_DURATION_HOURS` | `ECLD_EXEC_DURATION_HOURS` | `--duration-hours` (`--duration`) |
 | parallelism | `parallelism` | `EXEC_PARALLELISM` | `ECLD_EXEC_PARALLELISM` | `--parallelism` |
-| node cap | `maxCu` | `EXEC_MAX_CU` | `ECLD_EXEC_MAX_CU` | `--max-cu` |
+| node cap (GFLOPS) | `maxGflops` | `EXEC_MAX_GFLOPS` | `ECLD_EXEC_MAX_GFLOPS` | `--max-gflops` |
 | price margin | `headroomPercent` | `EXEC_HEADROOM_PERCENT` | `ECLD_EXEC_HEADROOM_PERCENT` | `--headroom` |
 | session inputs | `session.expectedInputs` | `EXEC_SESSION_EXPECTED_INPUTS` | `ECLD_EXEC_SESSION_EXPECTED_INPUTS` | `--expected-inputs` |
 | keep open | `session.keepOpen` | `EXEC_SESSION_KEEP_OPEN` | `ECLD_EXEC_SESSION_KEEP_OPEN` | `--keep-open` / `--no-keep-open` |
@@ -88,8 +88,12 @@ The module is `ethernity_cloud_sdk_py.commands.execution`: `DEFAULTS`,
 `SCHEMA`, `ENV_KEYS` (the `EXEC_*` list above), `validate()`, `normalize()`
 (a legacy flat `duration` becomes `execution.durationHours`), `parse_block()`
 and `from_env()` (strings parsed into numbers and booleans before the check),
-`to_env()` and `relays_per_hour()` (`1 + session.expectedInputs`, + 10 with
-ESR enabled). An error names the key in the `.config.json` spelling,
-`execution.session.expectedInputs must be an integer between 1 and 256`, on
-every surface. The JS SDK's `execution.js` uses the same keys, the same
-`EXEC_*` list and the same messages.
+`check_env()` (a variable of the `EXEC_` prefix, or `ECLD_EXEC_` for
+`ecld-init`, that is not in the list above is refused with a message naming
+it and listing the variables), `to_env()` and `relays_per_hour()`
+(`1 + session.expectedInputs`, plus 10 with ESR enabled). An error names the
+key in the `.config.json` spelling, `execution.session.expectedInputs must be an integer between 1 and
+256`, on every surface. `ecld-publish` writes exactly the `EXEC_*` list to
+`src/.env` and drops any other `EXEC_*` line there. The JS SDK's
+`execution.js` uses the same keys, the same `EXEC_*` list and the same
+messages.

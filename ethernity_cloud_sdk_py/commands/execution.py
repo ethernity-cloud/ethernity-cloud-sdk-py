@@ -9,7 +9,8 @@ spec/execution-spec.json), which both runners and both SDKs share:
 - a missing object or key takes its default; None is not a value;
 - strings (an EXEC_* value, a hand-edited .config.json) are parsed into
   numbers and booleans before validation;
-- an unknown key at any level is an error;
+- an unknown key at any level is an error, and so is an EXEC_* variable
+  that is not one of ENV_KEYS;
 - the session block is accepted in both modes and applied in mode "session"
   only, so a block written by ecld-init carries every key;
 - the object's shape is checked first (unknown keys at the top level, then
@@ -25,7 +26,7 @@ DEFAULTS = {
     "mode": "task",
     "durationHours": 1,
     "parallelism": 1,
-    "maxCu": 0,
+    "maxGflops": 0,
     "headroomPercent": 25,
     "session": {
         "expectedInputs": 1,
@@ -47,8 +48,8 @@ SCHEMA = (
      "message": "execution.durationHours must be an integer between 1 and 65535"},
     {"key": "parallelism", "type": "integer", "min": 1, "max": None, "default": 1,
      "message": "execution.parallelism must be an integer >= 1"},
-    {"key": "maxCu", "type": "integer", "min": 0, "max": None, "default": 0,
-     "message": "execution.maxCu must be an integer >= 0 (thousandths of a CU, 0 = any node)"},
+    {"key": "maxGflops", "type": "integer", "min": 0, "max": None, "default": 0,
+     "message": "execution.maxGflops must be an integer >= 0 (GFLOPS; 0 = any node)"},
     {"key": "headroomPercent", "type": "integer", "min": 0, "max": 100, "default": 25,
      "message": "execution.headroomPercent must be an integer between 0 and 100"},
     {"key": "session.expectedInputs", "type": "integer", "min": 1, "max": 256, "default": 1,
@@ -65,13 +66,17 @@ SCHEMA = (
 
 RENEW_MESSAGE = "execution.session.maxRenewals must be >= 1 when execution.session.renew is true"
 
+# The prefix of every execution variable. A variable carrying it that is not
+# one of ENV_KEYS is refused, as an unknown key of the object is.
+ENV_PREFIX = "EXEC_"
+
 # The EXEC_* variable of each key, in schema order: the list ecld-publish
 # writes to src/.env and the template reads back (the same list in the JS SDK).
 ENV_KEYS = (
     ("EXEC_MODE", "mode"),
     ("EXEC_DURATION_HOURS", "durationHours"),
     ("EXEC_PARALLELISM", "parallelism"),
-    ("EXEC_MAX_CU", "maxCu"),
+    ("EXEC_MAX_GFLOPS", "maxGflops"),
     ("EXEC_HEADROOM_PERCENT", "headroomPercent"),
     ("EXEC_SESSION_EXPECTED_INPUTS", "session.expectedInputs"),
     ("EXEC_SESSION_KEEP_OPEN", "session.keepOpen"),
@@ -160,10 +165,25 @@ def parse_block(block):
     return _parse_block(block, "")
 
 
+def check_env(env, prefix=""):
+    """Raises ExecutionError for the first variable of `env` (a mapping such
+    as os.environ), in name order, that carries the execution prefix
+    (`prefix` + ENV_PREFIX) and is not `prefix` + one of ENV_KEYS; the
+    message names the variable and lists the execution variables. ecld-init
+    passes the prefix "ECLD_" of its unattended variables."""
+    names = [prefix + env_key for env_key, _ in ENV_KEYS]
+    for name in sorted(env):
+        if name.startswith(prefix + ENV_PREFIX) and name not in names:
+            raise ExecutionError('execution has an unknown variable "%s" (the execution variables: %s)'
+                                 % (name, ", ".join(names)))
+
+
 def from_env(env):
     """The execution object the EXEC_* variables of `env` (a mapping such as
     os.environ or a parsed .env) describe: every set, non-empty variable of
-    ENV_KEYS parsed per key, every other key left to its default."""
+    ENV_KEYS parsed per key, every other key left to its default. A variable
+    of ENV_PREFIX outside ENV_KEYS raises ExecutionError (check_env)."""
+    check_env(env)
     execution = {}
     for env_key, dotted in ENV_KEYS:
         text = env.get(env_key)

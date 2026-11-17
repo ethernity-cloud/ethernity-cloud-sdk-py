@@ -155,10 +155,15 @@ or SIGHUP raise KeyboardInterrupt.
 `test_execution.py` runs `commands/execution.py` against the
 `execution-spec.json` copy: the defaults and the schema rows, the three
 normalization cases, the ten validation cases with their exact messages, the
-`EXEC_*` parsing (`from_env`) and export (`to_env`), and the relays-per-hour
-default. `test_init_execution.py` drives `ecld-init` as
+`EXEC_*` parsing (`from_env`) and export (`to_env`), the refusal of an
+`EXEC_*` or `ECLD_EXEC_*` variable outside `ENV_KEYS` (`check_env`), and the
+relays-per-hour default. `test_init_execution.py` drives `ecld-init` as
 `unattended_acceptance.sh` does and asserts the complete `EXECUTION` block it
-writes, the `ECLD_EXEC_*` parsing and the schema's message on a bad value;
+writes, the `ECLD_EXEC_*` parsing and the message on a bad value, an unknown
+stored key or an unknown `ECLD_EXEC_*` variable;
 `test_run_task.py` covers `ecld-run`'s fractional `--task-price`, the
 execution flags over the `EXEC_*` variables over the `.config.json` block,
-and the nested `execution` the runner receives beside the flat `duration`.
+the usage error of an unknown option or `EXEC_*` variable, and the nested
+`execution` the runner receives beside the flat `duration`.
+`test_publish_execution.py` covers the publish's gate on the stored block
+and `write_env` leaving exactly the `ENV_KEYS` variables in `src/.env`.

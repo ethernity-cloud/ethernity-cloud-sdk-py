@@ -85,8 +85,12 @@ def prompt_options(message, options, default_option):
 def write_env(key, value, env_file=envfile):
     """
     Write or update key-value pairs in a .env file in the current working directory.
+    A line whose variable carries the execution prefix (execution.ENV_PREFIX) and
+    is not one of execution.ENV_KEYS is dropped, so the file's execution variables
+    are exactly those the template reads.
     """
     env_path = os.path.join(current_dir, env_file)
+    execution_keys = {env_key for env_key, _ in execution.ENV_KEYS}
     if not os.path.exists(env_path):
         with open(env_path, "w") as f:
             f.write(f"{key}={value}\n")
@@ -96,9 +100,12 @@ def write_env(key, value, env_file=envfile):
             lines = f.readlines()
         with open(env_path, "w") as f:
             for line in lines:
+                name = line.split("=", 1)[0].strip()
                 if line.startswith(f"{key}="):
                     f.write(f"{key}={value}\n")
                     replaced = True
+                elif name.startswith(execution.ENV_PREFIX) and name not in execution_keys:
+                    continue
                 else:
                     f.write(line)
             if not replaced:
@@ -340,7 +347,8 @@ def main():
         write_env("NETWORK_TYPE", NETWORK_TYPE)
         write_env("TRUSTED_ZONE_IMAGE", config.read("TRUSTED_ZONE_IMAGE"))
         # The EXECUTION block of .config.json as the EXEC_* variables
-        # templates/src/ethernity_task.py reads (execution.ENV_KEYS).
+        # templates/src/ethernity_task.py reads (execution.ENV_KEYS); write_env
+        # drops every other EXEC_* line.
         for key, value in execution.to_env(config.read_execution()).items():
             write_env(key, value)
 

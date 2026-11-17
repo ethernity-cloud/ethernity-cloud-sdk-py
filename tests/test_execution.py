@@ -1,7 +1,9 @@
 """commands/execution.py against tests/spec/execution-spec.json (the copy of
 pox-smart-contract-litvm's fixture): the defaults and the schema rows, the
 three normalization cases, the ten validation cases with their exact
-messages, the EXEC_* parsing and export, and the relays-per-hour default."""
+messages, the EXEC_* parsing and export, the refusal of an EXEC_* or
+ECLD_EXEC_* variable outside ENV_KEYS and of a stored maxCu key, and the
+relays-per-hour default."""
 import json
 from pathlib import Path
 
@@ -108,23 +110,57 @@ def test_the_shape_is_checked_before_the_values_as_the_js_sdk_checks_it():
     assert str(raised.value) == 'execution.session has an unknown key "x"'
 
 
+def test_a_stored_max_cu_is_an_unknown_key():
+    with pytest.raises(ExecutionError) as raised:
+        execution.validate({"maxCu": 1500})
+    assert str(raised.value) == 'execution has an unknown key "maxCu"'
+    with pytest.raises(ExecutionError) as raised:
+        execution.validate(execution.complete({"maxCu": 1500}))
+    assert str(raised.value) == 'execution has an unknown key "maxCu"'
+
+
+EXECUTION_VARIABLES = ", ".join(env for env, _ in execution.ENV_KEYS)
+
+
+def test_an_exec_variable_outside_env_keys_is_refused_naming_it():
+    with pytest.raises(ExecutionError) as raised:
+        execution.from_env({"EXEC_MAX_CU": "150", "EXEC_MODE": "task"})
+    assert str(raised.value) == (
+        'execution has an unknown variable "EXEC_MAX_CU" (the execution variables: %s)' % EXECUTION_VARIABLES)
+    with pytest.raises(ExecutionError) as raised:
+        execution.check_env({"EXEC_MAX_GFLOPS": "150", "EXEC_MAX_CU": "150"})
+    assert '"EXEC_MAX_CU"' in str(raised.value)
+    execution.check_env({"EXEC_MAX_GFLOPS": "150", "ECLD_EXEC_MAX_CU": "150", "EXECUTOR": "x"})
+
+
+def test_an_ecld_exec_variable_outside_env_keys_is_refused_naming_it():
+    ecld_variables = ", ".join("ECLD_" + env for env, _ in execution.ENV_KEYS)
+    with pytest.raises(ExecutionError) as raised:
+        execution.check_env({"ECLD_EXEC_MAX_CU": "150", "ECLD_EXEC_MODE": "task"}, "ECLD_")
+    assert str(raised.value) == (
+        'execution has an unknown variable "ECLD_EXEC_MAX_CU" (the execution variables: %s)' % ecld_variables)
+    execution.check_env({"ECLD_EXEC_MAX_GFLOPS": "150", "EXEC_MAX_CU": "150"}, "ECLD_")
+
+
 def test_env_keys_are_the_ten_exec_variables_in_schema_order():
     assert [env for env, _ in execution.ENV_KEYS] == [
-        "EXEC_MODE", "EXEC_DURATION_HOURS", "EXEC_PARALLELISM", "EXEC_MAX_CU",
+        "EXEC_MODE", "EXEC_DURATION_HOURS", "EXEC_PARALLELISM", "EXEC_MAX_GFLOPS",
         "EXEC_HEADROOM_PERCENT", "EXEC_SESSION_EXPECTED_INPUTS", "EXEC_SESSION_KEEP_OPEN",
         "EXEC_SESSION_RENEW", "EXEC_SESSION_MAX_RENEWALS", "EXEC_ESR_EXPECTED_COMMITS"]
     assert [key for _, key in execution.ENV_KEYS] == [row["key"] for row in SPEC["schema"]]
+    assert execution.ENV_PREFIX == "EXEC_"
+    assert all(env.startswith(execution.ENV_PREFIX) for env, _ in execution.ENV_KEYS)
 
 
 def test_from_env_parses_strings_into_numbers_and_booleans_before_validation():
     parsed = execution.from_env({
         "EXEC_MODE": "session", "EXEC_DURATION_HOURS": "3", "EXEC_PARALLELISM": " 2 ",
-        "EXEC_MAX_CU": "1500", "EXEC_HEADROOM_PERCENT": "10",
+        "EXEC_MAX_GFLOPS": "150", "EXEC_HEADROOM_PERCENT": "10",
         "EXEC_SESSION_EXPECTED_INPUTS": "5", "EXEC_SESSION_KEEP_OPEN": "true",
         "EXEC_SESSION_RENEW": "1", "EXEC_SESSION_MAX_RENEWALS": "2",
         "EXEC_ESR_EXPECTED_COMMITS": "4", "OTHER": "ignored"})
     assert parsed == {
-        "mode": "session", "durationHours": 3, "parallelism": 2, "maxCu": 1500, "headroomPercent": 10,
+        "mode": "session", "durationHours": 3, "parallelism": 2, "maxGflops": 150, "headroomPercent": 10,
         "session": {"expectedInputs": 5, "keepOpen": True, "renew": True, "maxRenewals": 2},
         "esr": {"expectedCommits": 4}}
     assert execution.validate(parsed) == parsed
@@ -158,7 +194,7 @@ def test_a_numeric_string_outside_the_decimal_grammar_is_refused_as_the_js_sdk_r
 def test_a_decimal_string_with_a_fraction_is_a_float_and_a_signed_one_an_int():
     assert execution.parse_value("durationHours", "2.0") == 2.0
     assert execution.parse_value("durationHours", "+3") == 3
-    assert execution.parse_value("maxCu", "-1") == -1
+    assert execution.parse_value("maxGflops", "-1") == -1
     assert execution.validate(execution.from_env({"EXEC_DURATION_HOURS": "2.0"}))["durationHours"] == 2
 
 
@@ -174,7 +210,7 @@ def test_to_env_writes_every_variable_as_a_string_and_round_trips():
     env = execution.to_env(execution.DEFAULTS)
     assert list(env) == [key for key, _ in execution.ENV_KEYS]
     assert env == {
-        "EXEC_MODE": "task", "EXEC_DURATION_HOURS": "1", "EXEC_PARALLELISM": "1", "EXEC_MAX_CU": "0",
+        "EXEC_MODE": "task", "EXEC_DURATION_HOURS": "1", "EXEC_PARALLELISM": "1", "EXEC_MAX_GFLOPS": "0",
         "EXEC_HEADROOM_PERCENT": "25", "EXEC_SESSION_EXPECTED_INPUTS": "1", "EXEC_SESSION_KEEP_OPEN": "false",
         "EXEC_SESSION_RENEW": "false", "EXEC_SESSION_MAX_RENEWALS": "0", "EXEC_ESR_EXPECTED_COMMITS": "0"}
     full = execution.validate({"mode": "session", "session": {"expectedInputs": 7, "keepOpen": True}})

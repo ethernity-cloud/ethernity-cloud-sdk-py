@@ -67,7 +67,8 @@ def execute_task(code) -> None:
     # The execution object: the EXEC_* variables ecld-publish exported to
     # src/.env from .config.json's EXECUTION block (tests/spec/
     # execution-spec.json), parsed and checked; an unset variable takes its
-    # default. It is passed nested, and its durationHours as the flat
+    # default, and an EXEC_* variable that is not one of execution.ENV_KEYS
+    # is refused. It is passed nested, and its durationHours as the flat
     # "duration" a runner before PoX 1.2 reads.
     execution_config = execution.validate(execution.from_env(os.environ))
 

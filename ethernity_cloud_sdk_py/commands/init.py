@@ -208,12 +208,16 @@ def configure_execution():
     the ECLD_ prefix), else, interactively, the answer to its prompt, else the
     value already stored, else the default. The session keys are asked only in
     mode "session" and esr.expectedCommits only with ESR enabled; a stored
-    block, or a value, outside the schema ends the run with the schema's
-    message.
+    block or a value outside the schema, or an ECLD_EXEC_* variable that is
+    not one of these, ends the run with its message (execution.check_env).
     """
     block = config.read_execution()
     if not isinstance(block, dict):
         die("execution must be an object")
+    try:
+        execution.check_env(os.environ, "ECLD_")
+    except execution.ExecutionError as e:
+        die(str(e))
     esr_enabled = bool(config.read_esr().get("enabled"))
     env = {env_key: env_str("ECLD_" + env_key) for env_key, _ in execution.ENV_KEYS}
     from_env = {dotted for env_key, dotted in execution.ENV_KEYS if env[env_key] is not None}

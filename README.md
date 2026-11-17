@@ -213,10 +213,11 @@ The sdk has been tested on the following operating systems:
   request, so until that runner use whole tokens.
   The execution object (below) comes from `.config.json`, the `EXEC_*`
   variables over it, and the flags `--mode`, `--duration-hours` (`--duration`),
-  `--parallelism`, `--max-cu`, `--headroom`, `--expected-inputs`,
+  `--parallelism`, `--max-gflops`, `--headroom`, `--expected-inputs`,
   `--keep-open` / `--no-keep-open`, `--renew` / `--no-renew`,
   `--max-renewals`, `--expected-commits` over both;
-  `--relays-per-hour` replaces its computed default.
+  `--relays-per-hour` replaces its computed default. An unknown option is a
+  usage error.
   `--input <file>` / `--input-text <string>` send the task's input dataset, read
   as `___etny_data_set___` (`ecld.input`); it travels encrypted, and the
   trustedzone checks it against the sha256 the request carries.
@@ -234,7 +235,7 @@ The sdk has been tested on the following operating systems:
     "mode": "task",
     "durationHours": 1,
     "parallelism": 1,
-    "maxCu": 0,
+    "maxGflops": 0,
     "headroomPercent": 25,
     "session": { "expectedInputs": 1, "keepOpen": false, "renew": false, "maxRenewals": 0 },
     "esr": { "expectedCommits": 0 }
@@ -242,8 +243,8 @@ The sdk has been tested on the following operating systems:
   ```
   `mode` is `task` (one payload run per order) or `session` (the order stays
   open for inputs); `durationHours` the order duration, 1-65535;
-  `parallelism` the orders opened at once, each its own enclave; `maxCu` the
-  largest node paid for, in thousandths of a CU, 0 = any node;
+  `parallelism` the orders opened at once, each its own enclave; `maxGflops`
+  the largest node paid for, in GFLOPS (one CU is 100 GFLOPS), 0 = any node;
   `headroomPercent` the margin over the quoted price, 0-100;
   `session.expectedInputs` the inputs the dApp expects to send, 1-256;
   `session.keepOpen` keeps the session open until the dApp closes it;
@@ -257,14 +258,17 @@ The sdk has been tested on the following operating systems:
   `esr.expectedCommits` with ESR enabled. A missing key takes its default;
   strings are parsed into numbers and booleans before the check; an unknown
   key, or a value outside its bounds, is refused with the schema's message
-  (`execution.durationHours must be an integer between 1 and 65535`). The
-  session block is accepted in both modes and applied in mode `session`.
+  (`execution.durationHours must be an integer between 1 and 65535`), and so
+  is an `EXEC_*` (unattended `ECLD_EXEC_*`) variable that is not one of the
+  execution variables below. The session block is accepted in both modes and
+  applied in mode `session`.
   `ecld-publish` exports the block to `src/.env` as `EXEC_MODE`,
-  `EXEC_DURATION_HOURS`, `EXEC_PARALLELISM`, `EXEC_MAX_CU`,
+  `EXEC_DURATION_HOURS`, `EXEC_PARALLELISM`, `EXEC_MAX_GFLOPS`,
   `EXEC_HEADROOM_PERCENT`, `EXEC_SESSION_EXPECTED_INPUTS`,
   `EXEC_SESSION_KEEP_OPEN`, `EXEC_SESSION_RENEW`, `EXEC_SESSION_MAX_RENEWALS`
-  and `EXEC_ESR_EXPECTED_COMMITS`, which `src/ethernity_task.py` reads back
-  (`execution.from_env(os.environ)`) and passes nested as
+  and `EXEC_ESR_EXPECTED_COMMITS`, and drops any other `EXEC_*` line of that
+  file; `src/ethernity_task.py` reads them back
+  (`execution.from_env(os.environ)`) and passes the object nested as
   `resources["execution"]`, with `durationHours` also as the flat `duration`
   a runner before PoX 1.2 reads. The relays an order needs per hour of its
   duration default to `1 + expectedInputs` rows, plus 10 commits with ESR

@@ -199,13 +199,48 @@ def test_a_stored_block_that_is_not_an_object_is_named_and_not_replaced(ecld_run
 
 
 def test_every_execution_flag_is_parsed_and_the_boolean_flags_stand_alone(ecld_run):
-    assert ecld_run("--mode", "session", "--parallelism", "2", "--max-cu", "1500", "--headroom", "10",
+    assert ecld_run("--mode", "session", "--parallelism", "2", "--max-gflops", "150", "--headroom", "10",
                     "--expected-inputs", "5", "--keep-open", "--renew", "--max-renewals", "2",
                     "--expected-commits", "4") == 0
     assert _resources()["execution"] == {
-        "mode": "session", "durationHours": 1, "parallelism": 2, "maxCu": 1500, "headroomPercent": 10,
+        "mode": "session", "durationHours": 1, "parallelism": 2, "maxGflops": 150, "headroomPercent": 10,
         "session": {"expectedInputs": 5, "keepOpen": True, "renew": True, "maxRenewals": 2},
         "esr": {"expectedCommits": 4}}
+
+
+def test_max_gflops_sets_the_node_cap_in_gflops(ecld_run, monkeypatch):
+    assert ecld_run("--max-gflops", "150") == 0
+    assert _resources()["execution"]["maxGflops"] == 150
+    monkeypatch.setenv("EXEC_MAX_GFLOPS", "200")
+    assert ecld_run() == 0
+    assert _resources()["execution"]["maxGflops"] == 200
+
+
+def test_an_unknown_option_is_a_usage_error_and_never_reaches_the_payload(ecld_run, capsys):
+    with pytest.raises(SystemExit) as raised:
+        ecld_run("--max-cu", "150")
+    assert raised.value.code == 2
+    assert "unrecognized arguments: --max-cu" in capsys.readouterr().err
+    assert _Runner.run_args is None
+
+
+def test_an_exec_variable_outside_the_execution_variables_is_a_usage_error_naming_it(ecld_run, monkeypatch, capsys):
+    monkeypatch.setenv("EXEC_MAX_CU", "1500")
+    with pytest.raises(SystemExit) as raised:
+        ecld_run()
+    assert raised.value.code == 2
+    assert 'execution has an unknown variable "EXEC_MAX_CU" (the execution variables: %s)' % (
+        ", ".join(env for env, _ in execution.ENV_KEYS)) in capsys.readouterr().err
+    assert _Runner.run_args is None
+
+
+def test_a_stored_max_cu_is_a_usage_error_as_an_unknown_key(ecld_run, tmp_path, capsys):
+    (tmp_path / ".config.json").write_text(json.dumps({"EXECUTION": {"maxCu": 1500}}), encoding="utf-8")
+    with pytest.raises(SystemExit) as raised:
+        ecld_run()
+    assert raised.value.code == 2
+    assert 'execution has an unknown key "maxCu"' in capsys.readouterr().err
+    assert _Runner.run_args is None
 
 
 def test_an_execution_value_outside_the_schema_is_a_usage_error_with_the_schemas_message(ecld_run, capsys):

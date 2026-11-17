@@ -4,13 +4,16 @@ published; a block inside it passes the gate. ecld-publish runs in a process
 of its own, as test_testnet_cas.py runs it (publish.py reads .config.json
 from the process's CWD at import); unattended, without a key, so a run that
 passes the gate stops at the key with the ECLD_PRIVATE_KEY message. No chain
-is reached."""
+is reached. The export of the block to src/.env through write_env leaves
+exactly the EXEC_* variables of execution.ENV_KEYS in the file."""
 import json
 import os
 import subprocess
 import sys
 
 import pytest
+
+from ethernity_cloud_sdk_py.commands import execution
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,6 +34,7 @@ def _ecld_publish(tmp_path, block):
     ({"mode": "batch", "session": 3}, "execution.session must be an object"),
     ({"durationHours": 0}, "execution.durationHours must be an integer between 1 and 65535"),
     ({"paralelism": 2}, 'execution has an unknown key "paralelism"'),
+    ({"maxCu": 1500}, 'execution has an unknown key "maxCu"'),
 ])
 def test_a_block_outside_the_schema_ends_the_publish_before_the_key(tmp_path, block, message):
     run = _ecld_publish(tmp_path, block)
@@ -44,3 +48,36 @@ def test_a_block_inside_the_schema_passes_the_gate(tmp_path):
     assert run.returncode == 2, run.stdout + run.stderr
     assert "ECLD_PRIVATE_KEY" in run.stdout
     assert "ERROR: execution" not in run.stdout
+
+
+# What the publish does with the block after the five runtime variables.
+_EXPORT = """
+import os
+from ethernity_cloud_sdk_py.commands import execution
+from ethernity_cloud_sdk_py.commands import publish
+publish.current_dir = os.getcwd()
+publish.write_env("VERSION", "v3", "src/.env")
+for key, value in execution.to_env(publish.config.read_execution()).items():
+    publish.write_env(key, value, "src/.env")
+"""
+
+
+def test_write_env_drops_an_exec_max_cu_line(tmp_path):
+    (tmp_path / ".config.json").write_text(json.dumps({
+        "PROJECT_NAME": "demo", "BLOCKCHAIN_NETWORK": "BLOXBERG_TESTNET", "DAPP_TYPE": "Pynithy",
+        "VERSION": "v3", "EXECUTION": {"maxGflops": 150}}), encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / ".env").write_text(
+        "PROJECT_NAME=demo\nEXEC_MODE=task\nEXEC_MAX_CU=1500\nOTHER=1\n", encoding="utf-8")
+    env = {name: value for name, value in os.environ.items() if not name.startswith("ECLD_")}
+    env.update(PYTHONPATH=REPO_ROOT, PYTHONIOENCODING="utf-8", ECLD_NON_INTERACTIVE="1")
+    run = subprocess.run([sys.executable, "-c", _EXPORT], cwd=tmp_path, env=env,
+                         capture_output=True, text=True, encoding="utf-8")
+    assert run.returncode == 0, run.stdout + run.stderr
+    lines = dict(line.split("=", 1) for line in
+                 (tmp_path / "src" / ".env").read_text(encoding="utf-8").splitlines())
+    assert "EXEC_MAX_CU" not in lines
+    assert [name for name in lines if name.startswith("EXEC_")] == [key for key, _ in execution.ENV_KEYS]
+    assert lines["EXEC_MAX_GFLOPS"] == "150"
+    assert lines["PROJECT_NAME"] == "demo" and lines["OTHER"] == "1" and lines["VERSION"] == "v3"
+    assert execution.validate(execution.from_env(lines))["maxGflops"] == 150

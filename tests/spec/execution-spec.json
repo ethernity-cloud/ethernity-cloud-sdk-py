@@ -28,11 +28,11 @@
       "meaning": "orders runTasks opens at once, each a DO request with its own enclave"
     },
     {
-      "key": "maxCu",
+      "key": "maxGflops",
       "type": "integer",
       "min": 0,
       "default": 0,
-      "meaning": "the largest node paid for, in thousandths of a CU; 0 = any node (the escrow is then bounded by CU_MAX_DEFAULT)"
+      "meaning": "the largest node paid for, in GFLOPS (one CU is 100 GFLOPS); 0 = any node (the escrow is then bounded by the pricing parameter gflopsMaxDefault)"
     },
     {
       "key": "headroomPercent",
@@ -82,7 +82,7 @@
     "mode": "task",
     "durationHours": 1,
     "parallelism": 1,
-    "maxCu": 0,
+    "maxGflops": 0,
     "headroomPercent": 25,
     "session": {
       "expectedInputs": 1,
@@ -128,7 +128,7 @@
             "mode": "task",
             "durationHours": 2,
             "parallelism": 1,
-            "maxCu": 0,
+            "maxGflops": 0,
             "headroomPercent": 25,
             "session": {
               "expectedInputs": 1,
@@ -172,7 +172,7 @@
             "mode": "session",
             "durationHours": 3,
             "parallelism": 1,
-            "maxCu": 0,
+            "maxGflops": 0,
             "headroomPercent": 25,
             "session": {
               "expectedInputs": 5,
@@ -213,7 +213,7 @@
             "mode": "task",
             "durationHours": 4,
             "parallelism": 1,
-            "maxCu": 0,
+            "maxGflops": 0,
             "headroomPercent": 25,
             "session": {
               "expectedInputs": 1,
@@ -259,11 +259,11 @@
       "error": "execution.parallelism must be an integer >= 1"
     },
     {
-      "name": "maxCu negative",
+      "name": "maxGflops negative",
       "input": {
-        "maxCu": -1
+        "maxGflops": -1
       },
-      "error": "execution.maxCu must be an integer >= 0 (thousandths of a CU, 0 = any node)"
+      "error": "execution.maxGflops must be an integer >= 0 (GFLOPS; 0 = any node)"
     },
     {
       "name": "headroomPercent above 100",
