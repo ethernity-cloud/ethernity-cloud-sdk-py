@@ -6,7 +6,7 @@ from ethernity_cloud_sdk_py.commands import run
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 
 V3_IMAGE_REGISTRY = "0xa372a6e1Eb7Fcf343AF6b91E809b900C55001CD1"
-POX_1_2_IMPLEMENTATION = "0x7E7C6eB435E3687CfDfe18C09C0340eb70567d7b"
+POX_1_2_IMPLEMENTATION = "0x830c781F0352050343211B6BFA83600B3e77647C"
 VALIDATOR_REGISTRY_R3 = "0xc346BfFC83f318FbbC34987cEF85716a3f7dCcB0"
 SESSION_REGISTRY = "0x78f0c5E92E7A9Ec2f2A36A4509ED4a75D0f9463B"
 ESR = "0x0Ea1728EAE108FD3B9340ae91451348E2Cc6b4E4"
@@ -34,10 +34,11 @@ def test_the_unsafe_testnet_has_no_cas():
 
 
 def test_the_bloxberg_testnet_posts_to_the_pox_1_2_under_registry_r3():
-    """Both testnet variants post to the 1.2 implementation of 2026-11-14, not
-    to the legacy proxy, which stays the token; the set that judges them is
-    the registry R3 of the same cut. The session registry, the image registry
-    and the ESR are the ones from before the cut."""
+    """Both testnet variants post to the 1.2 implementation deployed
+    2026-11-18, not to the legacy proxy, which stays the token; the set that
+    judges them is the registry R3 of the cut of 2026-11-14. The session
+    registry, the image registry and the ESR are the ones from before the
+    cut."""
     for name in ("BLOXBERG_TESTNET", "BLOXBERG_TESTNET_UNSAFE"):
         member = BlockchainNetworks[name]
         assert member.protocol_contract_address == POX_1_2_IMPLEMENTATION, name

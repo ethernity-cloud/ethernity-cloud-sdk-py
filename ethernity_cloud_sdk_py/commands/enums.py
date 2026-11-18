@@ -46,11 +46,12 @@ class BlockchainNetworks(Enum):
         # validator set exactly as on mainnet (see `cas_provisioned`).
         "testnet", # Network type
         # The EthernityImplementationV2 1.2 of pox-smart-contract-litvm,
-        # deployed 2026-11-14 on its own EthernityCloudStorage 0xEE3aAa1A...
-        # (PRICING-PLAN.md section 9). The token stays the legacy proxy
-        # 0x02882F03..., which is also the old PoX: the orders placed through
-        # it stay on the legacy path and are not served by 1.2.
-        "0x7E7C6eB435E3687CfDfe18C09C0340eb70567d7b", # protocol contract address
+        # deployed 2026-11-18 on the EthernityCloudStorage 0xEE3aAa1A... of
+        # 2026-11-14 (PRICING-PLAN.md section 9); its compute figures are
+        # whole GFLOPS. The token stays the legacy proxy 0x02882F03..., which
+        # is also the old PoX: the orders placed through it stay on the legacy
+        # path and are not served by 1.2.
+        "0x830c781F0352050343211B6BFA83600B3e77647C", # protocol contract address
         "0xa372a6e1Eb7Fcf343AF6b91E809b900C55001CD1", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-06)
         # The endpoint the runner, the node and the CAS validators use. The
         # public core.bloxberg.org lagged thousands of blocks and stalled
@@ -81,7 +82,7 @@ class BlockchainNetworks(Enum):
         # image ran, not that an enclave ran it. The securelock is registered
         # as <project>-unsafe (UNSAFE_NETWORKS).
         "testnet", # Network type
-        "0x7E7C6eB435E3687CfDfe18C09C0340eb70567d7b", # protocol contract address
+        "0x830c781F0352050343211B6BFA83600B3e77647C", # protocol contract address
         "0xa372a6e1Eb7Fcf343AF6b91E809b900C55001CD1", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-06)
         "https://bloxberg.ethernity.cloud",
         8995,  # Example Chain ID
@@ -125,11 +126,12 @@ class BlockchainNetworks(Enum):
         "Polygon Amoy", # Network display name
         "polygon", # Network short name
         "testnet", # Network type
-        # The EthernityImplementationV2 1.2 of 2026-11-12, on the storage and
-        # token of the implementations 1.1 0xB8f46D2B... and 0x1579b37C....
-        # A DO request is escrowed by the implementation it was posted
-        # through, so only 1.2 is served.
-        "0x3Aa1A0d7A8A9DaE9e13345D3261afe86D67326A4", # protocol contract address
+        # The EthernityImplementationV2 1.2 deployed 2026-11-18, whose compute
+        # figures are whole GFLOPS, on the storage and token of the
+        # implementations 1.1 0xB8f46D2B... and 0x1579b37C.... A DO request
+        # is escrowed by the implementation it was posted through, so only
+        # this one is served.
+        "0xd1182deA61CDa785C320cdBE5888EaC4178cAAF2", # protocol contract address
         "0x0C0f52ebd72cd2d2cBe94F385c9e23cec528b706", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-28)
         "https://polygon-amoy-bor-rpc.publicnode.com",
         80002,  # Chain ID for Polygon Amoy Testnet
@@ -155,7 +157,7 @@ class BlockchainNetworks(Enum):
         # self-sign from MR_ENCLAVE, the securelock registered as
         # <project>-unsafe (UNSAFE_NETWORKS), as BLOXBERG_TESTNET_UNSAFE.
         "testnet", # Network type
-        "0x3Aa1A0d7A8A9DaE9e13345D3261afe86D67326A4", # protocol contract address
+        "0xd1182deA61CDa785C320cdBE5888EaC4178cAAF2", # protocol contract address
         "0x0C0f52ebd72cd2d2cBe94F385c9e23cec528b706", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-28)
         "https://polygon-amoy-bor-rpc.publicnode.com",
         80002,  # Chain ID for Polygon Amoy Testnet
