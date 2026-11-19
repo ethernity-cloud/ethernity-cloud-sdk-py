@@ -168,6 +168,47 @@ The sdk has been tested on the following operating systems:
   minutes for the service to queue the image from the chain event before
   posting the hash itself.
 
+  The fee per gas: on a network that sends EIP-1559 transactions (Polygon
+  mainnet and Amoy, Ethereum Sepolia, LitVM LiteForge, the IoTeX testnet)
+  every transaction of the publish offers the latest block's base fee plus a
+  tenth, plus the network's priority fee (32 gwei on Polygon), as its
+  `maxFeePerGas`, and none is sent above a ceiling. The default ceiling is
+  the network's: 500 gwei on Polygon mainnet, which admits a base fee up to
+  425.4 gwei, 64 on Amoy, 15 on Sepolia, 2 on LitVM LiteForge and 1500 on the
+  IoTeX testnet. `ECLD_MAX_FEE_PER_GAS` in the environment, a positive whole
+  number of gwei, is the ceiling instead, on whichever of those networks the
+  publish runs:
+  ```sh
+  ECLD_MAX_FEE_PER_GAS=600 ecld-publish
+  ```
+  On Windows, in PowerShell and in cmd.exe, where it stays set for the rest
+  of the session:
+  ```powershell
+  $env:ECLD_MAX_FEE_PER_GAS = "600"; ecld-publish
+  ```
+  ```bat
+  set "ECLD_MAX_FEE_PER_GAS=600" && ecld-publish
+  ```
+  The quotes of the cmd.exe form keep the space before `&&` out of the
+  value: `set ECLD_MAX_FEE_PER_GAS=600 && ecld-publish` stores `600` with a
+  space after it, which is refused.
+  `ecld-publish` checks the fee right after the gas balance, before it posts
+  a session, pins the image or sends a transaction, and again at each send,
+  from the base fee of the block that is the latest then. Above the ceiling
+  it stops with exit code 1 and a message that states the base fee, the fee,
+  the ceiling and what set it (`Polygon Mainnet: a base fee of 426 gwei puts
+  the fee per gas at 500.6 gwei, above the network's default ceiling of 500
+  gwei (ECLD_MAX_FEE_PER_GAS sets another, in whole gwei)`). A value of the
+  variable that is not a positive whole number in up to 30 digits alone
+  (`500 gwei`, `1.5`, `0`, a number with spaces around it) stops it the same
+  way, with the variable and the value named; an empty one leaves the
+  network's default. A network that sends legacy transactions (bloxberg)
+  pays its fixed gas price and does not read the variable.
+  `ecld-run` and the dApp's `src/ethernity_task.py` send through the runner
+  (ethernity-cloud-runner-py), which bounds the fee of its own transactions:
+  500 gwei on Polygon mainnet by default, and the same variable for another
+  ceiling. This package requires runner 0.5.38, the first that does both.
+
 - **Test (local, no chain)**: To run your backend locally with the enclave's own
   executor — no SGX, no gas, instant — run:
   ```sh

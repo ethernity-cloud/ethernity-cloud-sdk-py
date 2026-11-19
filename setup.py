@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 setup(
     name="ethernity-cloud-sdk-py",
-    version="0.10.6",
+    version="0.10.7",
     url="https://github.com/ethernity-cloud/ethernity-cloud-sdk-py",
     author="Ethernity Cloud Team",
     author_email="contact@ethernity.cloud",
@@ -27,8 +27,10 @@ setup(
         "typing-extensions",
         # 0.5.16: run(input_data=...) and the ERROR status of a non-zero task code,
         # which ecld-run's --input and exit code rely on, and artefacts of any
-        # size through the payload intake.
-        "ethernity-cloud-runner-py>=0.5.32",
+        # size through the payload intake. 0.5.38: Polygon mainnet's fee
+        # ceiling of 500 gwei and the variable ECLD_MAX_FEE_PER_GAS, which
+        # ecld-run's sends are bounded by.
+        "ethernity-cloud-runner-py>=0.5.38",
         "pyyaml",
         # Add other dependencies here
     ],

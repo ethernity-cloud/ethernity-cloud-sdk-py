@@ -12,6 +12,13 @@ BLOXBERG = BlockchainNetworks.BLOXBERG_TESTNET
 KEY = "0x" + "22" * 32
 
 
+@pytest.fixture(autouse=True)
+def _network_default_ceiling(monkeypatch):
+    """The fees here are checked against the networks' default ceilings
+    (ECLD_MAX_FEE_PER_GAS over one is test_fee_ceiling.py's)."""
+    monkeypatch.delenv("ECLD_MAX_FEE_PER_GAS", raising=False)
+
+
 class _Block:
     def __init__(self, base_fee):
         self.baseFeePerGas = base_fee

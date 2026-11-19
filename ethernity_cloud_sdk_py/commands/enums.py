@@ -110,7 +110,10 @@ class BlockchainNetworks(Enum):
         137,  # Chain ID for Polygon Mainnet
         True, # EIP 1559 SUPPORT
         200,  # Gas Price in Gwei
-        200,  # maxFeePerGas in Gwei
+        500,  # maxFeePerGas in Gwei -- the default ceiling of the fee per gas
+              # (commands/fees.py; ECLD_MAX_FEE_PER_GAS sets another). The fee
+              # is the latest block's base fee * 1.1 + the priority fee, so
+              # this admits a base fee up to 425.4 gwei.
         32,  # maxPriorityFeePerGas in Gwei
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
@@ -279,9 +282,10 @@ class BlockchainNetworks(Enum):
         4441,  # Chain ID for LitVM LiteForge
         True, # EIP 1559 SUPPORT
         2,   # Gas Price in Gwei
-        2,  # maxFeePerGas in Gwei -- the cap session_registry.fee_fields refuses
-            # above; the fee is the latest block's base fee * 1.1 + the priority
-            # fee, 0.011 gwei at the chain's 0.01 gwei base fee.
+        2,  # maxFeePerGas in Gwei -- the default ceiling of the fee per gas
+            # (commands/fees.py; ECLD_MAX_FEE_PER_GAS sets another); the fee is
+            # the latest block's base fee * 1.1 + the priority fee, 0.011 gwei
+            # at the chain's 0.01 gwei base fee.
         0,    # maxPriorityFeePerGas in Gwei -- LitVM suggests 0 (no tip needed)
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(

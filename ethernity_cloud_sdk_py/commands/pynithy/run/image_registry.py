@@ -12,6 +12,7 @@ from web3.middleware import ExtraDataToPOAMiddleware
 from eth_account import Account
 
 from pathlib import Path
+from ethernity_cloud_sdk_py.commands import fees
 from ethernity_cloud_sdk_py.commands.config import Config, config
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.spinner import Spinner
@@ -228,28 +229,31 @@ class ImageRegistry:
         except Exception as e:
             print(f"An error occurred while sending transaction: {e}")
 
+    def check_fee_per_gas(self):
+        """On an EIP-1559 network, whether a transaction would be built at the
+        latest block's base fee: fees.eip1559_fee_fields raises FeeCeilingError
+        when the fee per gas is above its ceiling, as it does at a send.
+        ecld-publish calls it on such a network beside the gas balance check,
+        and register_securelock_image before each addImage transaction it
+        builds."""
+        fees.eip1559_fee_fields(self.provider, self.blockchain_config)
+        return True
+
     def _transaction_options(self, gas_limit):
         """The options of a transaction from the publishing wallet: its pending
         nonce and the network's fee model, with `gas_limit` named where fees are
-        not quoted."""
+        not quoted. On an EIP-1559 network the fee fields are those of
+        fees.eip1559_fee_fields, which raises FeeCeilingError above the ceiling
+        of the fee per gas."""
         nonce = self.provider.eth.get_transaction_count(
             self.acct.address, "pending"
         )
         if self.blockchain_config.is_eip1559:
-            latest_block = self.provider.eth.get_block("latest")
-
-            max_fee_per_gas = int(latest_block.baseFeePerGas * 1.1) + self.provider.to_wei(self.blockchain_config.max_priority_fee_per_gas, 'gwei') # 10% increase in previous block gas price + priority fee
-
-            if max_fee_per_gas > self.provider.to_wei(self.blockchain_config.max_fee_per_gas, 'gwei'):
-                raise Exception("Network fee per gas is too high!")
-
             return {
-                "type": 2,
                 "nonce": nonce,
                 "chainId": self.blockchain_config.chain_id,
                 "from": self.acct.address,
-                'maxFeePerGas': max_fee_per_gas,
-                'maxPriorityFeePerGas': self.provider.to_wei(self.blockchain_config.max_priority_fee_per_gas, 'gwei'),
+                **fees.eip1559_fee_fields(self.provider, self.blockchain_config),
             }
         return {
             "nonce": nonce,
@@ -441,6 +445,12 @@ class ImageRegistry:
             for attempt in range(1, max_retries + 1):
                 try:
                     time.sleep(5)
+                    # A fee per gas above its ceiling ends the registration
+                    # with the refusal as its error. It is checked here, ahead
+                    # of build_transaction_add_image, which returns False for
+                    # any failure and is tried again.
+                    if self.blockchain_config.is_eip1559:
+                        self.check_fee_per_gas()
                     txn = spinner.spin_till_done(
                         f"Building transaction for securelock registration (version '{version_key}')",
                         self.build_transaction_add_image,
@@ -462,6 +472,8 @@ class ImageRegistry:
                     print(f"\t   Processing transaction 0x{txn.hash.hex()}")
                     last_result = self.process_transaction(txn)
                     break  # this channel registered successfully
+                except fees.FeeCeilingError:
+                    raise
                 except Exception as e:
                     if "already in registry" in str(e).lower():
                         print(f"\t✔  securelock already registered under version '{version_key}' (skipping)")

@@ -167,3 +167,43 @@ the usage error of an unknown option or `EXEC_*` variable, and the nested
 `execution` the runner receives beside the flat `duration`.
 `test_publish_execution.py` covers the publish's gate on the stored block
 and `write_env` leaving exactly the `ENV_KEYS` variables in `src/.env`.
+
+## The fee per gas and its ceiling
+
+`test_fee_ceiling.py` covers `commands/fees.py` through its three users,
+with web3 replaced. The default ceiling and the priority fee of every
+EIP-1559 network of the table are held by value. At the image registry's
+transaction options (`ImageRegistry._transaction_options`, the module
+imported from a directory holding a `.config.json`) and at the
+SessionRegistry's fee fields (`session_registry.fee_fields`), each case on
+both: Polygon mainnet's default ceiling of 500 gwei (a base fee of 425 gwei
+gives `maxFeePerGas` 499.5 gwei, 426 is refused after one read of the block,
+with one text for both sends; a fee equal to the ceiling is sent and a fee
+one wei above it is refused);
+`ECLD_MAX_FEE_PER_GAS` as the ceiling, above and below Polygon mainnet's
+default and on every EIP-1559 network of the table; an empty value leaving
+the default; a value that is not a positive whole number in up to 30 digits
+alone (a number with spaces around it, one of 31 digits and one of 5000,
+more than `int()` converts by default, included) refused with the variable
+and the value named, before the block is read, and one of 30 digits taken as
+the ceiling; a network of legacy transactions (bloxberg) taking its gas
+price whatever the variable holds.
+An `addImage` transaction is not built and `ImageRegistry._send` raises
+above the ceiling, with nothing signed.
+`ImageRegistry.register_securelock_image`, the registration on a registry
+that takes an image by `addImage`, raises the refusal after one read of the
+block, with nothing built and no second attempt; at a base fee the ceiling
+admits it reads the block before each of its two transactions and again as
+it builds each, and on bloxberg it reads none. `ecld-publish`'s main
+(`commands/publish.py`) runs in-process from the key to the publish script,
+its image registry the real one over the stand-in chain, the ownership check
+and the publish script (which posts the session, pins the image and sends
+the registration) replaced by recorders and every request of `requests`
+recorded: above the ceiling (on Polygon mainnet, and on every EIP-1559
+network at a base fee equal to its default ceiling), and on a variable it
+cannot read, it stops at the step after the gas balance with the refusal
+printed and exit code 1, having reached neither recorder, made no request
+and signed nothing; at a base fee the ceiling admits it goes on to the
+publish script; on bloxberg the step does not run.
+`test_session_registry_fees.py` holds the SessionRegistry's fees at the
+networks' default ceilings.

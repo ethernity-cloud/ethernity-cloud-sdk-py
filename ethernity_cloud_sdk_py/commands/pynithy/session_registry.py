@@ -26,6 +26,8 @@ from eth_abi import decode
 from web3 import Web3
 from web3.exceptions import ContractLogicError
 
+from ethernity_cloud_sdk_py.commands import fees
+
 try:
     from web3.middleware import ExtraDataToPOAMiddleware as _poa_middleware
 except Exception:
@@ -166,20 +168,16 @@ def _web3(provider_url):
 
 def fee_fields(w3, network):
     """The fee fields of a transaction on `network` (a BlockchainNetworks
-    member): on an EIP-1559 chain a type-2 transaction whose maxFeePerGas is
-    the latest block's base fee plus a tenth and the network's priority fee,
-    refused above the network's maxFeePerGas; otherwise the network's gas
-    price. The same model as the image registry's transactions."""
+    member): on an EIP-1559 chain those of fees.eip1559_fee_fields, which the
+    image registry's transactions take too (a type-2 transaction whose
+    maxFeePerGas is the latest block's base fee plus a tenth and the
+    network's priority fee), with a fee per gas above its ceiling refused by
+    exiting with that function's message; otherwise the network's gas price."""
     if network.is_eip1559:
-        base_fee = w3.eth.get_block("latest").baseFeePerGas
-        priority = w3.to_wei(network.max_priority_fee_per_gas, "gwei")
-        max_fee = int(base_fee * 1.1) + priority
-        cap = w3.to_wei(network.max_fee_per_gas, "gwei")
-        if max_fee > cap:
-            raise SystemExit(
-                f"{network.display_name}: a base fee of {base_fee} wei puts the fee per gas "
-                f"at {max_fee} wei, above the network's {cap} wei")
-        return {"type": 2, "maxFeePerGas": max_fee, "maxPriorityFeePerGas": priority}
+        try:
+            return fees.eip1559_fee_fields(w3, network)
+        except fees.FeeCeilingError as e:
+            raise SystemExit(str(e))
     return {"gasPrice": w3.to_wei(network.gas_price, "gwei")}
 
 

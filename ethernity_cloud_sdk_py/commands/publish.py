@@ -247,8 +247,16 @@ def main():
         On Polygon Amoy testnet, get free POL here:
         https://faucet.polygon.technology  (select Amoy)
 """)
-        exit(1) 
-        
+        exit(1)
+
+    # On an EIP-1559 network the fee per gas is checked against its ceiling
+    # (commands/fees.py) here, before the session is posted, anything is
+    # pinned or a transaction is sent; each send checks it again, at the base
+    # fee of the block that is the latest then. The spinner prints the refusal.
+    if NETWORK_CONFIG.is_eip1559 and not spinner.spin_till_done(
+            "Checking the fee per gas", image_registry.check_fee_per_gas):
+        exit(1)
+
     if not spinner.spin_till_done("Checking enclave ownership", image_registry.check_image_permissions):
         print("\t\u2714 Enclave ownership verification failed.")
         print()
