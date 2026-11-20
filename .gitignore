@@ -15,6 +15,7 @@ __pycache__/
 .Python
 develop-eggs/
 dist/
+dist-*/
 registry/
 downloads/
 eggs/
