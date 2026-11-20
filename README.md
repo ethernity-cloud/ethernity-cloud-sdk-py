@@ -166,7 +166,26 @@ The sdk has been tested on the following operating systems:
   connected to, and `ECLD_KUBO_IMAGE` (default `ipfs/kubo:release`) the
   docker image it runs. On such a registry the publish waits up to three
   minutes for the service to queue the image from the chain event before
-  posting the hash itself.
+  posting the hash itself. On a network whose image registry records an
+  image only with its certificate (the registry's first generation: bloxberg
+  mainnet, Polygon mainnet) nothing is on chain for the bootnode to pin
+  before the certificate exists, so a publish that runs its own node pins
+  the compose and the image on the public IPFS API (`ipfs.ethernity.cloud`)
+  before the certificate is extracted. That API takes a pin only with a
+  writer token, `IPFS_TOKEN` (or `ECLD_IPFS_TOKEN`); without one the publish
+  stops there, before anything is on chain. Each pin is asked with its
+  progress (`pin/add` with `progress=true`), so the API answers with a line
+  every half second while it fetches the blocks from your node and with one
+  that names the CID once the pin is complete. When an answer ends without
+  that line, breaks, stays silent for two minutes or is an error, the
+  publish asks the API whether it holds the pin (`pin/ls`), and when it does
+  not it asks for the pin again ten seconds later; a pin is asked five times
+  at most, and not again once an hour has passed since the first. A pin that
+  took more than one attempt says how many. A token the API refuses (a 401
+  or 403) ends the pin at once, and a pin that fails ends the publish with
+  what its last attempt ended with: the status and the start of the API's
+  answer, its error message, how the connection failed, that the answer
+  ended without the pin, or that the pin's time ran out.
 
   The fee per gas: on a network that sends EIP-1559 transactions (Polygon
   mainnet and Amoy, Ethereum Sepolia, LitVM LiteForge, the IoTeX testnet)

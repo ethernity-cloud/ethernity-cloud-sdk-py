@@ -150,6 +150,46 @@ taken-over one left to `release`, `stop`, also without a docker binary,
 is kept with the notice naming it, and `exit_on_interrupt` making a SIGTERM
 or SIGHUP raise KeyboardInterrupt.
 
+## The pin on the public IPFS API
+
+`test_ipfs_client_pin.py` runs `IPFSClient.pin`, which a publish on a
+first-generation image registry asks of the public IPFS API, with
+`requests.post` and the module's clock replaced. The bounds are held by
+value: 5 attempts, 10 s between two, 30 s to connect and for a `pin/ls`,
+120 s of silence, a byte at a read. The `pin/add` is asked with
+`recursive=true&progress=true` under the client's `Authorization` header and
+`Accept-Encoding: identity`, and read as a stream, its two timeouts cut to
+the time the pin has left; the pin is true at the line that names the CID
+among its `Pins`, after progress lines in the forms of Kubo 0.4.23 and of
+later versions or at once, with nothing printed. The lines are put together
+from the pieces the reads return (lines split and joined, a byte each), and
+a last line without a line feed is read. An answer that ends without the pin
+line, a read timeout or a dropped connection mid-stream, a request that gets
+no answer, an error line and a status that is no refusal are each followed
+by `pin/ls` under the `Authorization` header alone: a CID it lists is pinned
+after one `pin/add`, and anything else (the API's "not pinned", another CID
+listed, the CID listed under a 500, `Keys` that are a string holding the CID
+or a number, a 503, no answer) is followed 10 s later by another `pin/add`,
+with `the pin took 2 attempts` printed when that one reports the pin. Five
+attempts without a pin are false with what the last one ended with printed
+once: the answer's end (a line whose `Pins` do not name the CID, or are a
+string holding it, an object keyed by it, a number or `true`, is not its
+pin), the exception, the status and the first 300 characters of the body, or
+the error line's `Message` (which may name the CID). A 401 and a 403 are
+false after one request, at the first attempt and at a later one, with the
+status and the body printed. The body of a status is read as far as its
+first 300 characters, 1200 bytes of UTF-8, and left when the pin's time runs
+out. Once the pin's time has passed no attempt starts and no `pin/ls` is
+asked; an answer still arriving then, in lines or in bytes without a line
+end, is left at the next piece a read returns, the line that piece completes
+is still read, and a pin given no time makes no request. Under the publish's
+spinner a pin is one line and a repeated pin one more. Three cases run over
+HTTP against an `http.server` on the loopback interface: the pin read from a
+chunked stream asked with `Accept-Encoding: identity`, a silent answer left
+at the silence bound, before the server ends it, and settled by `pin/ls`,
+and a pin line read when it arrives in an answer without chunks or a length
+that stays open.
+
 ## The execution object
 
 `test_execution.py` runs `commands/execution.py` against the

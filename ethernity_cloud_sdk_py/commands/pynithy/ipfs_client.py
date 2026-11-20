@@ -3,6 +3,7 @@ import argparse
 import os, sys, time
 import json
 import functools
+import itertools
 import random
 from tqdm import tqdm
 from requests.exceptions import RequestException, SSLError
@@ -12,6 +13,22 @@ from requests_toolbelt.multipart.encoder import (
 )
 
 RETRY_COUNT = 10  # Or keep configurable elsewhere
+
+# IPFSClient.pin: how many times `pin/add` is asked for one CID, and how long
+# the client waits before it asks again.
+PIN_ATTEMPTS = 5
+PIN_RETRY_SECONDS = 10
+# How long a request of the pin may take to connect, and its `pin/ls` to
+# answer.
+PIN_REQUEST_SECONDS = 30
+# The longest silence in an answer of `pin/add`. Asked with progress=true, the
+# API writes a line every half second while it fetches the blocks.
+PIN_SILENCE_SECONDS = 120
+# How many bytes one read of an answer of `pin/add` asks for. A read of one
+# returns when a byte arrives, whatever the framing of the answer; a read of
+# more waits until that many have arrived, or the body or the chunk they are
+# in has ended.
+PIN_READ_BYTES = 1
 
 def retry_on_failure(max_attempts=RETRY_COUNT, initial_delay=10, backoff_factor=2, jitter=0.1):
     def decorator_retry(func):
@@ -37,6 +54,15 @@ def retry_on_failure(max_attempts=RETRY_COUNT, initial_delay=10, backoff_factor=
             return None
         return wrapper
     return decorator_retry
+
+
+def _json_object(text):
+    """The JSON object `text` holds, or {} when it holds anything else."""
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 class IPFSClient:
@@ -213,16 +239,97 @@ class IPFSClient:
 
     def pin(self, cid: str, timeout_secs: int = 3600) -> bool:
         """Pin `cid` on this API (`pin/add`), which fetches the blocks it does
-        not hold from the peers that provide them; the API answers once the
-        pin is complete. Returns True when the pin is reported."""
-        response = requests.post(
-            f"{self.api_url}/api/v0/pin/add?arg={cid}&recursive=true",
-            headers=self.headers, timeout=timeout_secs)
-        if response.status_code != 200:
-            print(f"\tFailed to pin {cid} on {self.api_url}: status {response.status_code}")
-            print(f"\t{response.text[:300]}")
+        not hold from the peers that provide them. The pin is asked with
+        progress=true: the API answers with a stream of lines, one every half
+        second while it fetches and one that names the CID among its Pins
+        once the pin is complete. An attempt that reads no such line (the
+        answer ends, breaks, stays silent for PIN_SILENCE_SECONDS, or is an
+        error) is followed by `pin/ls`, which tells whether the API holds the
+        pin; when it does not, `pin/add` is asked again after
+        PIN_RETRY_SECONDS, PIN_ATTEMPTS times at most, and no request starts
+        once `timeout_secs` have passed. The `pin/add` being read then ends
+        later: at the next byte of an answer still arriving, and up to
+        PIN_SILENCE_SECONDS after the last byte of one that has fallen
+        silent. A 401 or 403, the API refusing the token, ends the pin at
+        once. Returns True when the pin is complete, having printed the
+        number of attempts when there was more than one; otherwise prints
+        what the last attempt ended with and returns False."""
+        deadline = time.monotonic() + timeout_secs
+        for attempt in range(1, PIN_ATTEMPTS + 1):
+            failure, refused = self._pin_add(cid, deadline)
+            if failure is None or (not refused and self._pinned(cid, deadline)):
+                if attempt > 1:
+                    print(f"\tthe pin took {attempt} attempts")
+                return True
+            if refused or attempt == PIN_ATTEMPTS or deadline - time.monotonic() <= PIN_RETRY_SECONDS:
+                break
+            time.sleep(PIN_RETRY_SECONDS)
+        tried = f" in {attempt} attempts" if attempt > 1 else ""
+        print(f"\tFailed to pin {cid} on {self.api_url}{tried}: {failure}")
+        return False
+
+    def _pin_add(self, cid, deadline):
+        """One `pin/add` of `cid`, asked without compression and read
+        PIN_READ_BYTES at a read until the line that reports the pin (in an
+        answer that is no 200, until its first 300 characters), the answer's
+        end or the first read that returns after `deadline`. Returns
+        (failure, refused): failure is None when the pin is reported and says
+        what the attempt ended with otherwise; refused is True when that is a
+        401 or 403."""
+        out_of_time = "the pin was not complete when its time ran out"
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return out_of_time, False
+        try:
+            response = requests.post(
+                f"{self.api_url}/api/v0/pin/add?arg={cid}&recursive=true&progress=true",
+                headers={**self.headers, "Accept-Encoding": "identity"}, stream=True,
+                timeout=(min(PIN_REQUEST_SECONDS, left), min(PIN_SILENCE_SECONDS, left)))
+            try:
+                if response.status_code != 200:
+                    # The first 300 characters of a body in UTF-8 are within
+                    # its first 1200 bytes.
+                    body = b""
+                    for chunk in response.iter_content(PIN_READ_BYTES):
+                        body += chunk
+                        if len(body) >= 1200 or time.monotonic() >= deadline:
+                            break
+                    return (f"status {response.status_code}\n\t{body.decode('utf-8', 'replace')[:300]}",
+                            response.status_code in (401, 403))
+                pending = b""
+                # The line feed after the answer's end makes a line of what
+                # the answer left without one.
+                for chunk in itertools.chain(response.iter_content(PIN_READ_BYTES), [b"\n"]):
+                    *lines, pending = (pending + chunk).split(b"\n")
+                    for answer in map(_json_object, lines):
+                        pins = answer.get("Pins")
+                        if isinstance(pins, list) and cid in pins:
+                            return None, False
+                        if answer.get("Type") == "error":
+                            return str(answer.get("Message")), False
+                    if time.monotonic() >= deadline:
+                        return out_of_time, False
+                return "the answer ended without the pin", False
+            finally:
+                response.close()
+        except RequestException as e:
+            return f"{type(e).__name__}: {e}", False
+
+    def _pinned(self, cid, deadline):
+        """Whether `pin/ls` lists `cid` among the recursive pins of this API.
+        False also when the API does not answer the question, and when no
+        time is left before `deadline` to ask it."""
+        left = deadline - time.monotonic()
+        if left <= 0:
             return False
-        return cid in response.text
+        try:
+            response = requests.post(
+                f"{self.api_url}/api/v0/pin/ls?arg={cid}&type=recursive",
+                headers=self.headers, timeout=min(PIN_REQUEST_SECONDS, left))
+        except RequestException:
+            return False
+        keys = _json_object(response.text).get("Keys")
+        return response.status_code == 200 and isinstance(keys, dict) and cid in keys
 
     def upload(self, path: str, only_hash: bool = False) -> str:
         if os.path.isfile(path):
