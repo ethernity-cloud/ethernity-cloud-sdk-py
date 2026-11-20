@@ -31,8 +31,9 @@ environment over it, and the flags over both: --mode, --duration-hours (or
 --duration), --parallelism, --max-gflops, --headroom, --expected-inputs,
 --keep-open, --renew, --max-renewals, --expected-commits. It is validated
 before the runner is constructed and passed nested as resources["execution"],
-with the flat resources["duration"] a runner before PoX 1.2 reads. An EXEC_*
-variable outside execution.ENV_KEYS and an unknown option are usage errors.
+with the flat resources["duration"] a runner without the PoX 2.0 execution
+object reads. An EXEC_* variable outside execution.ENV_KEYS and an unknown
+option are usage errors.
 --relays-per-hour replaces the default execution.relays_per_hour computes;
 the runner takes neither until it carries the execution object.
 
@@ -181,8 +182,8 @@ def _resolve_private_key(cfg):
 
 def _task_price(text):
     """--task-price in tokens: a non-negative decimal. A whole number is passed
-    as an int, a fractional one as the Decimal it was given (a runner before
-    PoX 1.2 takes whole tokens only)."""
+    as an int, a fractional one as the Decimal it was given (a runner without
+    the PoX 2.0 execution object takes whole tokens only)."""
     try:
         price = Decimal(text.strip())
     except (InvalidOperation, ValueError, AttributeError):
@@ -235,7 +236,7 @@ def _build_execution(args, cfg, env):
 def _build_resources(args, run_execution):
     """The resources object run() expects: the flat keys from the flags, the
     validated execution nested, and its durationHours as the flat duration a
-    runner before PoX 1.2 reads."""
+    runner without the PoX 2.0 execution object reads."""
     return {
         "taskPrice": args.task_price,
         "cpu": args.cpu,
@@ -339,9 +340,9 @@ def build_parser():
     # Resource flags (run()'s resources object).
     parser.add_argument("--task-price", type=_task_price, default=3,
                         help="price in tokens (default: 3); a fractional price, e.g. 2.5, is passed as "
-                             "given and needs a PoX 1.2 runner: runner-py 0.5.29 cannot encode it into "
-                             "the request, and on a network with an ERC-20 token it sends the approve "
-                             "transaction before failing there")
+                             "given and needs a runner that carries the PoX 2.0 execution object: "
+                             "runner-py 0.5.29 cannot encode it into the request, and on a network with "
+                             "an ERC-20 token it sends the approve transaction before failing there")
     parser.add_argument("--cpu", type=int, default=1)
     parser.add_argument("--memory", type=int, default=1)
     parser.add_argument("--storage", type=int, default=10)

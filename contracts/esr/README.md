@@ -73,7 +73,7 @@ entry, as from single transactions.
 
 The instances the securelocks commit to carry `commit`, `commitFor` and the
 enumeration, not `commitForBatch`; the registry is immutable, so the batch is
-on a new instance per network, deployed together with PoX 1.2
+on a new instance per network, deployed together with PoX 2.0
 (pox-smart-contract-litvm `deploy/08-deploy-esr.js`; the contract is compiled
 for paris, as every contract deployed on bloxberg is, since bloxberg's EVM
 rejects PUSH0). The Amoy batch instance is deployed and referenced by nothing:

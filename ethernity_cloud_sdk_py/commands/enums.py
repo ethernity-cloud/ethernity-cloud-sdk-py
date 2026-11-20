@@ -45,12 +45,12 @@ class BlockchainNetworks(Enum):
         # this network, so the securelock is provisioned by the ethernity-cas
         # validator set exactly as on mainnet (see `cas_provisioned`).
         "testnet", # Network type
-        # The EthernityImplementationV2 1.2 of pox-smart-contract-litvm,
+        # The PoX 2.0 implementation of pox-smart-contract-litvm,
         # deployed 2026-11-18 on the EthernityCloudStorage 0xEE3aAa1A... of
         # 2026-11-14 (PRICING-PLAN.md section 9); its compute figures are
         # whole GFLOPS. The token stays the legacy proxy 0x02882F03..., which
         # is also the old PoX: the orders placed through it stay on the legacy
-        # path and are not served by 1.2.
+        # path and are not served by PoX 2.0.
         "0x830c781F0352050343211B6BFA83600B3e77647C", # protocol contract address
         "0xa372a6e1Eb7Fcf343AF6b91E809b900C55001CD1", # Image Registry Contract Address (ECImageRegistryV3, deployed 2026-10-06)
         # The endpoint the runner, the node and the CAS validators use. The
@@ -129,7 +129,7 @@ class BlockchainNetworks(Enum):
         "Polygon Amoy", # Network display name
         "polygon", # Network short name
         "testnet", # Network type
-        # The EthernityImplementationV2 1.2 deployed 2026-11-18, whose compute
+        # The PoX 2.0 implementation deployed 2026-11-18, whose compute
         # figures are whole GFLOPS, on the storage and token of the
         # implementations 1.1 0xB8f46D2B... and 0x1579b37C.... A DO request
         # is escrowed by the implementation it was posted through, so only
@@ -538,7 +538,7 @@ ESR_CONTRACT_ADDRESSES = {
 VALIDATOR_REGISTRY_ADDRESSES = {
     # The registry R3 of 2026-11-14 (ethernity-cas CAS-SETUP.md "The cut of
     # 2026-11-14 on bloxberg testnet"), seeded from the sealed Phase 2
-    # registry 0x8CC8B1dc... of 2026-10-21; its set judges the PoX 1.2 above.
+    # registry 0x8CC8B1dc... of 2026-10-21; its set judges the PoX 2.0 above.
     "BLOXBERG_TESTNET": "0xc346BfFC83f318FbbC34987cEF85716a3f7dCcB0",
     "LITVM_LITEFORGE": "0xbE3759f327e8643fC5A1717fb2072A0dAcBAD29E",
     "ETHEREUM_SEPOLIA": "0x8ad24b3F406A41a0F8D3440021792EB203957F43",

@@ -202,7 +202,7 @@ base fee is rejected). The commit builder detects the chain's fee model
 - [x] `commitForBatch` in the contract (pox-smart-contract-litvm
       `EnclaveStateRegistry.sol`, this directory's copy,
       `test/EnclaveStateRegistry.test.js`)
-- [ ] `commitForBatch` registry deployed per network with PoX 1.2
+- [ ] `commitForBatch` registry deployed per network with PoX 2.0
       (`deploy/08-deploy-esr.js`; compiled for paris, as every contract
       deployed on bloxberg is); the addresses in `commands/enums.py`
 - [ ] node: bundle an order's commits with `commitForBatch` above the cap,

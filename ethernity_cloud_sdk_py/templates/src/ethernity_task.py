@@ -69,11 +69,12 @@ def execute_task(code) -> None:
     # execution-spec.json), parsed and checked; an unset variable takes its
     # default, and an EXEC_* variable that is not one of execution.ENV_KEYS
     # is refused. It is passed nested, and its durationHours as the flat
-    # "duration" a runner before PoX 1.2 reads.
+    # "duration" a runner without the PoX 2.0 execution object reads.
     execution_config = execution.validate(execution.from_env(os.environ))
 
     resources = {
-        # tokens; a runner before PoX 1.2 takes whole tokens only
+        # tokens; a runner without the PoX 2.0 execution object takes
+        # whole tokens only
         "taskPrice": 3,
         "cpu": 1,
         "memory": 1,

@@ -267,10 +267,11 @@ The sdk has been tested on the following operating systems:
   `ECLD_KEY_PASSWORD` (or an interactive prompt). Resources are tunable with
   `--task-price`/`--cpu`/`--memory`/`--storage`/`--bandwidth`/`--validators`;
   `--task-price` takes a fractional price in tokens (`2.5`), passed as given;
-  it needs a PoX 1.2 runner: runner-py 0.5.29 cannot encode a fractional
-  price into its request (`uint256 taskPrice`), and on a network with an
-  ERC-20 token it sends the `approve` transaction first and fails at the
-  request, so until that runner use whole tokens.
+  it needs a runner that carries the PoX 2.0 execution object: runner-py
+  0.5.29 cannot encode a fractional price into its request
+  (`uint256 taskPrice`), and on a network with an ERC-20 token it sends the
+  `approve` transaction first and fails at the request, so until that runner
+  use whole tokens.
   The execution object (below) comes from `.config.json`, the `EXEC_*`
   variables over it, and the flags `--mode`, `--duration-hours` (`--duration`),
   `--parallelism`, `--max-gflops`, `--headroom`, `--expected-inputs`,
@@ -330,12 +331,13 @@ The sdk has been tested on the following operating systems:
   file; `src/ethernity_task.py` reads them back
   (`execution.from_env(os.environ)`) and passes the object nested as
   `resources["execution"]`, with `durationHours` also as the flat `duration`
-  a runner before PoX 1.2 reads. The relays an order needs per hour of its
-  duration default to `1 + expectedInputs` rows, plus 10 commits with ESR
-  enabled (`execution.relays_per_hour`); `ecld-info execution` prints the
-  block and that number, and `ecld-run --relays-per-hour N` replaces it. The
+  a runner without the PoX 2.0 execution object reads. The relays an order
+  needs per hour of its duration default to `1 + expectedInputs` rows, plus
+  10 commits with ESR enabled (`execution.relays_per_hour`);
+  `ecld-info execution` prints the block and that number, and
+  `ecld-run --relays-per-hour N` replaces it. The
   runner takes the nested object and the relay rate once it carries the
-  PoX 1.2 execution object; until then they are inert for `runner.run`.
+  PoX 2.0 execution object; until then they are inert for `runner.run`.
 
 - **The testnets and their unsafe networks**: `Bloxberg Testnet` (`BLOXBERG_TESTNET`),
   `LitVM LiteForge` (`LITVM_LITEFORGE`) and `Ethereum Sepolia` (`ETHEREUM_SEPOLIA`)
@@ -404,9 +406,10 @@ def execute_task() -> None:
 
     # The execution object from the EXEC_* variables ecld-publish exported
     # (ethernity_cloud_sdk_py.commands.execution; see "Execution" above):
-    # nested, and its durationHours as the flat duration a runner before
-    # PoX 1.2 reads. A runner before PoX 1.2 takes whole tokens only as
-    # taskPrice; a fractional price (2.5) needs a PoX 1.2 runner.
+    # nested, and its durationHours as the flat duration a runner without
+    # the PoX 2.0 execution object reads. Such a runner takes whole tokens
+    # only as taskPrice; a fractional price (2.5) needs a runner that
+    # carries that object.
     execution_config = execution.validate(execution.from_env(os.environ))
     resources = {
         "taskPrice": 8,
