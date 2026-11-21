@@ -340,7 +340,7 @@ def build_parser():
     # Resource flags (run()'s resources object).
     parser.add_argument("--task-price", type=_task_price, default=3,
                         help="price in tokens (default: 3); a fractional price, e.g. 2.5, is passed as "
-                             "given: no runner-py up to 0.5.39 can encode it into the request, and on a "
+                             "given: no runner-py up to 1.9.0 can encode it into the request, and on a "
                              "network with an ERC-20 token it sends the approve transaction before "
                              "failing there")
     parser.add_argument("--cpu", type=int, default=1)

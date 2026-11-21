@@ -231,8 +231,9 @@ The sdk has been tested on the following operating systems:
   `ecld-run` and the dApp's `src/ethernity_task.py` send through the runner
   (ethernity-cloud-runner-py), which bounds the fee of its own transactions:
   500 gwei on Polygon mainnet and on Amoy by default, and the same variable
-  for another ceiling. This package requires runner 0.5.39, which holds the
-  testnet PoX 1.0 networks and that default on Amoy.
+  for another ceiling. This package requires runner 1.9.0 or a later 1.x
+  (`ethernity-cloud-runner-py>=1.9.0,<2.0.0`), which holds the testnet PoX
+  1.0 networks and that default on Amoy; the PoX 2.0 runners are 2.x.
 
 - **Test (local, no chain)**: To run your backend locally with the enclave's own
   executor — no SGX, no gas, instant — run:
@@ -273,7 +274,7 @@ The sdk has been tested on the following operating systems:
   `ECLD_KEY_PASSWORD` (or an interactive prompt). Resources are tunable with
   `--task-price`/`--cpu`/`--memory`/`--storage`/`--bandwidth`/`--validators`;
   `--task-price` takes a fractional price in tokens (`2.5`), passed as given;
-  no runner-py up to 0.5.39 can encode a fractional price into its request
+  no runner-py up to 1.9.0 can encode a fractional price into its request
   (`uint8 _maxPrice`): on a network with an ERC-20 token it sends the
   `approve` transaction first and fails at the request, so use whole tokens
   until a runner that takes a fractional price is released.
@@ -400,7 +401,7 @@ The sdk has been tested on the following operating systems:
   draws tECLD from the token's faucet only while it holds less than 100
   tECLD, the balance below which that faucet gives; from 100 tECLD the
   runner refuses the request before any transaction, with the amount of
-  tECLD a transfer has to bring. runner-py 0.5.39 applies the same rule on
+  tECLD a transfer has to bring. runner-py 1.9.0 applies the same rule on
   `POLYGON_AMOY` and `POLYGON_AMOY_UNSAFE`, whose token is the same tECLD.
 
 - **Inspect (read-only)**: To read enclave and on-chain diagnostics — network,
@@ -454,7 +455,7 @@ def execute_task() -> None:
     # (ethernity_cloud_sdk_py.commands.execution; see "Execution" above):
     # nested, and its durationHours as the flat duration a runner without
     # the PoX 2.0 execution object reads. Such a runner takes whole tokens
-    # only as taskPrice: no runner-py up to 0.5.39 encodes a fractional
+    # only as taskPrice: no runner-py up to 1.9.0 encodes a fractional
     # price (2.5).
     execution_config = execution.validate(execution.from_env(os.environ))
     resources = {

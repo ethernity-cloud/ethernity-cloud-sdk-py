@@ -5,7 +5,7 @@ this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 setup(
     name="ethernity-cloud-sdk-py",
-    version="0.10.8",
+    version="1.9.0",
     url="https://github.com/ethernity-cloud/ethernity-cloud-sdk-py",
     author="Ethernity Cloud Team",
     author_email="contact@ethernity.cloud",
@@ -30,11 +30,13 @@ setup(
         # which ecld-run's --input and exit code rely on, and artefacts of any
         # size through the payload intake. 0.5.38: Polygon mainnet's fee
         # ceiling of 500 gwei and the variable ECLD_MAX_FEE_PER_GAS, which
-        # ecld-run's sends are bounded by. 0.5.39: the runner networks
+        # ecld-run's sends are bounded by. 1.9.0: the runner networks
         # BLOXBERG TESTNET_POX10 and POLYGON AMOY_POX10, which
         # enums.RUNNER_NETWORKS names for the testnet PoX 1.0 members, and
-        # Polygon Amoy's fee ceiling of 500 gwei.
-        "ethernity-cloud-runner-py>=0.5.39",
+        # Polygon Amoy's fee ceiling of 500 gwei. Below 2.0.0: this SDK and
+        # the runner releases 1.x are the PoX 1.0 line, the PoX 2.0 line is
+        # 2.x.
+        "ethernity-cloud-runner-py>=1.9.0,<2.0.0",
         "pyyaml",
         # Add other dependencies here
     ],
