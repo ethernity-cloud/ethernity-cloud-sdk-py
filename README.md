@@ -396,7 +396,11 @@ The sdk has been tested on the following operating systems:
   `BLOXBERG_TESTNET_POX10`, tE10, has no faucet: the wallet that pays for an
   order receives it by a transfer, and the runner refuses a request from a
   wallet that holds less than its escrow, before any transaction. On
-  `POLYGON_AMOY_POX10` the runner draws tECLD from the token's faucet.
+  `POLYGON_AMOY_POX10` a wallet that holds less than the request's escrow
+  draws tECLD from the token's faucet only while it holds less than 100
+  tECLD, the balance below which that faucet gives; from 100 tECLD the
+  runner refuses the request before any transaction, with the amount of
+  tECLD a transfer has to bring.
 
 - **Inspect (read-only)**: To read enclave and on-chain diagnostics — network,
   trustedzone/securelock registration, and ESR state — without spending gas, run:
