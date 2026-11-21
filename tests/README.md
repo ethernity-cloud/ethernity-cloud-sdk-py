@@ -208,6 +208,27 @@ the usage error of an unknown option or `EXEC_*` variable, and the nested
 `test_publish_execution.py` covers the publish's gate on the stored block
 and `write_env` leaving exactly the `ENV_KEYS` variables in `src/.env`.
 
+## The network table and the testnet PoX 1.0 networks
+
+`test_network_names.py` holds the network table by value: the members of
+`BlockchainNetworks` in the order `ecld-init` lists them, every value of
+each (display name, network, network type, PoX, image registry, RPC, chain
+id, fees, trustedzone template), the side maps of `commands/enums.py` (the
+ESR, ValidatorRegistry and SessionRegistry addresses, the `-unsafe`
+variants, the trustedzone tags, the session tags, the runner networks),
+what the SDK derives from a member, and the entry of the runner's table
+each member maps to (chain, PoX, image registry, trustedzone, ESR).
+`test_pox10_testnets.py` covers `BLOXBERG_TESTNET_POX10` and
+`POLYGON_AMOY_POX10`: their contracts, the type and registries they share
+with the mainnet each copies, their trustedzone tag and session tag (the
+network's word), the securelock session name `build.update_dockerfile`
+writes, the session's advisory list and both composes naming Scontain's CAS
+with the registry's trustedzone session, the image registry's transaction
+options (bloxberg's gas price; type 2 within Amoy's ceiling), the ESR gate
+of `ecld-build`, `ecld-init` taking either network by member name, word or
+display name, and `ecld-run` building the runner's network with `--ipfs`,
+refusing the payload intake and `--unsafe`.
+
 ## The fee per gas and its ceiling
 
 `test_fee_ceiling.py` covers `commands/fees.py` through its three users,

@@ -77,6 +77,8 @@ The sdk has been tested on the following operating systems:
       CAS session for them.
     - Testnet unsafe (no CAS) - the unsafe network beside the testnet (see
       "The testnets and their unsafe networks").
+    - Testnet PoX 1.0 - a copy of the mainnet's PoX 1.0 contracts on the
+      same chain (see "The testnet PoX 1.0 networks").
     - Mainnet - to be provided during the following updates
 - LitVM:
     - LiteForge - CAS-attested the same way, by LitVM's own ethernity-cas
@@ -85,6 +87,8 @@ The sdk has been tested on the following operating systems:
     - LiteForge unsafe (no CAS) - the unsafe network beside LiteForge.
 - Polyhon:
     - Amoy Testnet - to be provided during the following updates
+    - Amoy PoX 1.0 - a copy of Polygon mainnet's PoX 1.0 contracts on Amoy
+      (see "The testnet PoX 1.0 networks").
     - Mainnet - to be provided during the following updates
 
 ### Scripts
@@ -168,8 +172,9 @@ The sdk has been tested on the following operating systems:
   minutes for the service to queue the image from the chain event before
   posting the hash itself. On a network whose image registry records an
   image only with its certificate (the registry's first generation: bloxberg
-  mainnet, Polygon mainnet) nothing is on chain for the bootnode to pin
-  before the certificate exists, so a publish that runs its own node pins
+  mainnet, Polygon mainnet and the two testnet PoX 1.0 networks) nothing is
+  on chain for the bootnode to pin before the certificate exists, so a
+  publish that runs its own node pins
   the compose and the image on the public IPFS API (`ipfs.ethernity.cloud`)
   before the certificate is extracted. That API takes a pin only with a
   writer token, `IPFS_TOKEN` (or `ECLD_IPFS_TOKEN`); without one the publish
@@ -193,10 +198,10 @@ The sdk has been tested on the following operating systems:
   tenth, plus the network's priority fee (32 gwei on Polygon), as its
   `maxFeePerGas`, and none is sent above a ceiling. The default ceiling is
   the network's: 500 gwei on Polygon mainnet, which admits a base fee up to
-  425.4 gwei, 64 on Amoy, 15 on Sepolia, 2 on LitVM LiteForge and 1500 on the
-  IoTeX testnet. `ECLD_MAX_FEE_PER_GAS` in the environment, a positive whole
-  number of gwei, is the ceiling instead, on whichever of those networks the
-  publish runs:
+  425.4 gwei, 64 on Amoy (its PoX 1.0 network included), 15 on Sepolia, 2 on
+  LitVM LiteForge and 1500 on the IoTeX testnet. `ECLD_MAX_FEE_PER_GAS` in
+  the environment, a positive whole number of gwei, is the ceiling instead,
+  on whichever of those networks the publish runs:
   ```sh
   ECLD_MAX_FEE_PER_GAS=600 ecld-publish
   ```
@@ -226,7 +231,8 @@ The sdk has been tested on the following operating systems:
   `ecld-run` and the dApp's `src/ethernity_task.py` send through the runner
   (ethernity-cloud-runner-py), which bounds the fee of its own transactions:
   500 gwei on Polygon mainnet by default, and the same variable for another
-  ceiling. This package requires runner 0.5.38, the first that does both.
+  ceiling, both from runner 0.5.38 on. This package requires runner 0.5.39,
+  which holds the testnet PoX 1.0 networks.
 
 - **Test (local, no chain)**: To run your backend locally with the enclave's own
   executor — no SGX, no gas, instant — run:
@@ -267,7 +273,7 @@ The sdk has been tested on the following operating systems:
   `ECLD_KEY_PASSWORD` (or an interactive prompt). Resources are tunable with
   `--task-price`/`--cpu`/`--memory`/`--storage`/`--bandwidth`/`--validators`;
   `--task-price` takes a fractional price in tokens (`2.5`), passed as given;
-  no runner-py up to 0.5.38 can encode a fractional price into its request
+  no runner-py up to 0.5.39 can encode a fractional price into its request
   (`uint8 _maxPrice`): on a network with an ERC-20 token it sends the
   `approve` transaction first and fails at the request, so use whole tokens
   until a runner that takes a fractional price is released.
@@ -357,6 +363,41 @@ The sdk has been tested on the following operating systems:
   (`ecld-pynithy-litvm-testnet-unsafe`) trustedzone. Mainnet has no unsafe
   network.
 
+- **The testnet PoX 1.0 networks**: `Bloxberg Testnet PoX 1.0`
+  (`BLOXBERG_TESTNET_POX10`, the network `bloxberg_testnet_pox10`) and
+  `Polygon Amoy PoX 1.0` (`POLYGON_AMOY_POX10`, `polygon_amoy_pox10`) are
+  copies of the bloxberg mainnet's and of Polygon mainnet's PoX 1.0
+  contracts, on the bloxberg chain (8995) and on Polygon Amoy (80002), beside
+  the PoX 2.0 networks `BLOXBERG_TESTNET` and `POLYGON_AMOY`. `ecld-init`
+  lists them after the other networks, and `ECLD_BLOCKCHAIN_NETWORK` takes
+  the member name or the display name of either. A dApp is built and
+  published for one as for the mainnet it copies:
+
+  | | `BLOXBERG_TESTNET_POX10` | `POLYGON_AMOY_POX10` |
+  |---|---|---|
+  | PoX | `0x69A7bEB5Da2d3dA711d52E491D71e51296b08745`, also its token tE10 | `0x9Aad82557c84c11C4031382d8Bf2cacF8f256a02`, token tECLD `0x9927809B61122B2af3f3b3A3303875e0687b8eE3` |
+  | Image registry (first generation) | `0x7dBC1b591cc3b7136D863bc7430C6Db50E929665` | `0xa2EE2a9118d0011AF05a6196c862D37d8c29F8eC` |
+  | RPC | `https://bloxberg.ethernity.cloud` | `https://polygon-amoy-bor-rpc.publicnode.com` |
+  | Trustedzone, and its SDK registry tag | `etny-pynithy-testnet-pox10`, `bloxberg_testnet_pox10` | `ecld-pynithy-amoy-pox10`, `polygon_amoy_pox10` |
+  | Securelock session | `<project>_SECURELOCK_V3_bloxberg_testnet_pox10_<version>` | `<project>_SECURELOCK_V3_polygon_amoy_pox10_<version>` |
+  | ESR | `0x0Ea1728EAE108FD3B9340ae91451348E2Cc6b4E4`, the bloxberg testnet's | none: `ecld-build` refuses an ESR-enabled enclave unless the project names a registry of its own |
+  | Runner network | `("BLOXBERG", "TESTNET_POX10")` | `("POLYGON", "AMOY_POX10")` |
+
+  `ecld-build` signs the securelock `--production`, and `ecld-publish` posts
+  its session to Scontain's CAS, which also provisions the network's
+  trustedzone, and registers the image with its certificate (`addImage`); a
+  publish that runs its own IPFS node pins the image on the public IPFS API
+  first, which takes `IPFS_TOKEN` (see "How the image reaches the network").
+  Neither network has a SessionRegistry, a ValidatorRegistry or an unsafe
+  network. The bootnode's payload intake does not serve them: `ecld-run`
+  takes `--ipfs <url>` (with `--ipfs-token` for an API that requires one),
+  and `src/ethernity_task.py` calls `runner.set_storage_ipfs(url, token)` in
+  place of `runner.set_public_intake()`. The token of
+  `BLOXBERG_TESTNET_POX10`, tE10, has no faucet: the wallet that pays for an
+  order receives it by a transfer, and the runner refuses a request from a
+  wallet that holds less than its escrow, before any transaction. On
+  `POLYGON_AMOY_POX10` the runner draws tECLD from the token's faucet.
+
 - **Inspect (read-only)**: To read enclave and on-chain diagnostics — network,
   trustedzone/securelock registration, and ESR state — without spending gas, run:
   ```sh
@@ -407,7 +448,7 @@ def execute_task() -> None:
     # (ethernity_cloud_sdk_py.commands.execution; see "Execution" above):
     # nested, and its durationHours as the flat duration a runner without
     # the PoX 2.0 execution object reads. Such a runner takes whole tokens
-    # only as taskPrice: no runner-py up to 0.5.38 encodes a fractional
+    # only as taskPrice: no runner-py up to 0.5.39 encodes a fractional
     # price (2.5).
     execution_config = execution.validate(execution.from_env(os.environ))
     resources = {

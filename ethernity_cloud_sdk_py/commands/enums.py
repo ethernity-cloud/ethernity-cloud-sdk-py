@@ -326,6 +326,73 @@ class BlockchainNetworks(Enum):
         }
     )
 
+    BLOXBERG_TESTNET_POX10 = (
+        "Bloxberg Testnet PoX 1.0", # Network display name
+        "bloxberg", # Network short name
+        # The bloxberg testnet PoX 1.0 network, bloxberg_testnet_pox10: a copy
+        # of the bloxberg mainnet's PoX 1.0 contracts on the same chain (8995),
+        # deployed 2026-11-21 from block 30867912. The PoX proxy is also its
+        # token (tE10), and the image registry is a V1 ECImageRegistry, which
+        # records an image with its certificate. The network type is the one
+        # baked into the securelock as NETWORK_TYPE: "mainnet" is a securelock
+        # signed --production and provisioned by Scontain's CAS, which is how
+        # the trustedzones of this network are built, as BLOXBERG_MAINNET's
+        # are. No SessionRegistry and no ValidatorRegistry. The session tag
+        # and the trustedzone tag are the network's word (SESSION_TAGS,
+        # `trustedzone_tag`).
+        "mainnet", # Network type
+        "0x69A7bEB5Da2d3dA711d52E491D71e51296b08745", # protocol contract address
+        "0x7dBC1b591cc3b7136D863bc7430C6Db50E929665", # Image Registry Contract Address (V1 ECImageRegistry)
+        "https://bloxberg.ethernity.cloud",
+        8995,  # Chain ID for bloxberg
+        False, # EIP-1559 SUPPORT
+        0.002,  # Gas Price in Gwei for Legacy Mode
+        0.002,  # maxFeePerGas in Gwei for EIP-1559
+        0.0001,    # maxPriorityFeePerGas in Gwei for EIP-1559
+        {  # template_images
+            dAppTypes.PYNITHY.value: TemplateConfig(
+                trusted_zone_image="etny-pynithy-testnet-pox10",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
+                docker_login="",
+                docker_password="",
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
+            ),
+        }
+    )
+
+    POLYGON_AMOY_POX10 = (
+        "Polygon Amoy PoX 1.0", # Network display name
+        "polygon", # Network short name
+        # The Polygon Amoy PoX 1.0 network, polygon_amoy_pox10: a copy of
+        # Polygon mainnet's PoX 1.0 contracts on Amoy (80002), deployed
+        # 2026-11-21 from block 53417996, on the storage 0x20B9fDBD... and
+        # Amoy's test ECLD 0x9927809B.... The image registry is a V1
+        # ECImageRegistry. The network type "mainnet" is a securelock signed
+        # --production and provisioned by Scontain's CAS, which is how the
+        # trustedzones of this network are built, as POLYGON_MAINNET's are. No
+        # SessionRegistry, no ValidatorRegistry and no ESR. The session tag
+        # and the trustedzone tag are the network's word. The RPC, the chain
+        # id and the fees are POLYGON_AMOY's.
+        "mainnet", # Network type
+        "0x9Aad82557c84c11C4031382d8Bf2cacF8f256a02", # protocol contract address
+        "0xa2EE2a9118d0011AF05a6196c862D37d8c29F8eC", # Image Registry Contract Address (V1 ECImageRegistry)
+        "https://polygon-amoy-bor-rpc.publicnode.com",
+        80002,  # Chain ID for Polygon Amoy Testnet
+        True, # EIP 1559 SUPPORT
+        100,  # Gas Price in Gwei
+        64,  # maxFeePerGas in Gwei
+        32,  # maxPriorityFeePerGas in Gwei
+        {  # template_images
+            dAppTypes.PYNITHY.value: TemplateConfig(
+                trusted_zone_image="ecld-pynithy-amoy-pox10",
+                docker_repo_url="registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/apps",
+                docker_login="",
+                docker_password="",
+                base_image_tag="python-3.14.6-alpine3.24-scone6.0.7"
+            ),
+        }
+    )
+
     def __init__(
         self,
         display_name,
@@ -433,14 +500,16 @@ class BlockchainNetworks(Enum):
 
         Set for a CAS-attested testnet: the securelock session is registered
         there by `ecld-publish`. "" on the other networks, whose sessions go
-        to the Scontain CAS (mainnet) or nowhere (a testnet with no CAS).
+        to the Scontain CAS (network type "mainnet") or nowhere (a testnet
+        with no CAS).
         """
         return SESSION_REGISTRY_ADDRESSES.get(enum_name, "")
 
     @property
     def cas_provisioned(self):
         """Whether the securelock takes its certificate from a CAS session:
-        mainnet (Scontain CAS), and any testnet with a SessionRegistry
+        a network of type "mainnet" (Scontain CAS: the mainnets and the
+        testnet PoX 1.0 networks), and any testnet with a SessionRegistry
         (ethernity-cas). A testnet without one self-signs from MR_ENCLAVE."""
         return self.network_type == "mainnet" or bool(SESSION_REGISTRY_ADDRESSES.get(self.name, ""))
 
@@ -469,9 +538,13 @@ class BlockchainNetworks(Enum):
 
     @property
     def session_tag(self):
-        """The network part of the securelock session name: the network type,
-        and the variant on an -unsafe network, so the two testnet variants of
-        one project never share a session name."""
+        """The network part of the securelock session name: the member's
+        entry in SESSION_TAGS (the network's word, on the testnet PoX 1.0
+        networks), else the network type, with the variant on an -unsafe
+        network, so the two testnet variants of one project never share a
+        session name."""
+        if self.name in SESSION_TAGS:
+            return SESSION_TAGS[self.name]
         return f"{self.network_type}_unsafe" if self.is_unsafe else self.network_type
 
     @property
@@ -528,6 +601,11 @@ ESR_CONTRACT_ADDRESSES = {
     # ESR-enabled enclave here rather than sealing in an empty address.
     "POLYGON_MAINNET": "",
     "IOTEX_TESTNET": "",
+    # The testnet PoX 1.0 networks. The bloxberg one's trustedzones bake the
+    # bloxberg testnet's registry; the Amoy one's bake none, as
+    # POLYGON_MAINNET's, and ecld-build refuses an ESR-enabled enclave there.
+    "BLOXBERG_TESTNET_POX10": "0x0Ea1728EAE108FD3B9340ae91451348E2Cc6b4E4",
+    "POLYGON_AMOY_POX10": "",
 }
 
 # ethernity-cas ValidatorRegistry deployments, keyed like the ESR map above
@@ -588,6 +666,15 @@ TRUSTEDZONE_TAGS = {
     "POLYGON_AMOY_UNSAFE": "amoy_unsafe",
 }
 
+# The members whose securelock session name carries the network's word instead
+# of the network type (see `session_tag`): the testnet PoX 1.0 networks. Their
+# sessions are posted to Scontain's CAS, where the mainnets' sessions of the
+# same project are named <project>_SECURELOCK_V3_mainnet_<version>.
+SESSION_TAGS = {
+    "BLOXBERG_TESTNET_POX10": "bloxberg_testnet_pox10",
+    "POLYGON_AMOY_POX10": "polygon_amoy_pox10",
+}
+
 # The (network name, network type) each member is in the runner's network
 # tables (ethernity_cloud_runner_py ECNetwork). An -unsafe member is the
 # runner's -unsafe type, which runs only -unsafe trustedzones.
@@ -603,4 +690,6 @@ RUNNER_NETWORKS = {
     "ETHEREUM_SEPOLIA_UNSAFE": ("ETHEREUM", "SEPOLIA_UNSAFE"),
     "LITVM_LITEFORGE": ("LITVM", "LITEFORGE"),
     "LITVM_LITEFORGE_UNSAFE": ("LITVM", "LITEFORGE_UNSAFE"),
+    "BLOXBERG_TESTNET_POX10": ("BLOXBERG", "TESTNET_POX10"),
+    "POLYGON_AMOY_POX10": ("POLYGON", "AMOY_POX10"),
 }

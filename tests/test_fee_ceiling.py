@@ -196,7 +196,7 @@ def test_the_default_ceilings_and_priority_fees_of_the_eip1559_networks():
             for member in BlockchainNetworks if member.is_eip1559} == {
         "POLYGON_MAINNET": (500, 32), "POLYGON_AMOY": (64, 32), "POLYGON_AMOY_UNSAFE": (64, 32),
         "IOTEX_TESTNET": (1500, 1), "ETHEREUM_SEPOLIA": (15, 1), "ETHEREUM_SEPOLIA_UNSAFE": (15, 1),
-        "LITVM_LITEFORGE": (2, 0), "LITVM_LITEFORGE_UNSAFE": (2, 0)}
+        "LITVM_LITEFORGE": (2, 0), "LITVM_LITEFORGE_UNSAFE": (2, 0), "POLYGON_AMOY_POX10": (64, 32)}
 
 
 @pytest.mark.parametrize("send", SENDS)
