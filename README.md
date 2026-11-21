@@ -267,11 +267,10 @@ The sdk has been tested on the following operating systems:
   `ECLD_KEY_PASSWORD` (or an interactive prompt). Resources are tunable with
   `--task-price`/`--cpu`/`--memory`/`--storage`/`--bandwidth`/`--validators`;
   `--task-price` takes a fractional price in tokens (`2.5`), passed as given;
-  it needs a runner that carries the PoX 2.0 execution object: runner-py
-  0.5.29 cannot encode a fractional price into its request
-  (`uint256 taskPrice`), and on a network with an ERC-20 token it sends the
-  `approve` transaction first and fails at the request, so until that runner
-  use whole tokens.
+  no runner-py up to 0.5.38 can encode a fractional price into its request
+  (`uint8 _maxPrice`): on a network with an ERC-20 token it sends the
+  `approve` transaction first and fails at the request, so use whole tokens
+  until a runner that takes a fractional price is released.
   The execution object (below) comes from `.config.json`, the `EXEC_*`
   variables over it, and the flags `--mode`, `--duration-hours` (`--duration`),
   `--parallelism`, `--max-gflops`, `--headroom`, `--expected-inputs`,
@@ -408,8 +407,8 @@ def execute_task() -> None:
     # (ethernity_cloud_sdk_py.commands.execution; see "Execution" above):
     # nested, and its durationHours as the flat duration a runner without
     # the PoX 2.0 execution object reads. Such a runner takes whole tokens
-    # only as taskPrice; a fractional price (2.5) needs a runner that
-    # carries that object.
+    # only as taskPrice: no runner-py up to 0.5.38 encodes a fractional
+    # price (2.5).
     execution_config = execution.validate(execution.from_env(os.environ))
     resources = {
         "taskPrice": 8,

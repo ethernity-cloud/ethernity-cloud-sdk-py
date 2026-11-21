@@ -340,9 +340,9 @@ def build_parser():
     # Resource flags (run()'s resources object).
     parser.add_argument("--task-price", type=_task_price, default=3,
                         help="price in tokens (default: 3); a fractional price, e.g. 2.5, is passed as "
-                             "given and needs a runner that carries the PoX 2.0 execution object: "
-                             "runner-py 0.5.29 cannot encode it into the request, and on a network with "
-                             "an ERC-20 token it sends the approve transaction before failing there")
+                             "given: no runner-py up to 0.5.38 can encode it into the request, and on a "
+                             "network with an ERC-20 token it sends the approve transaction before "
+                             "failing there")
     parser.add_argument("--cpu", type=int, default=1)
     parser.add_argument("--memory", type=int, default=1)
     parser.add_argument("--storage", type=int, default=10)
