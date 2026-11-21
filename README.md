@@ -197,11 +197,11 @@ The sdk has been tested on the following operating systems:
   every transaction of the publish offers the latest block's base fee plus a
   tenth, plus the network's priority fee (32 gwei on Polygon), as its
   `maxFeePerGas`, and none is sent above a ceiling. The default ceiling is
-  the network's: 500 gwei on Polygon mainnet, which admits a base fee up to
-  425.4 gwei, 64 on Amoy (its PoX 1.0 network included), 15 on Sepolia, 2 on
-  LitVM LiteForge and 1500 on the IoTeX testnet. `ECLD_MAX_FEE_PER_GAS` in
-  the environment, a positive whole number of gwei, is the ceiling instead,
-  on whichever of those networks the publish runs:
+  the network's: 500 gwei on Polygon mainnet and on Amoy (its unsafe and its
+  PoX 1.0 network included), which admits a base fee up to 425.4 gwei, 15 on
+  Sepolia, 2 on LitVM LiteForge and 1500 on the IoTeX testnet.
+  `ECLD_MAX_FEE_PER_GAS` in the environment, a positive whole number of gwei,
+  is the ceiling instead, on whichever of those networks the publish runs:
   ```sh
   ECLD_MAX_FEE_PER_GAS=600 ecld-publish
   ```
@@ -230,9 +230,9 @@ The sdk has been tested on the following operating systems:
   pays its fixed gas price and does not read the variable.
   `ecld-run` and the dApp's `src/ethernity_task.py` send through the runner
   (ethernity-cloud-runner-py), which bounds the fee of its own transactions:
-  500 gwei on Polygon mainnet by default, and the same variable for another
-  ceiling, both from runner 0.5.38 on. This package requires runner 0.5.39,
-  which holds the testnet PoX 1.0 networks.
+  500 gwei on Polygon mainnet and on Amoy by default, and the same variable
+  for another ceiling. This package requires runner 0.5.39, which holds the
+  testnet PoX 1.0 networks and that default on Amoy.
 
 - **Test (local, no chain)**: To run your backend locally with the enclave's own
   executor — no SGX, no gas, instant — run:

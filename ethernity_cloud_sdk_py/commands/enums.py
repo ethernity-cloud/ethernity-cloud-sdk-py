@@ -140,7 +140,10 @@ class BlockchainNetworks(Enum):
         80002,  # Chain ID for Polygon Amoy Testnet
         True, # EIP 1559 SUPPORT
         100,  # Gas Price in Gwei
-        64,  # maxFeePerGas in Gwei
+        500,  # maxFeePerGas in Gwei -- the default ceiling of the fee per gas
+              # (commands/fees.py; ECLD_MAX_FEE_PER_GAS sets another). The fee
+              # is the latest block's base fee * 1.1 + the priority fee, so
+              # this admits a base fee up to 425.4 gwei.
         32,  # maxPriorityFeePerGas in Gwei
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
@@ -166,7 +169,8 @@ class BlockchainNetworks(Enum):
         80002,  # Chain ID for Polygon Amoy Testnet
         True, # EIP 1559 SUPPORT
         100,  # Gas Price in Gwei
-        64,  # maxFeePerGas in Gwei
+        500,  # maxFeePerGas in Gwei -- the default ceiling of the fee per gas,
+              # as POLYGON_AMOY's: it admits a base fee up to 425.4 gwei.
         32,  # maxPriorityFeePerGas in Gwei
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(
@@ -380,7 +384,8 @@ class BlockchainNetworks(Enum):
         80002,  # Chain ID for Polygon Amoy Testnet
         True, # EIP 1559 SUPPORT
         100,  # Gas Price in Gwei
-        64,  # maxFeePerGas in Gwei
+        500,  # maxFeePerGas in Gwei -- the default ceiling of the fee per gas,
+              # as POLYGON_AMOY's: it admits a base fee up to 425.4 gwei.
         32,  # maxPriorityFeePerGas in Gwei
         {  # template_images
             dAppTypes.PYNITHY.value: TemplateConfig(

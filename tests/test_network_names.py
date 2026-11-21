@@ -36,11 +36,11 @@ MEMBERS = {
     "POLYGON_AMOY": (
         "Polygon Amoy", "polygon", "testnet",
         "0xd1182deA61CDa785C320cdBE5888EaC4178cAAF2", "0x0C0f52ebd72cd2d2cBe94F385c9e23cec528b706",
-        "https://polygon-amoy-bor-rpc.publicnode.com", 80002, True, 100, 64, 32, "ecld-pynithy-amoy"),
+        "https://polygon-amoy-bor-rpc.publicnode.com", 80002, True, 100, 500, 32, "ecld-pynithy-amoy"),
     "POLYGON_AMOY_UNSAFE": (
         "Polygon Amoy unsafe (no CAS)", "polygon", "testnet",
         "0xd1182deA61CDa785C320cdBE5888EaC4178cAAF2", "0x0C0f52ebd72cd2d2cBe94F385c9e23cec528b706",
-        "https://polygon-amoy-bor-rpc.publicnode.com", 80002, True, 100, 64, 32, "ecld-pynithy-amoy-unsafe"),
+        "https://polygon-amoy-bor-rpc.publicnode.com", 80002, True, 100, 500, 32, "ecld-pynithy-amoy-unsafe"),
     "IOTEX_TESTNET": (
         "IoTeX Testnet", "iotex", "testnet",
         "0xD56385A97413Ed80E28B1b54A193b98F2C49c975", "0xa7467A6391816be9367a1cC52E0ef0c15FfE3cCC",
@@ -69,7 +69,7 @@ MEMBERS = {
     "POLYGON_AMOY_POX10": (
         "Polygon Amoy PoX 1.0", "polygon", "mainnet",
         "0x9Aad82557c84c11C4031382d8Bf2cacF8f256a02", "0xa2EE2a9118d0011AF05a6196c862D37d8c29F8eC",
-        "https://polygon-amoy-bor-rpc.publicnode.com", 80002, True, 100, 64, 32, "ecld-pynithy-amoy-pox10"),
+        "https://polygon-amoy-bor-rpc.publicnode.com", 80002, True, 100, 500, 32, "ecld-pynithy-amoy-pox10"),
 }
 
 # The template of every member's Pynithy trustedzone, apart from its image.

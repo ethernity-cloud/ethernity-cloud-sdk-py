@@ -31,7 +31,8 @@ setup(
         # ceiling of 500 gwei and the variable ECLD_MAX_FEE_PER_GAS, which
         # ecld-run's sends are bounded by. 0.5.39: the runner networks
         # BLOXBERG TESTNET_POX10 and POLYGON AMOY_POX10, which
-        # enums.RUNNER_NETWORKS names for the testnet PoX 1.0 members.
+        # enums.RUNNER_NETWORKS names for the testnet PoX 1.0 members, and
+        # Polygon Amoy's fee ceiling of 500 gwei.
         "ethernity-cloud-runner-py>=0.5.39",
         "pyyaml",
         # Add other dependencies here

@@ -230,17 +230,19 @@ def test_the_bloxberg_copys_registration_is_sent_at_the_bloxberg_gas_price(monke
 
 
 def test_the_amoy_copys_transactions_are_type_2_within_amoys_ceiling(monkeypatch, tmp_path):
-    registry = _image_registry(monkeypatch, tmp_path, AMOY, _Web3(gwei(20)))
+    """The ceiling of 500 gwei: a base fee of 425 gwei gives a fee of 499.5
+    gwei, which is sent; one of 426 gwei gives 500.6 gwei, which is refused."""
+    registry = _image_registry(monkeypatch, tmp_path, AMOY, _Web3(gwei(425)))
     assert registry.image_registry_address == "0xa2EE2a9118d0011AF05a6196c862D37d8c29F8eC"
     assert registry._transaction_options(GAS_LIMIT) == {
         "nonce": 7, "chainId": 80002, "from": registry.acct.address,
-        "type": 2, "maxFeePerGas": gwei(54), "maxPriorityFeePerGas": gwei(32)}
-    refused = _image_registry(monkeypatch, tmp_path, AMOY, _Web3(gwei(64)))
+        "type": 2, "maxFeePerGas": 499_500_000_000, "maxPriorityFeePerGas": gwei(32)}
+    refused = _image_registry(monkeypatch, tmp_path, AMOY, _Web3(gwei(426)))
     with pytest.raises(Exception) as refusal:
         refused._transaction_options(GAS_LIMIT)
     assert str(refusal.value) == (
-        "Polygon Amoy PoX 1.0: a base fee of 64 gwei puts the fee per gas at 102.4 gwei, above the network's "
-        "default ceiling of 64 gwei (ECLD_MAX_FEE_PER_GAS sets another, in whole gwei)")
+        "Polygon Amoy PoX 1.0: a base fee of 426 gwei puts the fee per gas at 500.6 gwei, above the network's "
+        "default ceiling of 500 gwei (ECLD_MAX_FEE_PER_GAS sets another, in whole gwei)")
 
 
 # ---- ecld-build's ESR gate ----
