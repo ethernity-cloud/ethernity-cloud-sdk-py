@@ -400,7 +400,8 @@ The sdk has been tested on the following operating systems:
   draws tECLD from the token's faucet only while it holds less than 100
   tECLD, the balance below which that faucet gives; from 100 tECLD the
   runner refuses the request before any transaction, with the amount of
-  tECLD a transfer has to bring.
+  tECLD a transfer has to bring. runner-py 0.5.39 applies the same rule on
+  `POLYGON_AMOY` and `POLYGON_AMOY_UNSAFE`, whose token is the same tECLD.
 
 - **Inspect (read-only)**: To read enclave and on-chain diagnostics — network,
   trustedzone/securelock registration, and ESR state — without spending gas, run:
@@ -421,6 +422,7 @@ def hello(msg='World'):
 From your py application, using the ethernity cloud runner library, you will be calling the function as seen in the below example, where we pass `hello("World")` to be executed on the backend which will run in the Blockchain:
 ```py
 import os
+import time
 from getpass import getpass
 from dotenv import load_dotenv
 
@@ -467,7 +469,8 @@ def execute_task() -> None:
     }
     # run(resources, securelock, protocol version, code, node, trustedzone):
     # the version is the protocol's, "v3", under which the image registry keys
-    # the securelock; an empty node lets any node take the order.
+    # the securelock; an empty node lets any node take the order. run()
+    # returns at once and the task proceeds on a thread of the runner's own.
     runner.run(
         resources,
         os.getenv("PROJECT_NAME"),
@@ -476,6 +479,21 @@ def execute_task() -> None:
         "",
         os.getenv("TRUSTED_ZONE_IMAGE", ""),
     )
+
+    # Wait for the task, printing each step it reaches, then its result or
+    # its error.
+    seen = None
+    while runner.is_running():
+        state = runner.get_state()
+        if state["progress"] != seen:
+            seen = state["progress"]
+            print(f"[{seen}] {state['status']}")
+        time.sleep(0.5)
+    state = runner.get_state()
+    if state["status"] == "SUCCESS":
+        print(runner.get_result()["value"])
+    else:
+        print(f"Error: {state['last_error']}")
 
 
 if __name__ == "__main__":

@@ -350,6 +350,8 @@ class _Runner:
 @pytest.fixture
 def ecld_run(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
+    # run.main reads no .env: the case's environment is the case's alone.
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
     monkeypatch.setenv("ECLD_PRIVATE_KEY", KEY)
     monkeypatch.delenv("ECLD_IPFS_TOKEN", raising=False)
     monkeypatch.setattr("ethernity_cloud_runner_py.runner.EthernityCloudRunner", _Runner)

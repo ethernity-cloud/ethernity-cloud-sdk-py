@@ -380,10 +380,12 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # dotenv, if present, so ENC_PRIVATE_KEY / NETWORK_* are available.
+    # The .env of the working directory, or of the nearest directory above it
+    # that holds one, so ENC_PRIVATE_KEY / NETWORK_* are available; a
+    # variable already set is kept.
     try:
-        from dotenv import load_dotenv
-        load_dotenv(override=False)
+        from dotenv import find_dotenv, load_dotenv
+        load_dotenv(find_dotenv(usecwd=True), override=False)
     except Exception:
         pass
 

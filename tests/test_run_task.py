@@ -5,6 +5,7 @@ execution object reaches the runner nested in the resources: the EXECUTION
 block of .config.json, the EXEC_* variables over it, the flags over both. No
 chain and no network: the runner is replaced."""
 import json
+import os
 from decimal import Decimal
 
 import pytest
@@ -63,6 +64,8 @@ RAISED = ({"status": "ERROR", "progress": "FINISHED",
 @pytest.fixture
 def ecld_run(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
+    # run.main reads no .env: the case's environment is the case's alone.
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
     monkeypatch.setenv("ECLD_PRIVATE_KEY", KEY)
     monkeypatch.setattr("ethernity_cloud_runner_py.runner.EthernityCloudRunner", _Runner)
 
@@ -104,6 +107,29 @@ def test_a_task_that_raised_prints_its_report_and_exits_1(ecld_run, capsys):
 def test_a_successful_task_exits_0_without_a_task_code_line(ecld_run, capsys):
     assert ecld_run() == 0
     assert "task code" not in capsys.readouterr().out
+
+
+def test_the_env_file_handed_to_dotenv_is_the_one_of_the_working_directory(ecld_run, tmp_path, monkeypatch):
+    """Not one found upward from where the SDK is installed. python-dotenv's load_dotenv is a recorder here, so
+    no .env is read."""
+    import dotenv
+    (tmp_path / ".env").write_text("NETWORK_NAME=BLOXBERG\n", encoding="utf-8")
+    loaded = []
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda dotenv_path=None, **kwargs: loaded.append((dotenv_path, kwargs)))
+    assert ecld_run() == 0
+    assert [(path and os.path.normcase(path), kwargs) for path, kwargs in loaded] == [
+        (os.path.normcase(str(tmp_path / ".env")), {"override": False})]
+
+
+def test_the_cases_that_call_run_main_read_no_env_file(ecld_run, tmp_path, monkeypatch):
+    """The fixture disables python-dotenv: a .env of the working directory, the only one the call would find,
+    is not read."""
+    (tmp_path / ".env").write_text("ECLD_SUITE_DOTENV_MARK=read\n", encoding="utf-8")
+    monkeypatch.delenv("ECLD_SUITE_DOTENV_MARK", raising=False)
+    assert ecld_run() == 0
+    # Read outside the assert, so a failure prints the marker alone and not the environment.
+    marker = os.environ.get("ECLD_SUITE_DOTENV_MARK")
+    assert marker is None
 
 
 def test_a_whole_task_price_is_passed_as_an_int(ecld_run):

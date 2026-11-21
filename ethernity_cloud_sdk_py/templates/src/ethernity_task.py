@@ -15,27 +15,16 @@ code = "hello('World!')"
 import time
 
 def print_logs(runner):
-    previous_logs_count = 0
-    while True:
+    """Polls the runner until its task has ended, printing each step the task
+    reaches (get_state()'s progress) with the task's status, as ecld-run
+    does."""
+    seen = None
+    while runner.is_running():
         state = runner.get_state()
-        current_logs = state['log']  # Assuming this is a list of logs in chronological order
-
-        # Determine which logs are new based on how many logs we've seen before
-        new_logs = current_logs[previous_logs_count:]
-
-        # Print the new logs in the order they appear
-        for log in new_logs:
-            print(log)
-
-        # Update the count of previously seen logs
-        previous_logs_count = len(current_logs)
-
-        # Check if the task has finished and all logs have been printed
-        if not runner.is_running() and previous_logs_count == len(current_logs):
-            break
-
-        # Add a small delay to prevent excessive CPU usage
-        time.sleep(0.1)
+        if state["progress"] != seen:
+            seen = state["progress"]
+            print(f"[{seen}] {state['status']}")
+        time.sleep(0.5)
 
 def execute_task(code) -> None:
 

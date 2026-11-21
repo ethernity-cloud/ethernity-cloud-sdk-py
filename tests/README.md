@@ -203,8 +203,16 @@ writes, the `ECLD_EXEC_*` parsing and the message on a bad value, an unknown
 stored key or an unknown `ECLD_EXEC_*` variable;
 `test_run_task.py` covers `ecld-run`'s fractional `--task-price`, the
 execution flags over the `EXEC_*` variables over the `.config.json` block,
-the usage error of an unknown option or `EXEC_*` variable, and the nested
-`execution` the runner receives beside the flat `duration`.
+the usage error of an unknown option or `EXEC_*` variable, the nested
+`execution` the runner receives beside the flat `duration`, and the `.env`
+`ecld-run` hands python-dotenv, the one found from the working directory.
+The cases that call `run.main` (`test_run_task.py`, `test_run_ipfs.py`,
+`test_pox10_testnets.py`) set `PYTHON_DOTENV_DISABLED`, so the suite reads no
+`.env`. `test_template_task.py` drives the task script `ecld-init` writes
+(`templates/src/ethernity_task.py`) against a stand-in runner that answers as
+runner-py's does: it waits for the task, printing each step, and prints the
+result or the error. `test_packaging.py` holds the package list `setup.py`
+gives: `ethernity_cloud_sdk_py` and its subpackages, not `tests`.
 `test_publish_execution.py` covers the publish's gate on the stored block
 and `write_env` leaving exactly the `ENV_KEYS` variables in `src/.env`.
 
