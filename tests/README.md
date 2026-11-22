@@ -112,6 +112,52 @@ and `_task_ledger` restored by `discard_step_commits`.
 `test_f_probe_start_refused.py` compiles `start_probe` from the template:
 a refused ready put leaves `self.probe` None.
 
+## The securelock's store credential
+
+`test_store_credential.py` holds `src/store_credential.py` to the reader's
+text by its SHA-256 and its length over LF line endings, and runs the reader
+over its vectors (26 file contents, the files given as bytes, a directory,
+nothing and a regular file as the parent at the path, the call with no
+argument): the keys or the literal pair, the source, and the one log line,
+which names the path and the reason and holds neither key and nothing of
+the file. It reads the sources: the literal pair is in the reader alone,
+`securelock.py.tmpl` calls `store_credential.load()` once, with no argument,
+in the statement before the one that constructs its one `SwiftStreamService`
+from the two keys, `scripts/binary-fs-build.sh` declares the host path
+`/run/ecld` between `/etc/resolv.conf` and `/etc/hosts`, `Dockerfile.tpl`
+holds `LABEL cloud.ethernity.securelock.store="file"` on the line before its
+`ENTRYPOINT`, and no Dockerfile of the image names a `USER`. Every object
+name the securelock passes to a put matches one of the nine patterns the
+agent's policy lets a securelock's store user put, and it asks no removal:
+over a plain task and a session run from the template, and over a plain
+task's commit, a session step's commit and a fence under esr_local.
+`ecld-build`, run with its docker commands recorded, hands docker a context
+with the reader and the host path and a Dockerfile that ends with the label
+and the `ENTRYPOINT`; the two composes of `ecld-publish` mount nothing at
+`/run/ecld`. `test_f_log_confidentiality.py` runs the template's securelock
+under no credential file, under a file the reader takes and under one it
+refuses, and against a store on the loopback interface that refuses the
+file's credential or ends every connection (through the template's own
+`swift_stream_service` over minio; skipped without minio): the store client
+is constructed once, after the reader's one line, from the file's keys or
+the literal pair, neither key is written to stdout, stderr or the logging
+module, the payload's globals, the environment and the bucket hold none, and
+a store that refuses the file's credential is asked under no other.
+
+The store tests of `test_store_credential.py` need a MinIO
+(RELEASE.2023-03-13T19-46-17Z, the node agent's) and are skipped unless
+`ECLD_TEST_STORE_ENDPOINT` names its `host:port`, with
+`ECLD_TEST_STORE_BUCKET` (a bucket that holds `.env`),
+`ECLD_TEST_STORE_ROLE` (`trustedzone` or `securelock`) and
+`ECLD_TEST_STORE_CREDENTIAL` (the path of the `store.json` of a user the
+node agent made for that bucket and role). Through the repository's
+`SwiftStreamService`, built from the reader's answer for that file: the
+bucket answers its head, an absent object answers `NoSuchKey`, a
+trustedzone's user puts, reads and removes any object, a securelock's user
+reads any object, puts every name its policy admits, removes nothing and
+puts no other enclave's name in one request or in parts, an object of 6 MiB
+is put in parts, and every call on `etny-bucket-integration` is refused.
+
 ## The build's image at the publish
 
 `test_build_records_securelock.py` runs `build.record_securelock_image` with

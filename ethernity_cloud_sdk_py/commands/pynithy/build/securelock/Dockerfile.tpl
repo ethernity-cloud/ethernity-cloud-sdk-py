@@ -128,4 +128,5 @@ RUN scone-signer info /usr/local/bin/python > /tmp/siginfo.txt 2>&1; \
 
 RUN rm -rf /enclave-key.pem
 
+LABEL cloud.ethernity.securelock.store="file"
 ENTRYPOINT ["/usr/local/bin/python", "/etny-securelock/securelock.py"]
