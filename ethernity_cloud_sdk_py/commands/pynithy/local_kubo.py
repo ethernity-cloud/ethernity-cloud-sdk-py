@@ -225,9 +225,13 @@ class LocalKubo:
         return any(p.get("Peer") == peer_id for p in peers)
 
     def stop(self):
-        """Remove the container; nothing when docker is not installed."""
+        """Remove the container and its anonymous volumes (`-v`); nothing
+        when docker is not installed. The Kubo image declares /data/ipfs and
+        /export as volumes, and /data/ipfs holds the repo with every block
+        the publish added. A container run afresh gets new anonymous volumes,
+        so no container reads these again."""
         try:
-            subprocess.run(["docker", "rm", "-f", self.container], capture_output=True, text=True)
+            subprocess.run(["docker", "rm", "-f", "-v", self.container], capture_output=True, text=True)
         except OSError:
             pass
 
@@ -235,11 +239,11 @@ class LocalKubo:
         """End the publish's use of the Kubo: stop it, unless it is the source
         of a registered image whose certificate is not on chain yet, which it
         keeps serving to the extraction service and the bootnode's mirror;
-        the next publish of the project takes it over, `docker rm -f` stops
-        it."""
+        the next publish of the project takes it over, `docker rm -f -v`
+        stops it."""
         if not self.serving:
             self.stop()
             return
         print(f"\t⚠  The registered image stays available from this publish's IPFS node, the docker")
         print(f"\t   container {self.container}, for the extraction service and the bootnode.")
-        print(f"\t   Publish again to retry; `docker rm -f {self.container}` stops it.")
+        print(f"\t   Publish again to retry; `docker rm -f -v {self.container}` stops it.")
