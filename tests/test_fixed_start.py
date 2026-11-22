@@ -189,14 +189,23 @@ def test_fixed_start_c_is_byte_identical_to_etny_nodenithys_when_that_checkout_i
     assert lf(LAUNCHER) == lf(NODENITHY_LAUNCHER)
 
 
+COMPILE_LINE = re.compile(r"^python -m compileall (.*) /usr/local/lib/python3\.14/site-packages \\$")
+
+
+def _compileall_arguments():
+    """The arguments pyfreeze.sh gives compileall."""
+    (line,) = [m.group(1) for m in map(COMPILE_LINE.match, (x.strip() for x in _read(PYFREEZE).split("\n"))) if m]
+    return line.split()
+
+
 def test_the_freeze_stage_compiles_site_packages_with_unchecked_hash_headers_after_pyinstaller():
     lines = [line.strip() for line in _read(PYFREEZE).split("\n")]
     freeze = lines.index("pyinstaller --onedir --noconfirm securelock.py")
     remove = lines.index("find /usr/local/lib/python3.14/site-packages /etny-securelock -depth -type d "
                          "-name __pycache__ -exec rm -rf {} \\;")
-    compile_ = lines.index("python -m compileall -q --invalidation-mode unchecked-hash "
-                           "/usr/local/lib/python3.14/site-packages \\")
+    (compile_,) = [i for i, line in enumerate(lines) if COMPILE_LINE.match(line)]
     assert freeze < remove < compile_
+    assert _compileall_arguments() == ["-q", "-f", "--invalidation-mode", "unchecked-hash"]
 
 
 def _tree(root, mtime):
@@ -217,7 +226,9 @@ def _bytecode(root):
 
 def test_the_freeze_stage_s_recompilation_writes_the_same_bytecode_for_sources_of_other_times(tmp_path):
     # Two builds at the same path (the bytecode names its source's path), the
-    # sources written at other times.
+    # sources written at other times. Between the removal of the bytecode and
+    # the compilation, pkg/mod.py gets the timestamped bytecode an import at
+    # the compiling interpreter's start writes.
     root = tmp_path / "site-packages"
     builds = []
     for mtime in (1_000_000_000, 1_700_000_000):
@@ -225,8 +236,9 @@ def test_the_freeze_stage_s_recompilation_writes_the_same_bytecode_for_sources_o
         timestamped = _bytecode(root)
         for cache in sorted(root.rglob("__pycache__"), reverse=True):
             shutil.rmtree(cache)
-        subprocess.run([sys.executable, "-m", "compileall", "-q", "--invalidation-mode", "unchecked-hash", str(root)],
-                       check=True)
+        py_compile.compile(str(root / "pkg" / "mod.py"), invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP,
+                           doraise=True)
+        subprocess.run([sys.executable, "-m", "compileall", *_compileall_arguments(), str(root)], check=True)
         builds.append((timestamped, _bytecode(root)))
         shutil.rmtree(root)
     assert builds[0][0] != builds[1][0], "the timestamp headers differ"

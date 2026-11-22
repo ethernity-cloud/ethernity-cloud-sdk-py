@@ -35,10 +35,12 @@ pyinstaller --onedir --noconfirm securelock.py
 # removed, and site-packages is compiled again in one process, in compileall's
 # order, with headers that carry the hash of the source and that the
 # interpreter does not check against it (unchecked-hash): two builds of the
-# same sources write the same files. A file that does not compile keeps no
-# bytecode, as with pip.
+# same sources write the same files. -f rewrites the bytecode the compiling
+# interpreter writes at its own start (setuptools' distutils-precedence.pth
+# imports _distutils_hack), which compileall otherwise keeps as up to date. A
+# file that does not compile keeps no bytecode, as with pip.
 find /usr/local/lib/python3.14/site-packages /etny-securelock -depth -type d -name __pycache__ -exec rm -rf {} \;
-python -m compileall -q --invalidation-mode unchecked-hash /usr/local/lib/python3.14/site-packages \
+python -m compileall -q -f --invalidation-mode unchecked-hash /usr/local/lib/python3.14/site-packages \
   || echo "compileall: a file of site-packages does not compile and keeps no bytecode"
 
 echo "pyfreeze complete: COLLECT-00.toc + site-packages ready for binary-fs"
