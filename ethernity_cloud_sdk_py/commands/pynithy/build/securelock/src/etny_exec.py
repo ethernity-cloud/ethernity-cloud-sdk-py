@@ -4,6 +4,8 @@ import json
 import logging
 import traceback
 
+from log_text import error_class
+
 # If the serverless backend fails to import, remember WHY. Previously any
 # import failure was silently swallowed (backend = None), so every task then
 # died later with a misleading "name 'X' is not defined" — a missing module in
@@ -288,10 +290,7 @@ def Exec(payload_data, input_data, globals=None, locals=None):
             # esr-counter example returns dicts -- so serialize anything that
             # is not already a str instead of letting join() raise. None (an
             # expression statement with no value, e.g. a bare print()) is
-            # dropped, matching REPL semantics. NOTE: this is the executor the
-            # serverless securelock actually runs (local_api.py imports
-            # etny_exec); the 0.8.3 fix landed only in etny_exec_serv.py,
-            # which nothing imports.
+            # dropped, matching REPL semantics.
             rendered = [
                 out if isinstance(out, str) else json.dumps(out, default=str)
                 for out in outputs
@@ -321,9 +320,10 @@ def Exec(payload_data, input_data, globals=None, locals=None):
             code, data = e.args[0][0], e.args[0][1]
         except Exception:
             tb = traceback.format_exc()
+            # The log names the class alone: the SystemExit's args, repr and
+            # traceback can carry the payload's data, and stay in the result.
             logging.error(
-                "SystemExit without a [code, data] result payload: %r (args=%r)"
-                " -- full traceback follows:\n%s", e, getattr(e, "args", None), tb)
+                "SystemExit without a [code, data] result payload: %s", error_class(e))
             return TaskStatus.SYSTEM_ERROR, f"SYSTEM_ERROR: {e!r}\n{tb}"
         if code == 0:
             return TaskStatus.SUCCESS, data
@@ -341,20 +341,22 @@ def Exec(payload_data, input_data, globals=None, locals=None):
                     code, data = chained.args[0][0], chained.args[0][1]
                 except Exception:
                     continue
+                # The log holds neither the code, which is the payload's
+                # value before int() reads it, nor the error's message.
                 logging.warning(
                     "SystemError raised during result unwind; recovered task "
-                    "result from chained SystemExit (code=%r). Native error was: "
-                    "%r", code, e)
+                    "result from chained SystemExit. Native error: %s",
+                    error_class(e))
                 if code == 0:
                     return TaskStatus.SUCCESS, data
                 return int(code), data
         # No recoverable result -> genuine internal error. Deliver the FULL
         # traceback to the data owner AS the result (visible in their runner
-        # output) and never crash the enclave.
+        # output) and never crash the enclave. The log names the error's class
+        # alone: its repr, args and traceback can quote the payload, the input
+        # and what they computed.
         tb = traceback.format_exc()
-        logging.error(
-            "SystemError in payload execution: %r (args=%r) -- full traceback "
-            "follows:\n%s", e, getattr(e, "args", None), tb)
+        logging.error("SystemError in payload execution: %s", error_class(e))
         return TaskStatus.SYSTEM_ERROR, f"SYSTEM_ERROR: {e!r}\n{tb}"
     except KeyError as e:
         return TaskStatus.KEY_ERROR, e.args[0]
@@ -379,9 +381,9 @@ def Exec(payload_data, input_data, globals=None, locals=None):
                 return TaskStatus.SUCCESS, e.args[0][1]
         except Exception:
             pass
+        # The log names the error's class alone: its repr and traceback can
+        # quote the payload, the input and what they computed.
         tb = traceback.format_exc()
-        logging.error(
-            "BaseException in payload execution: %r -- full traceback follows:\n%s",
-            e, tb)
+        logging.error("BaseException in payload execution: %s", error_class(e))
         return TaskStatus.BASE_EXCEPTION, f"BASE_EXCEPTION: {e!r}\n{tb}"
 
