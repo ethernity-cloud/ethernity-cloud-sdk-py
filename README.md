@@ -106,9 +106,11 @@ The sdk has been tested on the following operating systems:
   securelock's container, and uses the store's fixed credential where there
   is no such file. The image carries the label
   `cloud.ethernity.securelock.store=file`, by which the node agent knows that
-  the image reads the file. The file is readable by root alone, the user the
-  image runs as: `src/serverless/Dockerfile.serverless` must not set another
-  `USER`.
+  the image reads the file, and holds the empty directory `/run/ecld`, which
+  SCONE requires of the container at the start of the securelock; the node
+  agent mounts the directory of the file over it. The file is readable by
+  root alone, the user the image runs as:
+  `src/serverless/Dockerfile.serverless` must not set another `USER`.
 
 - **Publish**: To publish the project, run:
   ```sh

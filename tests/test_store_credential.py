@@ -26,9 +26,11 @@ reads it.
     /run/ecld and /etc/hosts, in that order, as the last three lines of
     EXEC.
   - Dockerfile.tpl holds LABEL cloud.ethernity.securelock.store="file" in
-    its last stage, on the line before its one ENTRYPOINT, and no other
-    LABEL; Dockerfile.base.tpl holds none; no Dockerfile of the image holds
-    a USER instruction (the credential file is readable by root alone).
+    its last stage, then the creation of the empty directory /run/ecld
+    (mode 0700) on the line before its one ENTRYPOINT, no other LABEL and
+    no other instruction that names /run/ecld; Dockerfile.base.tpl holds no
+    LABEL; no Dockerfile of the image holds a USER instruction (the
+    credential file is readable by root alone).
   - PUT_PATTERNS are the object names the agent's policy lets a securelock's
     store user put. ADMITTED (every name a securelock puts) matches them and
     REFUSED (the node's, the client's and the trustedzone's objects) does
@@ -39,8 +41,9 @@ reads it.
     swift_stream_service.py calls a removal or an upload of the store client.
   - ecld-build, run with its docker commands recorded: the build context
     holds the reader and the host path, the Dockerfile docker builds the
-    securelock from ends with the label and the ENTRYPOINT, and the image is
-    built, tagged and pushed by three commands that name no other label.
+    securelock from ends with the label, the directory and the ENTRYPOINT,
+    and the image is built, tagged and pushed by three commands that name
+    no other label.
   - ecld-publish's two composes, for a network with a LAS and for an -unsafe
     one: no volume at /run/ecld (the mount is the agent's), no `user` on an
     enclave service, and the securelock named by the image the build pushed.
@@ -86,6 +89,9 @@ READER_BYTES = 1905
 CREDENTIAL_PATH = "/run/ecld/store.json"
 LITERAL = "swiftstreamadmin"
 LABEL = 'LABEL cloud.ethernity.securelock.store="file"'
+# The directory of CREDENTIAL_PATH, the host path of binary-fs-build.sh, as
+# the image holds it: empty, root's, mode 0700.
+DIRECTORY = "RUN mkdir -p -m 0700 " + CREDENTIAL_PATH.rsplit("/", 1)[0]
 MAX_BYTES = 4096
 
 # content: the file's text, whose UTF-8 encoding is its bytes; source file:
@@ -335,18 +341,21 @@ def _instructions(lines, name):
     return [index for index, line in enumerate(lines) if line.split(" ")[0].upper() == name]
 
 
-def _assert_label_before_entrypoint(lines):
-    """The label of a securelock image on the line before the one
-    ENTRYPOINT, in the last stage, and no other LABEL instruction."""
+def _assert_label_and_directory_before_entrypoint(lines):
+    """The label of a securelock image, then the creation of /run/ecld on
+    the line before the one ENTRYPOINT, in the last stage; no other LABEL
+    instruction and no other instruction that names /run/ecld."""
     entrypoint = _instructions(lines, "ENTRYPOINT")
-    assert len(entrypoint) == 1 and entrypoint[0] > _instructions(lines, "FROM")[-1]
-    assert lines[entrypoint[0] - 1] == LABEL
-    assert _instructions(lines, "LABEL") == [entrypoint[0] - 1]
+    assert len(entrypoint) == 1 and entrypoint[0] - 2 > _instructions(lines, "FROM")[-1]
+    assert lines[entrypoint[0] - 2:entrypoint[0]] == [LABEL, DIRECTORY]
+    assert DIRECTORY == "RUN mkdir -p -m 0700 /run/ecld"
+    assert [line for line in lines if "/run/ecld" in line and not line.lstrip().startswith("#")] == [DIRECTORY]
+    assert _instructions(lines, "LABEL") == [entrypoint[0] - 2]
     assert not any("cloud.ethernity.store" in line for line in lines)
 
 
-def test_the_last_stage_of_the_image_holds_the_securelocks_label_before_its_entrypoint():
-    _assert_label_before_entrypoint(_dockerfile(SECURELOCK / "Dockerfile.tpl"))
+def test_the_last_stage_of_the_image_holds_the_securelocks_label_and_the_directory_before_its_entrypoint():
+    _assert_label_and_directory_before_entrypoint(_dockerfile(SECURELOCK / "Dockerfile.tpl"))
     assert _instructions(_dockerfile(SECURELOCK / "Dockerfile.base.tpl"), "LABEL") == []
 
 
@@ -509,8 +518,8 @@ def test_ecld_build_hands_docker_the_reader_the_host_path_and_the_label(monkeypa
     assert "  --host-path=/run/ecld \\" in (context / "scripts" / "binary-fs-build.sh").read_text(
         encoding="utf-8").splitlines()
     rendered = [line for line in _dockerfile(context / "Dockerfile") if line.strip()]
-    _assert_label_before_entrypoint(rendered)
-    assert rendered[-2:] == [LABEL, 'ENTRYPOINT ["/usr/local/bin/python", "/etny-securelock/securelock.py"]']
+    _assert_label_and_directory_before_entrypoint(rendered)
+    assert rendered[-3:] == [LABEL, DIRECTORY, 'ENTRYPOINT ["/usr/local/bin/python", "/etny-securelock/securelock.py"]']
     assert not any(re.search(r"__[A-Z][A-Z0-9_]*__", line) for line in rendered)
 
     # The securelock is built from that Dockerfile, tagged and pushed as built.

@@ -128,5 +128,13 @@ RUN scone-signer info /usr/local/bin/python > /tmp/siginfo.txt 2>&1; \
 
 RUN rm -rf /enclave-key.pem
 
+# The label: this securelock builds its store client from the credential file
+# /run/ecld/store.json (src/store_credential.py). The node agent reads the
+# label from the image. /run/ecld is a host path of the binary-fs
+# (scripts/binary-fs-build.sh) and SCONE ends the start of a process whose
+# container has no such path, so the image holds it: an empty directory,
+# root's, mode 0700, over which the node agent mounts the directory of the
+# credential file read-only.
 LABEL cloud.ethernity.securelock.store="file"
+RUN mkdir -p -m 0700 /run/ecld
 ENTRYPOINT ["/usr/local/bin/python", "/etny-securelock/securelock.py"]
