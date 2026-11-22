@@ -69,6 +69,7 @@ import ecld_state
 import etny_exec
 import securelock_probe
 from etny_exec import TaskStatus
+from log_text import error_class
 
 HANDLER_NAME = "___etny_on_input___"
 HANDLER_GRACE_SECONDS = 30
@@ -313,7 +314,9 @@ class SecureLockSession:
         try:
             outcome = self._serve()
         except Exception as e:
-            logging.error(f"session executor failed: {e}")
+            # Logged by class: the error can quote the payload's data, as
+            # int() quotes a code that is not an integer.
+            logging.error(f"session executor failed: {error_class(e)}")
             outcome = (TaskStatus.SYSTEM_ERROR, f"SESSION EXECUTOR ERROR: {e}")
         if outcome is None:
             return None
@@ -343,7 +346,9 @@ class SecureLockSession:
                 ready, "session.ready",
                 signed_prefix=self._session_binding("session.ready"))
         except Exception as e:
-            logging.error(f"session: could not publish readiness: {e}")
+            # Logged by class: the handler is read from the payload's globals,
+            # whose objects can raise with the payload's data.
+            logging.error(f"session: could not publish readiness: {error_class(e)}")
         if not self._fence_before_first_input():
             self.reason = "FENCE_NOT_RECEIVED"
             logging.error(f"session: no fence signal within {READY_WINDOW_SECONDS} s; ending the task")
@@ -376,7 +381,9 @@ class SecureLockSession:
             try:
                 data = self.app.get_and_verify_trustedzone_object(obj)
             except Exception as e:
-                logging.error(f"session: input {next_seq} failed verification: {e}")
+                # Logged by class: a UnicodeDecodeError quotes the byte of the
+                # plaintext it refused, and its repr the whole plaintext.
+                logging.error(f"session: input {next_seq} failed verification: {error_class(e)}")
                 time.sleep(TICK_SECONDS)
                 continue
             self.seen += 1
@@ -401,7 +408,8 @@ class SecureLockSession:
             "emitted": self.emitted,
             "unprocessed": self.unprocessed,
         }
-        logging.info(f"session: finalizing -- {summary}")
+        # The summary is the session's result and is not logged.
+        logging.info("session: finalizing")
         return (TaskStatus.SUCCESS, json.dumps(summary))
 
 
@@ -413,5 +421,7 @@ def run_session(app):
     try:
         return SecureLockSession(app).run()
     except Exception as e:
-        logging.error(f"session executor failed: {e}")
+        # Logged by class: session.config is signed over its plain text, as a
+        # session input is, and int() and float() quote a field they refuse.
+        logging.error(f"session executor failed: {error_class(e)}")
         return (TaskStatus.SYSTEM_ERROR, f"SESSION EXECUTOR ERROR: {e}")

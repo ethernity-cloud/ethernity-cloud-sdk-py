@@ -17,6 +17,8 @@ import random
 import base64  # CAS self-attestation quote decoding
 import json
 import secrets  # CAS attestation challenge nonce
+import sys
+import threading
 import urllib.request  # enclave-initiated CAS attestation endpoint
 from cryptography import x509
 from cryptography.x509.oid import NameOID
@@ -35,11 +37,31 @@ from swift_stream_service import SwiftStreamService
 # only at runtime, inside the enclave, where it cannot be diagnosed).
 import esr_wallet
 import securelock_probe
+from log_text import error_class, result_digest
 # Suppress pkg_resources warning if using web3
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="web3")
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+# An exception no handler catches, on the main thread or on another (a
+# session's input handler runs on one), is logged by its class alone: its
+# message and traceback can quote the payload, the input or a session input.
+# A SystemExit that ends a thread is not logged, as with the default hook.
+def _log_uncaught_exception(exc_type, exc_value, exc_traceback):
+    logging.error(f"uncaught exception: {error_class(exc_value)}")
+
+
+def _log_uncaught_thread_exception(args):
+    if args.exc_type is not SystemExit:
+        logging.error(f"uncaught exception in a thread: {error_class(args.exc_value)}")
+
+
+sys.excepthook = _log_uncaught_exception
+threading.excepthook = _log_uncaught_thread_exception
+
+
 class EtnySecureLock:
     def __init__(self, cert_pem: str, private_key_pem: str, swiftStreamClient: SwiftStreamService):
         self.swift_stream_service = swiftStreamClient
@@ -763,6 +785,10 @@ class EtnySecureLock:
             logging.error(f"ESR ledger re-stamp skipped: {e}")
         self.task_result = self._attach_task_attestation(
             self.task_result, attestation, getattr(self, "task_binding", None))
+        # The code, and the result as the length and the SHA-256 of the text
+        # save_result hands to the trustedzone; the result is encrypted for
+        # the trustedzone and the data owner and is not logged.
+        logging.info(f"TASK RESULT: code {self.task_code}, {result_digest(self.task_result)}")
 
     @staticmethod
     def _attach_task_attestation(task_result, attestation, binding):
@@ -846,7 +872,6 @@ class EtnySecureLock:
         logging.debug(f"Trustedzone Public Key (hex): {self.trustedzone_public_key}")
 
         sig_der_payload = bytes.fromhex(self.payload_signature)
-        logging.debug(f"Signature DER (hex): {sig_der_payload.hex()}")
         if not crypto.verify_signature(self.trustedzone_public_key, self.payload_data.encode('utf-8'), sig_der_payload):
             logging.error("Payload signature validation failed")
             raise ValueError('INVALID PAYLOAD SIGNATURE')  # Or set error state as needed
@@ -1008,7 +1033,8 @@ def _report_failure(app, exc):
         app.save_result()
         logging.info(f"failure reported (task_code={app.task_code})")
     except Exception as report_exc:
-        logging.error(f"could not report the failure result: {report_exc}")
+        # Logged by class: str() of a result can raise with the result's text.
+        logging.error(f"could not report the failure result: {error_class(report_exc)}")
     try:
         app.end_probe()
     except Exception as tail_exc:
@@ -1128,7 +1154,11 @@ if __name__ == '__main__':
 
         logging.info('Finished the execution')
     except Exception as e:
-        logging.error(f"Error: {e}")
+        # Logged by class: the error can quote the order's data (int() quotes
+        # a payload's code that is not an integer, a UnicodeDecodeError a
+        # plaintext byte, str() of a result the result's text); the failure
+        # report below writes it into the result when no result is set.
+        logging.error(f"Error: {error_class(e)}")
         logging.info(f"PUBLIC_CERT: {cert_pem.decode('utf-8')}")
         # Publish a failure result rather than exiting silently. The trustedzone
         # blocks waiting for this enclave's result; without it that wait runs to

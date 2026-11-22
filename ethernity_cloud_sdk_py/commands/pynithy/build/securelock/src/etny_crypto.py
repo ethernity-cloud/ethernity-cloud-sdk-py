@@ -105,7 +105,6 @@ class etny_crypto:
         # Generating keypair for tinyEC
         priv_key_tec = int.from_bytes(private_key, byteorder="big")
         decrypted_msg = etny_crypto.decrypt_ecc(encrypted_msg, priv_key_tec)
-        #print("\ndecrypted msg:", decrypted_msg)
         return decrypted_msg
 
     @staticmethod
