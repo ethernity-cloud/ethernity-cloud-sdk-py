@@ -213,7 +213,7 @@ The cases that call `run.main` (`test_run_task.py`, `test_run_ipfs.py`,
 runner-py's does: it waits for the task, printing each step, and prints the
 result or the error. `test_packaging.py` holds the package list `setup.py`
 gives (`ethernity_cloud_sdk_py` and its subpackages, not `tests`), the
-release 1.9.0 and the runner requirement `>=1.9.0,<2.0.0`.
+release 1.9.1 and the runner requirement `>=1.9.0,<2.0.0`.
 `test_publish_execution.py` covers the publish's gate on the stored block
 and `write_env` leaving exactly the `ENV_KEYS` variables in `src/.env`.
 
