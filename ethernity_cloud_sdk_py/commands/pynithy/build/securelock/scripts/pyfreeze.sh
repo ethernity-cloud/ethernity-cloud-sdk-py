@@ -29,4 +29,16 @@ mv securelock.py.tmp securelock.py
 # for the crypto/web3 stack so the COLLECT toc is complete.
 pyinstaller --onedir --noconfirm securelock.py
 
+# The binary-fs holds site-packages with its bytecode, which pip and the
+# imports of this stage write with the time of the build in each file's
+# header. Every __pycache__ of site-packages and of /etny-securelock is
+# removed, and site-packages is compiled again in one process, in compileall's
+# order, with headers that carry the hash of the source and that the
+# interpreter does not check against it (unchecked-hash): two builds of the
+# same sources write the same files. A file that does not compile keeps no
+# bytecode, as with pip.
+find /usr/local/lib/python3.14/site-packages /etny-securelock -depth -type d -name __pycache__ -exec rm -rf {} \;
+python -m compileall -q --invalidation-mode unchecked-hash /usr/local/lib/python3.14/site-packages \
+  || echo "compileall: a file of site-packages does not compile and keeps no bytecode"
+
 echo "pyfreeze complete: COLLECT-00.toc + site-packages ready for binary-fs"

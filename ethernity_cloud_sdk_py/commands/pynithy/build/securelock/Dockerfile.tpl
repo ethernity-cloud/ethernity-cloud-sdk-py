@@ -79,7 +79,13 @@ COPY --from=pyfreeze /etny-securelock /etny-securelock
 COPY --from=pyfreeze /etny-securelock/build/securelock/COLLECT-00.toc /etny-securelock/COLLECT-00.toc
 COPY --from=pyfreeze /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 RUN chmod +x /etny-securelock/binary-fs-build.sh && /etny-securelock/binary-fs-build.sh
-RUN cd /binary-fs-dir && scone gcc ./binary_fs_blob.s ./libbinary_fs_template.a -shared -o /libbinary-fs.so
+# The fixed start (fixed-start/fixed_start.c, with the securelock's argument
+# vector and environment keys in fixed-start/securelock.h) is linked into the
+# extension, which the signer measures: the enclave runs the ENTRYPOINT's
+# vector with HOME=/tmp and the listed keys of its environment, whatever
+# arguments and environment its start gives it.
+COPY ./fixed-start/ /fixed-start/
+RUN cd /binary-fs-dir && scone gcc ./binary_fs_blob.s -O2 -fPIC -include /fixed-start/securelock.h /fixed-start/fixed_start.c ./libbinary_fs_template.a -shared -o /libbinary-fs.so
 
 ########################################################################
 # Stage 4 - final SCONE runtime image (lean scone python base) + sign.
@@ -128,4 +134,4 @@ RUN scone-signer info /usr/local/bin/python > /tmp/siginfo.txt 2>&1; \
 
 RUN rm -rf /enclave-key.pem
 
-ENTRYPOINT ["/usr/local/bin/python", "/etny-securelock/securelock.py"]
+ENTRYPOINT ["/usr/local/bin/python", "-I", "/etny-securelock/securelock.py"]

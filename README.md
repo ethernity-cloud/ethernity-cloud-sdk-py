@@ -107,6 +107,19 @@ The sdk has been tested on the following operating systems:
   ```
   Required after build, to build and integrate the secure certificates that will be used during executions and to register the project to the Ethernity Cloud Image Register.
 
+  The fixed start: `build/securelock/fixed-start/fixed_start.c` is linked into
+  the extension the signer measures (`/lib/libbinary-fs.so`) with the
+  securelock's header `securelock.h`: the enclave's interpreter is called with
+  the ENTRYPOINT's vector (`/usr/local/bin/python -I
+  /etny-securelock/securelock.py`) and with `HOME=/tmp` and the first entry of
+  each of `ETNY_ORDER_ID`, `ECAS_ATTEST_SESSION`, `ECAS_ENCLAVE_NONCE`,
+  `ECAS_CAS_QUOTE` and `ESR_CONTRACT_ADDRESS` its start's environment holds,
+  and nothing else; the arguments and environment of the compose or of a CAS
+  session reach neither the interpreter nor the securelock. A start that did
+  not come through the launcher ends with status 78. The freeze stage compiles
+  site-packages with `unchecked-hash` bytecode headers, so that two builds of
+  the same sources bake the same binary-fs.
+
   What the publish measures: `ecld-build` records the securelock it pushed in
   `.config.json` (`SECURELOCK_IMAGE_DIGEST`, the digest of the pushed
   manifest, and `MRENCLAVE_SECURELOCK_SIGNED`, the MRENCLAVE it was signed

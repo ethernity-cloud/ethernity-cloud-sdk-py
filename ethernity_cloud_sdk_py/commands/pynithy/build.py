@@ -195,6 +195,13 @@ def copy_from_module_to_build_dir(build_dir):
     dest_file = build_dir / "securelock" / "scripts" / "pyfreeze.sh"
     shutil.copy(src_file, dest_file)
 
+    # The fixed start the binfs stage links into the extension.
+    src_file = module_dir / "build" / "securelock" / "fixed-start"
+    dest_file = build_dir / "securelock" / "fixed-start"
+    if dest_file.exists():
+        shutil.rmtree(dest_file)
+    shutil.copytree(src_file, dest_file)
+
     src_file = module_dir / "build" / "securelock" / "src"
     dest_file = build_dir / "securelock" / "src"
     # Remove dest if it exists (since copytree fails if dest exists)
@@ -242,15 +249,70 @@ def update_dockerfile():
     with open("Dockerfile.base.tpl", "r") as f:
         dockerfile_secure_template = f.read()
 
-    dockerfile_secure_content = (
-        dockerfile_secure_template.replace("__DOCKER_REPO_URL__", DOCKER_REPO_URL)
-        .replace("__BASE_IMAGE_TAG__", BASE_IMAGE_TAG)
-    )
-
     with open("Dockerfile.base", "w") as f:
-        f.write(dockerfile_secure_content)
+        f.write(render_base_dockerfile(dockerfile_secure_template, DOCKER_REPO_URL, BASE_IMAGE_TAG))
 
     return True
+
+
+def render_base_dockerfile(template, docker_repo_url, base_image_tag):
+    """Dockerfile.base from Dockerfile.base.tpl: the SCONE Python base image
+    the securelock's base is built from."""
+    return template.replace("__DOCKER_REPO_URL__", docker_repo_url).replace("__BASE_IMAGE_TAG__", base_image_tag)
+
+
+def render_securelock_dockerfile(template, blockchain_network, securelock_session, trusted_zone_image, memory, esr,
+                                 production):
+    """The securelock's Dockerfile from Dockerfile.tpl, as ecld-build builds it.
+
+    blockchain_network is the BlockchainNetworks name of the build's network,
+    memory its SCONE_HEAP, esr validate_esr_config()'s answer and production
+    whether the securelock is signed --production (a CAS-provisioned one).
+    """
+    network = BlockchainNetworks.get_details_by_enum_name(blockchain_network)
+    content = (
+        template.replace("__SECURELOCK_SESSION__", securelock_session)
+        .replace("__BUCKET_NAME__", trusted_zone_image + "-v3")
+        .replace("__SMART_CONTRACT_ADDRESS__", network.protocol_contract_address)
+        .replace("__IMAGE_REGISTRY_ADDRESS__", network.image_registry_contract_address)
+        .replace("__RPC_URL__", network.rpc_url)
+        .replace("__CHAIN_ID__", str(network.chain_id))
+        .replace("__TRUSTED_ZONE_IMAGE__", trusted_zone_image)
+        .replace("__NETWORK_TYPE__", network.network_type)
+        # ethernity-cas ValidatorRegistry, baked so the enclave can verify the
+        # CAS that provisions it (ECAS_CAS_QUOTE). "" = no registry on this
+        # network -> the enclave skips the check.
+        .replace("__VALIDATOR_REGISTRY_ADDRESS__",
+                 BlockchainNetworks.get_validator_registry_address(blockchain_network) or "")
+        .replace("__MEMORY_TO_ALLOCATE__", memory)
+    )
+
+    # ESR env injection (RFC §5.4). Disabled projects get the placeholder line
+    # removed entirely, so the rendered Dockerfile is byte-identical to a
+    # pre-ESR render and existing MRENCLAVEs are unaffected. Enabled projects
+    # get the address(es) baked as runtime env in the final (signed) stage.
+    esr_env_block = ""
+    if esr.get("enabled"):
+        esr_env_block = f"ENV ESR_CONTRACT_ADDRESS={esr['contract_address']}\n"
+        if (esr.get("wallet_address") or "").strip():
+            esr_env_block += f"ENV ESR_WALLET_ADDRESS={esr['wallet_address']}\n"
+    content = content.replace("__ESR_ENV__\n", esr_env_block)
+
+    # The signed binary is /usr/local/bin/python, the one the ENTRYPOINT runs
+    # (/usr/local/bin/python3 is a separate symlink to python3.14). The
+    # enclave-creation parameters (--heap/--stack/--dlopen/--extensions) are
+    # passed explicitly and match the runtime environment: scone-signer embeds
+    # SCONE's defaults for anything not passed as a flag, and a drift makes
+    # SCONE recompute MRENCLAVE and re-sign the enclave as debug at load.
+    # Values mirror publish.py's securelock_env.
+    sign_flags = (
+        f"--key=/enclave-key.pem --env --heap={memory} "
+        f"--stack=4M --tcs=64 --dlopen=1 --extensions=/lib/libbinary-fs.so"
+    )
+    return content.replace(
+        "__SCONE_SIGN__",
+        f"RUN scone-signer sign {sign_flags}{' --production' if production else ''} /usr/local/bin/python",
+    ).replace("__SCONE_ALLOW_DLOPEN__", "ENV SCONE_ALLOW_DLOPEN=1")
 
 
 def start_local_registry():
@@ -513,75 +575,14 @@ def main():
     with open("Dockerfile.tpl", "r") as f:
         dockerfile_secure_template = f.read()
 
-    MEMORY_TO_ALLOCATE_FORMATED = MEMORY_TO_ALLOCATE
-
-    dockerfile_secure_content = (
-        dockerfile_secure_template.replace(
-            "__SECURELOCK_SESSION__", SECURELOCK_SESSION
-        )
-        .replace("__BUCKET_NAME__", TRUSTED_ZONE_IMAGE + "-v3")
-        .replace(
-            "__SMART_CONTRACT_ADDRESS__",
-            BLOCKCHAIN_CONFIG.protocol_contract_address,
-        )
-        .replace("__IMAGE_REGISTRY_ADDRESS__", BLOCKCHAIN_CONFIG.image_registry_contract_address)
-        .replace("__RPC_URL__", BLOCKCHAIN_CONFIG.rpc_url)
-        .replace("__CHAIN_ID__", str(BLOCKCHAIN_CONFIG.chain_id))
-        .replace("__TRUSTED_ZONE_IMAGE__", TRUSTED_ZONE_IMAGE)
-        .replace("__NETWORK_TYPE__", BLOCKCHAIN_CONFIG.network_type)
-        # ethernity-cas ValidatorRegistry, baked so the enclave can verify the
-        # CAS that provisions it (ECAS_CAS_QUOTE). "" = no registry on this
-        # network -> the enclave skips the check.
-        .replace("__VALIDATOR_REGISTRY_ADDRESS__",
-                 BlockchainNetworks.get_validator_registry_address(BLOCKCHAIN_NETWORK) or "")
-        .replace("__MEMORY_TO_ALLOCATE__", MEMORY_TO_ALLOCATE_FORMATED)
-    )
-
-    # ESR env injection (RFC §5.4). Disabled projects get the placeholder line
-    # removed entirely, so the rendered Dockerfile is byte-identical to a
-    # pre-ESR render and existing MRENCLAVEs are unaffected. Enabled projects
-    # get the address(es) baked as runtime env in the final (signed) stage.
-    esr_env_block = ""
-    if ESR.get("enabled"):
-        esr_env_block = f"ENV ESR_CONTRACT_ADDRESS={ESR['contract_address']}\n"
-        if (ESR.get("wallet_address") or "").strip():
-            esr_env_block += f"ENV ESR_WALLET_ADDRESS={ESR['wallet_address']}\n"
-    dockerfile_secure_content = dockerfile_secure_content.replace(
-        "__ESR_ENV__\n", esr_env_block
-    )
-
-    # CRITICAL: sign /usr/local/bin/python -- the binary the enclave actually
-    # EXECUTES (ENTRYPOINT and the publish/run compose command both run
-    # /usr/local/bin/python). /usr/local/bin/python3 is a SEPARATE symlink ->
-    # python3.14; signing that leaves the executed binary as the base image's
-    # DEBUG-signed one (Debug: yes, heap 64MB), so at runtime SCONE recomputes
-    # MRENCLAVE and dynamically re-signs as debug -> CAS rejects the DCAP quote
-    # ("Debug mode is enabled -> enclave not trustworthy") on mainnet.
-    #
-    # The enclave-creation params (--heap/--stack/--dlopen/--extensions) MUST be
-    # passed explicitly and match the runtime env exactly (scone-signer embeds
-    # SCONE defaults for anything not passed as a flag) -- any drift triggers the
-    # same debug re-sign. Values mirror publish.py's securelock_env.
-    sign_flags = (
-        f"--key=/enclave-key.pem --env --heap={MEMORY_TO_ALLOCATE_FORMATED} "
-        f"--stack=4M --tcs=64 --dlopen=1 --extensions=/lib/libbinary-fs.so"
-    )
     # A CAS-provisioned securelock (mainnet, or a testnet with a
     # SessionRegistry) is signed --production: the CAS session admits
     # production enclaves only, and a debug-signed one is refused at
     # attestation. A self-signing testnet securelock is signed debug.
-    if BLOCKCHAIN_CONFIG.cas_provisioned:
-        dockerfile_secure_content_final_signed = dockerfile_secure_content.replace(
-            "__SCONE_SIGN__", f"RUN scone-signer sign {sign_flags} --production /usr/local/bin/python"
-        ).replace( "__SCONE_ALLOW_DLOPEN__", "ENV SCONE_ALLOW_DLOPEN=1")
-    else:
-        dockerfile_secure_content_final_signed = dockerfile_secure_content.replace(
-            "__SCONE_SIGN__", f"RUN scone-signer sign {sign_flags} /usr/local/bin/python"
-        ).replace( "__SCONE_ALLOW_DLOPEN__", "ENV SCONE_ALLOW_DLOPEN=1")
-
-
     with open("Dockerfile", "w") as f:
-        f.write(dockerfile_secure_content_final_signed)
+        f.write(render_securelock_dockerfile(
+            dockerfile_secure_template, BLOCKCHAIN_NETWORK, SECURELOCK_SESSION, TRUSTED_ZONE_IMAGE,
+            MEMORY_TO_ALLOCATE, ESR, BLOCKCHAIN_CONFIG.cas_provisioned))
 
 
     # Adding dockerfile customizations
