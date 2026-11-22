@@ -85,13 +85,18 @@ def content(swift, name):
 
 def recording_swift(mem_swift_class, put_delay=0.0, refuse=()):
     """An esr_local.MemSwift that also keeps every heartbeat body written,
-    in order (`beats`), sleeps `put_delay` on every put and refuses the puts
-    of the names in `refuse`."""
+    in order (`beats`), the object name of every put asked of it, refused
+    ones included (`puts`), and every removal asked of it through the
+    delete methods of SwiftStreamService (`removes`); it sleeps `put_delay`
+    on every put and refuses the puts of the names in `refuse`."""
     swift = mem_swift_class()
     swift.beats = []
+    swift.puts = []
+    swift.removes = []
     base_put = swift.put_file_content
 
     def put_file_content(bucket, object_name, prefix, io_obj):
+        swift.puts.append(object_name)
         if object_name in refuse:
             return False, f"{object_name} refused"
         if put_delay:
@@ -100,7 +105,15 @@ def recording_swift(mem_swift_class, put_delay=0.0, refuse=()):
             swift.beats.append(io_obj.getvalue().decode("ascii"))
         return base_put(bucket, object_name, prefix, io_obj)
 
+    def remove(method):
+        def asked(bucket, *names):
+            swift.removes.append((method, bucket, *names))
+            return True, ""
+        return asked
+
     swift.put_file_content = put_file_content
+    for method in ("delete_file", "delete_files", "delete_bucket"):
+        setattr(swift, method, remove(method))
     return swift
 
 

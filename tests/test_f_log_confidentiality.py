@@ -17,7 +17,16 @@ while the template's securelock runs as its __main__ block:
     session.config the store takes from a session input, globals whose
     handle raises at the readiness handshake, and a handler that raises a
     BaseException on its thread;
-  - the uncaught-exception hooks the template installs.
+  - the uncaught-exception hooks the template installs;
+  - the store credential: an order under no credential file, under a file
+    the reader takes and under one it refuses, and, with the file's
+    credential, a store that refuses it and a store that ends every
+    connection without an answer.
+
+The access key and the secret key of the store, the literal pair among
+them, and the credential file's member names are written in no run. Each
+run keeps the arguments the template constructs its store client with and
+the reader's log lines written before that.
 
 securelock.py.tmpl is rendered for a mainnet network with no
 ValidatorRegistry, so it loads the key and the certificate from the session
@@ -25,20 +34,27 @@ paths, which the test maps to files of its own, and is executed as __main__
 with stand-ins for etny_crypto (AES-256-GCM sealing under the SHA-256 of the
 recipient's public key, ECDSA over P-384 with SHA-256), web3 (the PoX and
 Image Registry answers of one order), swift_stream_service (esr_local's
-MemSwift), exit() and time.sleep (capped at 0.02 s). The securelock modules
-are loaded anew from src/. The last tests read the template and its modules:
-they write to stdout and stderr only through the logging module and print()
-at the places KNOWN_PRINTS names, and no comment holds a print or logging
-call."""
+MemSwift, recording), exit() and time.sleep (capped at 0.02 s). The
+securelock modules are loaded anew from src/; store_credential's open maps
+/run/ecld/store.json to a file of the test's own, absent unless the run
+gives its bytes. The two runs against a store on the loopback interface
+construct the client with the template's own swift_stream_service over
+minio, its endpoint replaced by the server's, and are skipped without minio.
+The last tests read the template and its modules: they write to stdout and
+stderr only through the logging module and print() at the places
+KNOWN_PRINTS names, and no comment holds a print or logging call."""
 import ast
 import base64
 import builtins
 import hashlib
+import http.server
+import importlib
 import io
 import json
 import logging
 import os
 import re
+import socketserver
 import sys
 import threading
 import time
@@ -56,7 +72,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.x509.oid import NameOID
 
-from tests.f_session_support import SRC, load_modules
+from tests.f_session_support import SRC, load_modules, recording_swift
 
 TEMPLATE = SRC / "securelock.py.tmpl"
 BUCKET = "etny-suite-v3"
@@ -86,7 +102,18 @@ RESULT = "zq9RESULTsecret"
 CODE = "zq9CODEsecret"
 SESSION_INPUT = "zq9SESSIONinput"
 SESSION_OUTPUT = "zq9OUTPUTsecret"
-SECRETS = (PAYLOAD_MARK, INPUT, RESULT, CODE, SESSION_INPUT, SESSION_OUTPUT, CHALLENGE)
+
+# The store client's endpoint in the template, the path the reader reads,
+# the literal pair, and a credential file of a user of the test's own.
+STORE_ENDPOINT = "etny-swift-stream:9000"
+STORE_CREDENTIAL_PATH = "/run/ecld/store.json"
+STORE_LITERAL = "swiftstreamadmin"
+ACCESS_KEY = "ecldslzq9ACCESSkey01"
+SECRET_KEY = "zq9STOREsecret0123456789abcdef01234567"
+CREDENTIAL = f'{{"accessKey":"{ACCESS_KEY}","secretKey":"{SECRET_KEY}"}}\n'.encode("ascii")
+STORE_SECRETS = (ACCESS_KEY, SECRET_KEY, "accessKey", "secretKey")
+
+SECRETS = (PAYLOAD_MARK, INPUT, RESULT, CODE, SESSION_INPUT, SESSION_OUTPUT, CHALLENGE, STORE_LITERAL)
 
 
 def _key_and_cert(name):
@@ -209,21 +236,21 @@ class _Records(logging.Handler):
 @contextmanager
 def _captured(capsys):
     """stdout, stderr and the logging module while the block runs, at any
-    level; yields the namespace that holds them after the block."""
+    level; yields the namespace that holds them after the block. Its
+    messages are the logging module's so far while the block runs."""
     capsys.readouterr()
     records = _Records()
     root = logging.getLogger()
     level = root.level
     root.addHandler(records)
     root.setLevel(logging.DEBUG)
-    out = SimpleNamespace()
+    out = SimpleNamespace(messages=records.messages)
     try:
         yield out
     finally:
         root.removeHandler(records)
         root.setLevel(level)
         written = capsys.readouterr()
-        out.messages = records.messages
         out.text = "\n".join([written.out, written.err, *records.texts])
 
 
@@ -237,17 +264,24 @@ def _assert_nothing_of(run, secrets, what):
 SESSION_CONFIG = {"order_id": ORDER_ID, "close_after_seconds": 1.0, "input_cutoff_seconds": 1.0, "max_messages": 8}
 
 
-def _run(monkeypatch, capsys, tmp_path, payload, input_data=INPUT, session=None, inputs=(), config_text=None):
+def _run(monkeypatch, capsys, tmp_path, payload, input_data=INPUT, session=None, inputs=(), config_text=None,
+         credential=None, client=None):
     """The template's securelock run as __main__ over one order: `payload`
     and `input_data` staged and signed as the trustedzone stages them, the
     order's metadata their checksums; with `session` (a session.config, or
     `config_text` as its plain text) a session whose inputs are `inputs`
-    (text, or bytes staged as they are). Returns what was written (text,
-    and messages: the logging module's), the exit code, the payload's
-    signature, and the result and code as the trustedzone opens them."""
+    (text, or bytes staged as they are). `credential` is the bytes of the
+    file the reader finds at STORE_CREDENTIAL_PATH; without it there is no
+    file. The template's SwiftStreamService answers the recording MemSwift
+    that holds the order, or what `client` returns for the template's
+    arguments. Returns what was written (text, and messages: the logging
+    module's), the exit code, the payload's signature, the result and code
+    as the trustedzone opens them, the store, and clients: the arguments of
+    each SwiftStreamService call with the reader's lines logged before it."""
     mods = load_modules(monkeypatch)
-    for name in ("models", "log_text"):
+    for name in ("models", "log_text", "store_credential"):
         monkeypatch.delitem(sys.modules, name, raising=False)
+    reader = importlib.import_module("store_credential")
     monkeypatch.setattr(mods["etny_session_exec"], "TICK_SECONDS", 0.02)
     monkeypatch.setattr(mods["securelock_probe"], "HEARTBEAT_PERIOD_SECONDS", 0.02)
     monkeypatch.setattr(mods["securelock_probe"], "IDLE_TAIL_SECONDS", 0.04)
@@ -259,7 +293,7 @@ def _run(monkeypatch, capsys, tmp_path, payload, input_data=INPUT, session=None,
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ETNY_ORDER_ID", str(ORDER_ID))
 
-    store = mods["esr_local"].MemSwift()
+    store = recording_swift(mods["esr_local"].MemSwift)
     sha = lambda text: hashlib.sha256(_bytes(text)).hexdigest()
 
     def put(name, data):
@@ -295,20 +329,34 @@ def _run(monkeypatch, capsys, tmp_path, payload, input_data=INPUT, session=None,
     web3, middleware = _web3_modules(answers)
     crypto = types.ModuleType("etny_crypto")
     crypto.etny_crypto = _Sealing
+    clients, capture = [], []
+
+    def service(*args, **kwargs):
+        logged = [message for message in capture[0].messages if message.startswith("store credential:")]
+        clients.append(SimpleNamespace(args=args, kwargs=kwargs, logged=logged))
+        return store if client is None else client(*args, **kwargs)
+
     swift = types.ModuleType("swift_stream_service")
-    swift.SwiftStreamService = lambda *args, **kwargs: store
+    swift.SwiftStreamService = service
     for name, module in (("web3", web3), ("web3.middleware", middleware),
                          ("etny_crypto", crypto), ("swift_stream_service", swift)):
         monkeypatch.setitem(sys.modules, name, module)
 
-    files = {KEY_FILE: tmp_path / "key.pem", CERT_FILE: tmp_path / "cert.pem"}
+    files = {KEY_FILE: tmp_path / "key.pem", CERT_FILE: tmp_path / "cert.pem",
+             STORE_CREDENTIAL_PATH: tmp_path / "ecld" / "store.json"}
     files[KEY_FILE].write_bytes(SL_KEY)
     files[CERT_FILE].write_bytes(SL_CERT)
+    if credential is not None:
+        files[STORE_CREDENTIAL_PATH].parent.mkdir()
+        files[STORE_CREDENTIAL_PATH].write_bytes(credential)
     real_exists = os.path.exists
     monkeypatch.setattr(os.path, "exists", lambda path: path in files or real_exists(path))
 
     def open_mapped(path, *args, **kwargs):
         return builtins.open(files.get(path, path), *args, **kwargs)
+
+    assert reader.STORE_CREDENTIAL_PATH == STORE_CREDENTIAL_PATH
+    monkeypatch.setattr(reader, "open", open_mapped, raising=False)
 
     def exit_with(code=None):
         raise SystemExit(code)
@@ -320,12 +368,14 @@ def _run(monkeypatch, capsys, tmp_path, payload, input_data=INPUT, session=None,
     namespace = {"__name__": "__main__", "__file__": str(SRC / "securelock.py"),
                  "__builtins__": builtins, "open": open_mapped, "exit": exit_with}
     with _captured(capsys) as run:
+        capture.append(run)
         try:
             exec(compile(source, str(TEMPLATE), "exec"), namespace)
             run.exit_code = None
         except SystemExit as stop:
             run.exit_code = stop.code
     run.store = store
+    run.clients = clients
     run.payload_signature = payload_signature
     stored = lambda name: store._store.get(f"{BUCKET}/{name}")
     run.result = _opened_by_trustedzone(stored("result.trustedzone")) if stored("result.trustedzone") else None
@@ -534,6 +584,152 @@ def test_the_uncaught_exception_hooks_log_the_class_alone(monkeypatch, capsys, t
             (type(thread_exit), thread_exit, thread_exit.__traceback__, thread)))
     _assert_nothing_of(hooks, SECRETS, "the uncaught-exception hooks")
     assert hooks.messages == ["uncaught exception: ValueError", "uncaught exception in a thread: KeyError"]
+
+
+def _credential_lines(run):
+    return [message for message in run.messages if message.startswith("store credential:")]
+
+
+def _clients(run):
+    return [(made.args, made.kwargs, made.logged) for made in run.clients]
+
+
+def test_an_order_under_no_credential_file_runs_on_the_literal_pair_and_logs_its_source_alone(
+        monkeypatch, capsys, tmp_path):
+    run = _run(monkeypatch, capsys, tmp_path, f"'{PAYLOAD_MARK}'\necld.result('{RESULT}')\n")
+    _assert_nothing_of(run, _secrets_of(run) + STORE_SECRETS, "an order under no credential file")
+    assert run.code == "0"
+    line = f"store credential: literal ({STORE_CREDENTIAL_PATH}: absent)"
+    assert _credential_lines(run) == [line]
+    assert _clients(run) == [((STORE_ENDPOINT, STORE_LITERAL, STORE_LITERAL), {}, [line])]
+
+
+# The payload's result is the text values of its globals.
+CONTEXT = f"""'{PAYLOAD_MARK}'
+ecld.result(repr(sorted(item for item in globals().items() if isinstance(item[1], str))))
+"""
+
+
+def test_an_order_under_a_credential_file_writes_neither_key_and_holds_them_in_the_store_client_alone(
+        monkeypatch, capsys, tmp_path):
+    run = _run(monkeypatch, capsys, tmp_path, CONTEXT, credential=CREDENTIAL)
+    _assert_nothing_of(run, _secrets_of(run) + STORE_SECRETS, "an order under a credential file")
+    assert run.code == "0"
+    line = f"store credential: file ({STORE_CREDENTIAL_PATH})"
+    assert _credential_lines(run) == [line]
+    assert _clients(run) == [((STORE_ENDPOINT, ACCESS_KEY, SECRET_KEY), {}, [line])]
+    context = json.loads(run.result)["data"]
+    assert INPUT in context
+    for key in (ACCESS_KEY, SECRET_KEY):
+        assert key not in context, "the payload's globals hold a key"
+        assert not any(key in name or key in value for name, value in os.environ.items())
+        assert not any(key.encode("ascii") in data for data in run.store._store.values())
+
+
+def test_a_credential_file_the_reader_refuses_is_logged_by_its_reason_and_the_order_runs_on_the_literal_pair(
+        monkeypatch, capsys, tmp_path):
+    named = f'{{"accessKey":"{ACCESS_KEY}","secretKey":"{SECRET_KEY}","bucket":"other-v3"}}\n'.encode("ascii")
+    run = _run(monkeypatch, capsys, tmp_path, f"'{PAYLOAD_MARK}'\necld.result('{RESULT}')\n", credential=named)
+    _assert_nothing_of(run, _secrets_of(run) + STORE_SECRETS + ("other-v3",), "a file the reader refuses")
+    line = f"store credential: literal ({STORE_CREDENTIAL_PATH}: malformed)"
+    assert _credential_lines(run) == [line]
+    assert _clients(run) == [((STORE_ENDPOINT, STORE_LITERAL, STORE_LITERAL), {}, [line])]
+    assert run.code == "0"
+    assert all(name.startswith(f"{BUCKET}/") for name in run.store._store)
+
+
+REFUSAL = (b'<?xml version="1.0" encoding="UTF-8"?>\n<Error><Code>InvalidAccessKeyId</Code>'
+           b"<Message>The Access Key Id you provided does not exist in our records.</Message>"
+           b"<Resource>/</Resource><RequestId>17A9F3C2</RequestId><HostId>e3b0c442</HostId></Error>")
+
+
+class _Refusing(http.server.BaseHTTPRequestHandler):
+    """A store that answers every request as MinIO answers an access key it
+    does not hold; the server keeps each request's method, path and
+    Authorization header."""
+
+    def _refuse(self):
+        self.server.requests.append((self.command, self.path, self.headers.get("Authorization", "")))
+        self.send_response(403)
+        self.send_header("Content-Type", "application/xml")
+        self.send_header("Content-Length", str(len(REFUSAL)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(REFUSAL)
+
+    do_GET = do_HEAD = do_PUT = do_POST = do_DELETE = _refuse
+
+    def log_message(self, format, *args):
+        pass
+
+
+class _Closing(socketserver.BaseRequestHandler):
+    """A store that ends every connection without an answer; the server
+    keeps the address of each."""
+
+    def handle(self):
+        self.server.connections.append(self.client_address)
+
+
+@contextmanager
+def _serving(server):
+    """`server` answering on the loopback interface while the block runs."""
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def _minio_client(monkeypatch, server):
+    """The template's own SwiftStreamService (swift_stream_service.py over
+    minio) for the credential it is given, at `server`'s address."""
+    pytest.importorskip("minio")
+    monkeypatch.syspath_prepend(str(SRC))
+    monkeypatch.delitem(sys.modules, "swift_stream_service", raising=False)
+    module = importlib.import_module("swift_stream_service")
+    del sys.modules["swift_stream_service"]
+    host, port = server.server_address
+    return lambda endpoint, access_key, secret_key: module.SwiftStreamService(
+        f"{host}:{port}", access_key, secret_key)
+
+
+def test_a_store_that_refuses_the_files_credential_is_asked_under_no_other_and_neither_key_is_written(
+        monkeypatch, capsys, tmp_path):
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Refusing)
+    server.requests = []
+    with _serving(server):
+        run = _run(monkeypatch, capsys, tmp_path, f"'{PAYLOAD_MARK}'\necld.result('{RESULT}')\n",
+                   credential=CREDENTIAL, client=_minio_client(monkeypatch, server))
+    _assert_nothing_of(run, _secrets_of(run) + STORE_SECRETS, "a store that refuses the credential")
+    line = f"store credential: file ({STORE_CREDENTIAL_PATH})"
+    assert _credential_lines(run) == [line]
+    assert _clients(run) == [((STORE_ENDPOINT, ACCESS_KEY, SECRET_KEY), {}, [line])]
+    assert run.exit_code == 0
+    assert "No .env in SwiftStream; public key emitted, exiting (cert-harvest mode)" in run.messages
+    assert server.requests and run.store.puts == []
+    for method, path, authorization in server.requests:
+        assert f"Credential={ACCESS_KEY}/" in authorization, (method, path)
+        assert STORE_LITERAL not in authorization, (method, path)
+
+
+def test_a_store_that_does_not_answer_is_logged_without_either_key(monkeypatch, capsys, tmp_path):
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _Closing)
+    server.connections = []
+    with _serving(server):
+        run = _run(monkeypatch, capsys, tmp_path, f"'{PAYLOAD_MARK}'\necld.result('{RESULT}')\n",
+                   credential=CREDENTIAL, client=_minio_client(monkeypatch, server))
+    _assert_nothing_of(run, _secrets_of(run) + STORE_SECRETS, "a store that does not answer")
+    line = f"store credential: file ({STORE_CREDENTIAL_PATH})"
+    assert _credential_lines(run) == [line]
+    assert _clients(run) == [((STORE_ENDPOINT, ACCESS_KEY, SECRET_KEY), {}, [line])]
+    assert run.exit_code == 0 and server.connections and run.store.puts == []
+    unavailable = [message for message in run.messages if message.startswith("SwiftStream unavailable (")]
+    assert len(unavailable) == 1
+    assert unavailable[0].endswith("); public key emitted, exiting (cert-harvest mode)")
 
 
 def test_error_class_and_result_digest(monkeypatch):

@@ -19,6 +19,7 @@ EXEC=(scone binary-fs / /binary-fs-dir -v \
   --include '/usr/local/lib/python3.14/*' \
   --include '/etny-securelock/*' \
   --host-path=/etc/resolv.conf \
+  --host-path=/run/ecld \
   --host-path=/etc/hosts)
 
 # Add every shared object PyInstaller collected (crypto/web3/etc. native libs).

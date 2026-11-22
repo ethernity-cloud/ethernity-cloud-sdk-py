@@ -37,6 +37,7 @@ from swift_stream_service import SwiftStreamService
 # only at runtime, inside the enclave, where it cannot be diagnosed).
 import esr_wallet
 import securelock_probe
+import store_credential
 from log_text import error_class, result_digest
 # Suppress pkg_resources warning if using web3
 import warnings
@@ -1108,7 +1109,8 @@ if __name__ == '__main__':
     # that never comes, hanging the extractor until its 20-minute timeout. (The
     # extractor captures the cert from stdout when this process exits.)
     try:
-        swiftStreamClient = SwiftStreamService("etny-swift-stream:9000", "swiftstreamadmin", "swiftstreamadmin")
+        access_key, secret_key, _ = store_credential.load()
+        swiftStreamClient = SwiftStreamService("etny-swift-stream:9000", access_key, secret_key)
         status, env_content = swiftStreamClient.get_file_content("__BUCKET_NAME__", ".env")
     except Exception as e:
         logging.info(f"SwiftStream unavailable ({e}); public key emitted, exiting (cert-harvest mode)")
