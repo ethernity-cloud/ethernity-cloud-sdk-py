@@ -69,11 +69,13 @@ class LocalRegistry:
         return f"{self.host}/{repository}"
 
     def stop(self):
-        """Remove the container, and the tags the publish pulled from it,
-        which name a port no registry answers at any more; nothing when
-        docker is not installed."""
+        """Remove the container with its anonymous volumes (`-v`), and the
+        tags the publish pulled from it, which name a port no registry
+        answers at any more; nothing when docker is not installed. `-v`
+        leaves the tree in place: a bind mount is not a volume docker
+        removes."""
         try:
-            subprocess.run(["docker", "rm", "-f", self.container], capture_output=True, text=True)
+            subprocess.run(["docker", "rm", "-f", "-v", self.container], capture_output=True, text=True)
             if self.host is not None:
                 subprocess.run(["docker", "rmi"] + [self.image(r) for r in REPOSITORIES], capture_output=True, text=True)
         except OSError:

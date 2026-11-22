@@ -65,7 +65,7 @@ def test_start_serves_the_tree_read_only_on_a_loopback_port_free_on_the_host(mon
     assert registry.host == HOST
     assert registry.image("etny-securelock") == f"{HOST}/etny-securelock"
     assert docker.commands == [
-        ["docker", "rm", "-f", "ecld-registry-accept-m3"],
+        ["docker", "rm", "-f", "-v", "ecld-registry-accept-m3"],
         ["docker", "run", "-d", "--name", "ecld-registry-accept-m3", "-p", f"127.0.0.1:{PORT}:5000",
          "-v", f"{registry.tree}:/var/lib/registry:ro", "registry:2"],
     ]
@@ -99,7 +99,7 @@ def test_a_run_docker_refuses_leaves_no_container(monkeypatch, tmp_path):
     with pytest.raises(Exception, match="docker could not start registry:2: port is already allocated"):
         registry.start()
     assert [c[:2] for c in docker.commands] == [["docker", "rm"], ["docker", "run"], ["docker", "rm"]]
-    assert docker.commands[-1] == ["docker", "rm", "-f", "ecld-registry-accept-m3"]
+    assert docker.commands[-1] == ["docker", "rm", "-f", "-v", "ecld-registry-accept-m3"]
     assert registry.host is None
 
 
@@ -109,23 +109,37 @@ def test_a_registry_that_does_not_answer_is_removed(monkeypatch, tmp_path):
     with pytest.raises(Exception, match="did not answer"):
         registry.start()
     assert docker.commands[-2:] == [
-        ["docker", "rm", "-f", "ecld-registry-accept-m3"],
+        ["docker", "rm", "-f", "-v", "ecld-registry-accept-m3"],
         ["docker", "rmi", f"{HOST}/etny-las", f"{HOST}/etny-securelock", f"{HOST}/etny-trustedzone"],
     ]
 
 
-def test_stop_removes_the_container_and_the_tags_pulled_from_it(monkeypatch, tmp_path):
+def test_stop_removes_the_container_with_its_anonymous_volumes_and_the_tags_pulled_from_it(monkeypatch, tmp_path):
     docker = _Docker()
     registry = _registry(monkeypatch, tmp_path, docker)
     registry.stop()
-    assert docker.commands == [["docker", "rm", "-f", "ecld-registry-accept-m3"]]
+    assert docker.commands == [["docker", "rm", "-f", "-v", "ecld-registry-accept-m3"]]
     registry.start()
     del docker.commands[:]
     registry.stop()
     assert docker.commands == [
-        ["docker", "rm", "-f", "ecld-registry-accept-m3"],
+        ["docker", "rm", "-f", "-v", "ecld-registry-accept-m3"],
         ["docker", "rmi", f"{HOST}/etny-las", f"{HOST}/etny-securelock", f"{HOST}/etny-trustedzone"],
     ]
+
+
+@pytest.mark.parametrize("run_returncode, removals", [(0, 2), (125, 3)])
+def test_every_container_the_registry_removes_is_removed_with_its_anonymous_volumes(monkeypatch, tmp_path, run_returncode, removals):
+    """The container a previous publish left, a refused run, and the stop."""
+    docker = _Docker(run_returncode=run_returncode)
+    registry = _registry(monkeypatch, tmp_path, docker)
+    try:
+        registry.start()
+    except Exception:
+        pass
+    registry.stop()
+    removed = [c for c in docker.commands if c[:2] == ["docker", "rm"]]
+    assert removed == [["docker", "rm", "-f", "-v", "ecld-registry-accept-m3"]] * removals
 
 
 def test_stop_without_a_docker_binary_raises_nothing(monkeypatch, tmp_path):

@@ -160,7 +160,8 @@ The sdk has been tested on the following operating systems:
   publish kept", starting it again when a restart of docker stopped it),
   finds the image already registered and continues to the certificate, and
   keeps the node in turn should it end before the certificate.
-  `docker rm -f ecld-kubo-<project>` stops it; a node started afresh has
+  `docker rm -f -v ecld-kubo-<project>` stops it and removes its IPFS repo;
+  a node started afresh has
   another peer id, which matches nothing on chain, and the image must then be
   rebuilt. `ECLD_KUBO_SWARM_PORT` (default 4001) is the port
   your node publishes when it is free; when another container holds it, the

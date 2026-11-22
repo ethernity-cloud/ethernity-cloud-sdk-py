@@ -139,12 +139,36 @@ def _run_without_swarm_port(kubo):
             local_kubo.KUBO_IMAGE, "daemon", "--init", "--migrate=true"]
 
 
-def test_stop_removes_the_container(monkeypatch):
+def test_stop_removes_the_container_with_its_anonymous_volumes_the_ipfs_repo_in_data_ipfs_and_export(monkeypatch):
     docker = _Docker()
     monkeypatch.setattr(subprocess, "run", docker)
     kubo = _kubo(monkeypatch, [])
     kubo.stop()
-    assert docker.commands == [["docker", "rm", "-f", kubo.container]]
+    assert docker.commands == [["docker", "rm", "-f", "-v", kubo.container]]
+
+
+@pytest.mark.parametrize("refusals, api", [
+    ([NO_SUCH_IMAGE], None),
+    ([PORT_ALLOCATED], None),
+    ([PORT_ALLOCATED, PORT_ALLOCATED], None),
+    ([], _refusing),
+])
+def test_every_container_the_kubo_removes_is_removed_with_its_anonymous_volumes(monkeypatch, refusals, api):
+    """A refused run, a run refused without the swarm port, an API that does
+    not come up, and the release."""
+    docker = _Docker(refusals=refusals)
+    kubo = _starting(monkeypatch, docker)
+    if api is not None:
+        monkeypatch.setattr(kubo, "_api", api)
+        _past_the_deadline(monkeypatch)
+    try:
+        kubo.start()
+    except Exception:
+        pass
+    kubo.release()
+    removals = [c for c in docker.commands if c[:2] == ["docker", "rm"]]
+    assert len(removals) >= 2
+    assert all(c == ["docker", "rm", "-f", "-v", kubo.container] for c in removals)
 
 
 def test_stop_without_a_docker_binary_raises_nothing(monkeypatch):
@@ -275,7 +299,7 @@ def test_a_kubo_serving_no_registered_image_is_stopped_on_release(monkeypatch):
     monkeypatch.setattr(subprocess, "run", docker)
     kubo = _kubo(monkeypatch, [])
     kubo.release()
-    assert docker.commands == [["docker", "rm", "-f", kubo.container]]
+    assert docker.commands == [["docker", "rm", "-f", "-v", kubo.container]]
 
 
 def test_a_kubo_serving_a_registered_image_is_kept_on_release(monkeypatch, capsys):
@@ -288,7 +312,7 @@ def test_a_kubo_serving_a_registered_image_is_kept_on_release(monkeypatch, capsy
     assert docker.commands == []
     assert "The registered image stays available from this publish's IPFS node, the docker" in out
     assert f"container {kubo.container}, for the extraction service and the bootnode." in out
-    assert f"Publish again to retry; `docker rm -f {kubo.container}` stops it." in out
+    assert f"\t   Publish again to retry; `docker rm -f -v {kubo.container}` stops it.\n" in out
 
 
 def test_a_sigterm_or_sighup_ends_the_publish_as_ctrl_c_does():

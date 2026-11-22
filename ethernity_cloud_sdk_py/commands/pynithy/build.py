@@ -67,6 +67,20 @@ def get_docker_server_info():
     except FileNotFoundError:
         return False
 
+def container_ids(name):
+    """The ids of the containers, running or stopped, named exactly `name`;
+    none when docker fails. `docker ps` runs from an argument list, without a
+    shell, so the filter `name=^/<name>$` reaches docker unchanged on every
+    OS: cmd.exe keeps single quotes in the argument and takes `^` as its
+    escape character."""
+    result = subprocess.run(
+        ["docker", "ps", "-a", "-q", "--filter", f"name=^/{name}$"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        return []
+    return result.stdout.split()
+
+
 def clean_up_registry():
     # Remove the 'registry' directory if it exists
     shutil.rmtree("./build/registry", ignore_errors=True)
@@ -79,7 +93,7 @@ def clean_up_registry():
     # running on the same host. `-v` removes their anonymous volumes too:
     # registry:2 keeps its pushed images in one, about 1.3 GB per build.
     for name in ("registry", "las", "etny-securelock", "etny-trustedzone", "etny-swift-stream"):
-        containers = get_command_output(f"docker ps --filter 'name=^/{name}$' -a -q")
+        containers = " ".join(container_ids(name))
         if containers:
             run_command(f"docker stop {containers}", True)
             run_command(f"docker rm -f -v {containers}", True)
