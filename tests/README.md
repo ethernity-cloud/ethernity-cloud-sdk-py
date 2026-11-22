@@ -125,15 +125,16 @@ the file. It reads the sources: the literal pair is in the reader alone,
 in the statement before the one that constructs its one `SwiftStreamService`
 from the two keys, `scripts/binary-fs-build.sh` declares the host path
 `/run/ecld` between `/etc/resolv.conf` and `/etc/hosts`, `Dockerfile.tpl`
-holds `LABEL cloud.ethernity.securelock.store="file"` on the line before its
-`ENTRYPOINT`, and no Dockerfile of the image names a `USER`. Every object
+holds `LABEL cloud.ethernity.securelock.store="file"` and then
+`RUN mkdir -p -m 0700 /run/ecld` on the line before its `ENTRYPOINT`, and no
+Dockerfile of the image names a `USER`. Every object
 name the securelock passes to a put matches one of the nine patterns the
 agent's policy lets a securelock's store user put, and it asks no removal:
 over a plain task and a session run from the template, and over a plain
 task's commit, a session step's commit and a fence under esr_local.
 `ecld-build`, run with its docker commands recorded, hands docker a context
-with the reader and the host path and a Dockerfile that ends with the label
-and the `ENTRYPOINT`; the two composes of `ecld-publish` mount nothing at
+with the reader and the host path and a Dockerfile that ends with the label,
+the directory and the `ENTRYPOINT`; the two composes of `ecld-publish` mount nothing at
 `/run/ecld`. `test_f_log_confidentiality.py` runs the template's securelock
 under no credential file, under a file the reader takes and under one it
 refuses, and against a store on the loopback interface that refuses the
