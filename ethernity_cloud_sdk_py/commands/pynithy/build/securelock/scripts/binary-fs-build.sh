@@ -14,6 +14,18 @@
 set -e
 cd /etny-securelock
 
+# The shared objects PyInstaller collected, read from its toc before its
+# output is removed. PyInstaller's output (build/: its analysis, the PYZ
+# archive and the frozen executable; dist/: the frozen application with a copy
+# of every collected library) is not run by the enclave, which runs
+# securelock.py with the SCONE interpreter, and differs from build to build:
+# it stays out of the binary-fs, as in the trustedzone's binary-fs-build.sh.
+COLLECTED_SO=()
+if [ -f ./COLLECT-00.toc ]; then
+  while IFS= read -r FILE; do COLLECTED_SO+=("${FILE}"); done < <(grep '.so' ./COLLECT-00.toc | grep BINARY | awk -F "'" '{print $4}')
+fi
+rm -rf ./build ./dist ./*.spec ./COLLECT-00.toc
+
 EXEC=(scone binary-fs / /binary-fs-dir -v \
   --include '/usr/local/bin/python3' \
   --include '/usr/local/lib/python3.14/*' \
@@ -22,11 +34,9 @@ EXEC=(scone binary-fs / /binary-fs-dir -v \
   --host-path=/etc/hosts)
 
 # Add every shared object PyInstaller collected (crypto/web3/etc. native libs).
-if [ -f ./COLLECT-00.toc ]; then
-  for FILE in $(grep '.so' ./COLLECT-00.toc | grep BINARY | awk -F "'" '{print $4}'); do
-    EXEC+=(--include "${FILE}"'*')
-  done
-fi
+for FILE in "${COLLECTED_SO[@]}"; do
+  EXEC+=(--include "${FILE}"'*')
+done
 
 echo "${EXEC[@]}"
 mkdir -p /binary-fs-dir

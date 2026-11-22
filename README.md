@@ -117,8 +117,9 @@ The sdk has been tested on the following operating systems:
   and nothing else; the arguments and environment of the compose or of a CAS
   session reach neither the interpreter nor the securelock. A start that did
   not come through the launcher ends with status 78. The freeze stage compiles
-  site-packages with `unchecked-hash` bytecode headers, so that two builds of
-  the same sources bake the same binary-fs.
+  site-packages with `unchecked-hash` bytecode headers and `binary-fs-build.sh`
+  leaves PyInstaller's output (`build/`, `dist/`) out of the binary-fs, so that
+  two builds of the same sources bake the same binary-fs.
 
   What the publish measures: `ecld-build` records the securelock it pushed in
   `.config.json` (`SECURELOCK_IMAGE_DIGEST`, the digest of the pushed
