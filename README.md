@@ -135,6 +135,19 @@ The sdk has been tested on the following operating systems:
   leaves PyInstaller's output (`build/`, `dist/`) out of the binary-fs, so that
   two builds of the same sources bake the same binary-fs.
 
+  The securelock reads no `.env` file of its file system: it takes the order
+  id from its environment and from the `.env` object of its store bucket
+  (`read_env_str` over the content `get_file_content` returns), and no
+  securelock source imports dotenv, so the image installs no python-dotenv (a
+  backend that imports it lists it in `src/serverless/requirements.txt`). No
+  `.env` file is built into the image: the build directory's `src/`,
+  `scripts/` and `fixed-start/` hold none and the Dockerfiles and the build
+  scripts name none. `tests/test_securelock_env_files.py` fails on a source
+  of the securelock or of the scaffold's `src/serverless` that loads a `.env`
+  file (`load_dotenv`, `find_dotenv`, `dotenv_values` or `DotEnv` on a path, a
+  file opened by a `.env` name), on an import of dotenv, on python-dotenv in a
+  pip line and on a `.env` file in those trees and lines.
+
   What the publish measures: `ecld-build` records the securelock it pushed in
   `.config.json` (`SECURELOCK_IMAGE_DIGEST`, the digest of the pushed
   manifest, and `MRENCLAVE_SECURELOCK_SIGNED`, the MRENCLAVE it was signed

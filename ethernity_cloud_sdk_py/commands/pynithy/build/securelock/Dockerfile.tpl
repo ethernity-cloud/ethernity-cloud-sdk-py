@@ -37,7 +37,7 @@ WORKDIR /etny-securelock
 # and native builds work normally).
 RUN pip install --no-cache-dir \
       pyinstaller \
-      python-dotenv "web3>=6" cryptography ecdsa pyasn1 tinyec minio pynacl
+      "web3>=6" cryptography ecdsa pyasn1 tinyec minio pynacl
 
 # User-supplied additional modules (the customization hook).
 COPY ./src/serverless/requirements.txt /requirements.txt
