@@ -116,7 +116,21 @@ The sdk has been tested on the following operating systems:
   `ECAS_CAS_QUOTE` and `ESR_CONTRACT_ADDRESS` its start's environment holds,
   and nothing else; the arguments and environment of the compose or of a CAS
   session reach neither the interpreter nor the securelock. A start that did
-  not come through the launcher ends with status 78. The freeze stage compiles
+  not come through the launcher ends with status 78. Before it calls the
+  interpreter's main the launcher checks the file tree: for each path of
+  `fixed-start/securelock.tree` (`/etny-securelock` with the dApp's
+  `serverless` package, `/usr/local/lib/python3.14` with `site-packages`, and
+  the names the tree does not hold and the interpreter reads: the zip archive
+  on `sys.path` and, beside the interpreter, the `._pth` file, `pyvenv.cfg`,
+  `pybuilddir.txt` and the standard library's landmarks) it computes the
+  digest of the tree at that path as the enclave sees it (every regular file
+  with its size and SHA-256, every symbolic link with its target, in a fixed
+  order; `fixed_start.c` and `fixed-start/tree_digest.sh` state the records)
+  and ends with status 78 (`the file tree is not the image's at <path>`) when
+  one differs from the digest the binfs stage wrote with `tree_digest.sh` after
+  the binary-fs was made, which the link line compiles into the measured
+  extension. A file at such a path that is not the tree's changes the digest;
+  a file at another path (`/tmp`, `/app`, `/etc`) is not checked. The freeze stage compiles
   site-packages with `unchecked-hash` bytecode headers and `binary-fs-build.sh`
   leaves PyInstaller's output (`build/`, `dist/`) out of the binary-fs, so that
   two builds of the same sources bake the same binary-fs.

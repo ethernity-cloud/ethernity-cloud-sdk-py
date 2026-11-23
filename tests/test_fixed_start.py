@@ -8,16 +8,23 @@ securelock's Python reads from its environment; securelock.py puts its own
 directory on sys.path before it imports a sibling module. The Dockerfile
 ecld-build renders links the launcher into /libbinary-fs.so; the build
 directory holds fixed-start/; the freeze stage compiles site-packages with
-hash-based bytecode headers. With a musl C library and gcc on the host, the
-launcher is compiled with the securelock's header and a program started
-through it runs with the fixed vector and environment whatever it is started
-with."""
+hash-based bytecode headers. The file tree check: fixed-start/securelock.tree
+names the paths from which the interpreter loads code and the files its path
+configuration opens by name, the binfs stage writes their digests with
+fixed-start/tree_digest.sh after it makes the binary-fs, and the link line
+compiles them into the launcher. With a musl C library, gcc and bash on the
+host, the launcher is compiled with the securelock's header and the digests of
+a tree, and a program started through it runs with the fixed vector and
+environment whatever it is started with, and only while that tree is the one
+the digests were written for."""
 import ast
+import hashlib
 import json
 import os
 import py_compile
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -34,11 +41,25 @@ DOCKERFILE = SECURELOCK / "Dockerfile.tpl"
 PYFREEZE = SECURELOCK / "scripts" / "pyfreeze.sh"
 LAUNCHER = SECURELOCK / "fixed-start" / "fixed_start.c"
 HEADER = SECURELOCK / "fixed-start" / "securelock.h"
+TREE_FILE = SECURELOCK / "fixed-start" / "securelock.tree"
+TREE_DIGEST = SECURELOCK / "fixed-start" / "tree_digest.sh"
+BINARY_FS_BUILD = SECURELOCK / "scripts" / "binary-fs-build.sh"
 # The etny-nodenithy checkout: ETNY_NODENITHY, else the sibling of this repository.
 NODENITHY = Path(os.environ.get("ETNY_NODENITHY") or ROOT.parent / "etny-nodenithy").resolve()
-NODENITHY_LAUNCHER = NODENITHY / "v3" / "build" / "trustedzone" / "fixed-start" / "fixed_start.c"
+NODENITHY_FIXED_START = NODENITHY / "v3" / "build" / "trustedzone" / "fixed-start"
+NODENITHY_LAUNCHER = NODENITHY_FIXED_START / "fixed_start.c"
 
 VECTOR = ["/usr/local/bin/python", "-I", "/etny-securelock/securelock.py"]
+# The paths the file tree check covers (securelock.tree): the entry's
+# directory and the standard library's (sys.path), and what the tree does not
+# hold: the zip archive on sys.path and the names getpath and site read beside
+# the interpreter (a ._pth file, pyvenv.cfg, the build marker, the standard
+# library's landmarks searched up to /usr).
+TREE = [
+    "/etny-securelock", "/usr/local/lib/python3.14", "/usr/local/lib/python314.zip",
+    "/usr/local/bin/python._pth", "/usr/local/bin/pyvenv.cfg", "/usr/local/pyvenv.cfg",
+    "/usr/local/bin/pybuilddir.txt", "/usr/local/bin/lib", "/usr/lib/python314.zip", "/usr/lib/python3.14",
+]
 FIXED_ENV = ["HOME=/tmp"]
 ALLOWED = ["ETNY_ORDER_ID", "ECAS_ATTEST_SESSION", "ECAS_ENCLAVE_NONCE", "ECAS_CAS_QUOTE", "ESR_CONTRACT_ADDRESS"]
 # Read by esr_wallet.py and not passed (securelock.h).
@@ -46,7 +67,10 @@ NOT_PASSED = ["ESR_IDENTITY_SECRET"]
 SPACE = 32768
 REFUSED = 78
 LINK = ("RUN cd /binary-fs-dir && scone gcc ./binary_fs_blob.s -O2 -fPIC -include /fixed-start/securelock.h "
-        "/fixed-start/fixed_start.c ./libbinary_fs_template.a -shared -o /libbinary-fs.so")
+        "-include /binary-fs-dir/fixed_start_tree.h /fixed-start/fixed_start.c ./libbinary_fs_template.a -shared "
+        "-o /libbinary-fs.so")
+TREE_RUN = ("RUN bash /fixed-start/tree_digest.sh /fixed-start/securelock.tree /binary-fs-dir/fixed_start_tree.h "
+            "/binary-fs-dir/fixed_start_tree.txt")
 NO_ESR = {"enabled": False, "contract_address": "", "wallet_address": ""}
 
 
@@ -139,6 +163,38 @@ def test_one_line_links_the_launcher_into_the_extension_after_the_copy_of_fixed_
     assert re.search(r"^ENV SCONE_EXTENSIONS_PATH=/lib/libbinary-fs\.so$", signed, re.M)
 
 
+def test_the_binfs_stage_writes_the_tree_s_digests_after_it_makes_the_binary_fs_and_before_the_link():
+    (binfs,) = [s for s in _stages(_read(DOCKERFILE)) if TREE_RUN in s]
+    make = binfs.find("/etny-securelock/binary-fs-build.sh\n")
+    copy = binfs.find("COPY ./fixed-start/ /fixed-start/\n")
+    run = binfs.find(TREE_RUN)
+    assert 0 <= make < copy < run < binfs.find(LINK)
+    # Nothing after the digests changes the file system the binary-fs was made from.
+    assert [line for line in binfs[run:].split("\n") if re.match(r"(RUN|COPY|ADD) ", line)] == [TREE_RUN, LINK]
+    # The binary-fs holds the two directories of the tree whole.
+    script = _read(BINARY_FS_BUILD)
+    for directory in TREE[:2]:
+        assert f"--include '{directory}/*'" in script
+
+
+def _tree_paths(text):
+    return [line for line in text.splitlines() if line and not line.startswith("#")]
+
+
+def test_the_tree_file_names_the_entry_s_directory_the_standard_library_and_the_names_getpath_reads():
+    assert _tree_paths(_read(TREE_FILE)) == TREE
+    assert TREE[0] == os.path.dirname(VECTOR[2])
+    interpreter = VECTOR[0]
+    bin_dir = os.path.dirname(interpreter)
+    prefix = os.path.dirname(bin_dir)
+    assert TREE[1] == f"{prefix}/lib/python3.14"
+    assert TREE[2] == f"{prefix}/lib/python314.zip"
+    assert TREE[3] == f"{interpreter}._pth"
+    assert TREE[4:7] == [f"{bin_dir}/pyvenv.cfg", f"{prefix}/pyvenv.cfg", f"{bin_dir}/pybuilddir.txt"]
+    assert TREE[7:] == [f"{bin_dir}/lib", f"{os.path.dirname(prefix)}/lib/python314.zip",
+                        f"{os.path.dirname(prefix)}/lib/python3.14"]
+
+
 @pytest.mark.parametrize("network,image", [
     ("BLOXBERG_TESTNET_UNSAFE", "etny-pynithy-testnet-unsafe"),
     ("BLOXBERG_TESTNET", "etny-pynithy-testnet"),
@@ -177,16 +233,18 @@ def test_the_base_dockerfile_names_the_networks_base_image():
 def test_the_build_directory_holds_the_fixed_start(tmp_path):
     assert build.copy_from_module_to_build_dir(tmp_path) is True
     copied = tmp_path / "securelock" / "fixed-start"
-    assert sorted(p.name for p in copied.iterdir()) == ["fixed_start.c", "securelock.h"]
-    assert (copied / "fixed_start.c").read_bytes() == LAUNCHER.read_bytes()
-    assert (copied / "securelock.h").read_bytes() == HEADER.read_bytes()
+    assert sorted(p.name for p in copied.iterdir()) == ["fixed_start.c", "securelock.h", "securelock.tree",
+                                                        "tree_digest.sh"]
+    for name in ("fixed_start.c", "securelock.h", "securelock.tree", "tree_digest.sh"):
+        assert (copied / name).read_bytes() == (SECURELOCK / "fixed-start" / name).read_bytes()
 
 
-def test_fixed_start_c_is_byte_identical_to_etny_nodenithys_when_that_checkout_is_present():
+def test_fixed_start_c_and_tree_digest_sh_are_byte_identical_to_etny_nodenithys_when_that_checkout_is_present():
     if not NODENITHY_LAUNCHER.exists():
         pytest.skip(f"no etny-nodenithy checkout at {NODENITHY} (set ETNY_NODENITHY)")
     lf = lambda p: _read(p).replace("\r\n", "\n")  # noqa: E731
     assert lf(LAUNCHER) == lf(NODENITHY_LAUNCHER)
+    assert lf(TREE_DIGEST) == lf(NODENITHY_FIXED_START / "tree_digest.sh")
 
 
 COMPILE_LINE = re.compile(r"^python -m compileall (.*) /usr/local/lib/python3\.14/site-packages \\$")
@@ -248,7 +306,8 @@ def test_the_freeze_stage_s_recompilation_writes_the_same_bytecode_for_sources_o
         assert int.from_bytes(data[4:8], "little") == 0b01, "the header's flags: hash-based, not checked"
 
 
-# A musl C library (the one SCONE's runtime is built on) and gcc.
+# A musl C library (the one SCONE's runtime is built on), gcc, and bash for
+# tree_digest.sh.
 def _toolchain_missing():
     if sys.platform != "linux":
         return f"the host is {sys.platform}, not Linux"
@@ -256,7 +315,70 @@ def _toolchain_missing():
         return "the host C library is not musl"
     if shutil.which("gcc") is None:
         return "gcc is not on PATH"
+    if shutil.which("bash") is None:
+        return "bash is not on PATH"
     return None
+
+
+def _tree_digest(p):
+    """The digest of the tree at p as fixed_start.c defines it, computed here
+    from the definition."""
+    h = hashlib.sha256()
+
+    def record(*fields):
+        for field in fields:
+            h.update(os.fsencode(field) + b"\0")
+
+    def entry(x):
+        st = os.lstat(x)
+        if stat.S_ISREG(st.st_mode):
+            data = Path(x).read_bytes()
+            record("F" + x, str(len(data)), hashlib.sha256(data).hexdigest())
+        elif stat.S_ISLNK(st.st_mode):
+            record("L" + x, os.readlink(x))
+        elif stat.S_ISDIR(st.st_mode):
+            for name in sorted(os.listdir(x), key=os.fsencode):
+                entry(f"{x}/{name}")
+        else:
+            record("O" + x)
+
+    if os.path.lexists(p):
+        entry(p)
+    else:
+        record("A" + p)
+    return h.hexdigest()
+
+
+def _make_tree(root, reverse=False, mode=0o644, mtime=1_000_000_000):
+    """A tree for the launcher's tests under root: the entry, the dApp's
+    serverless package, a json package, names whose bytewise order differs
+    from a sort of the whole paths (pkg/, pkg-b.py, pkg.py), a .pth file and a
+    symbolic link. reverse reverses the order the entries are made in; mode and
+    mtime set the files' modes and times."""
+    files = [("securelock.py", "import serverless.backend\n"), ("serverless/backend.py", "def hello(m):\n    return m\n"),
+             ("pkg/__init__.py", "X = 1\n"), ("pkg-b.py", "B = 1\n"), ("pkg.py", "import pkg\n"),
+             ("json/__init__.py", "dumps = repr\n"), ("site-packages/dist.pth", "./pkg\n")]
+    steps = []
+    for rel, text in files:
+        def write(rel=rel, text=text):
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+            os.chmod(path, mode)
+            os.utime(path, (mtime, mtime))
+        steps.append(write)
+    steps.append(lambda: os.symlink("pkg.py", root / "link.py"))
+    root.mkdir(parents=True, exist_ok=True)
+    for step in (reversed(steps) if reverse else steps):
+        step()
+
+
+def _digests(tree_file, out):
+    """tree_digest.sh over tree_file: its header and its listing."""
+    r = subprocess.run(["bash", str(TREE_DIGEST), str(tree_file), f"{out}.h", f"{out}.txt"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return _read(f"{out}.h"), _read(f"{out}.txt")
 
 
 STARTED_C = r"""#include <stdio.h>
@@ -302,15 +424,23 @@ def launcher_build(tmp_path_factory):
     (d / "started.c").write_text(STARTED_C)
     (d / "loader.c").write_text(LOADER_C)
     lib = d / "libfixedstart.so"
+    tree = d / "etny-securelock"
+    absent = d / "python314.zip"
+    tree_file = d / "test.tree"
+    _make_tree(tree)
+    tree_file.write_text(f"# the test's paths\n{tree}\n{absent}\n")
+    _digests(tree_file, d / "fixed_start_tree")
 
     def gcc(*args):
         r = subprocess.run(["gcc", *map(str, args)], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
 
-    gcc("-shared", "-fPIC", "-O2", "-Wall", "-Wextra", "-Werror", "-include", HEADER, "-o", lib, LAUNCHER)
+    gcc("-shared", "-fPIC", "-O2", "-Wall", "-Wextra", "-Werror", "-include", HEADER,
+        "-include", d / "fixed_start_tree.h", "-o", lib, LAUNCHER)
     gcc("-O2", "-o", d / "started", d / "started.c", f"-L{d}", "-lfixedstart", f"-Wl,-rpath,{d}")
     gcc("-O2", "-o", d / "loader", d / "loader.c")
-    return {"lib": lib, "started": d / "started", "loader": d / "loader"}
+    return {"dir": d, "lib": lib, "started": d / "started", "loader": d / "loader", "tree": tree,
+            "absent": absent, "tree_file": tree_file}
 
 
 def _lines(out, tag):
@@ -345,3 +475,85 @@ def test_a_start_that_did_not_come_through_the_launcher_is_refused_when_its_obje
     assert r.returncode == REFUSED
     assert r.stdout == ""
     assert r.stderr == "fixed start: the start is refused: the start did not come through the launcher\n"
+
+
+def _start(launcher_build):
+    return subprocess.run([launcher_build["started"]], capture_output=True, text=True, env={"ETNY_ORDER_ID": "7"})
+
+
+def _refused_at(launcher_build, where, change, undo):
+    """A start through the launcher after change() is refused before main;
+    once undone, the next start runs main."""
+    change()
+    try:
+        r = _start(launcher_build)
+        assert r.returncode == REFUSED, r.stdout
+        assert r.stdout == ""
+        assert r.stderr == f"fixed start: the start is refused: the file tree is not the image's at {where}\n"
+    finally:
+        undo()
+    again = _start(launcher_build)
+    assert again.returncode == 0, again.stderr
+
+
+def test_the_generator_writes_the_digest_of_each_path_the_tree_file_names_as_fixed_start_c_defines_it(launcher_build):
+    tree, absent = str(launcher_build["tree"]), str(launcher_build["absent"])
+    header, listing = _digests(launcher_build["tree_file"], launcher_build["dir"] / "check")
+    assert header == "\n".join([
+        "/* Written by tree_digest.sh from test.tree: the digest of each path. */",
+        "#define FIXED_START_TREE \\",
+        f'    {{ "{tree}", "{_tree_digest(tree)}" }}, \\',
+        f'    {{ "{absent}", "{_tree_digest(absent)}" }}, \\',
+        "",
+        "",
+    ])
+    entries = [line.split(" ")[-1] for line in listing.split("\n") if re.match(r"[FLOA] ", line)]
+    assert entries == [f"{tree}/json/__init__.py", "pkg.py", f"{tree}/pkg/__init__.py", f"{tree}/pkg-b.py",
+                       f"{tree}/pkg.py", f"{tree}/securelock.py", f"{tree}/serverless/backend.py",
+                       f"{tree}/site-packages/dist.pth", absent]
+
+
+def test_a_start_whose_tree_is_the_one_the_digests_were_written_for_runs_the_program_s_main(launcher_build):
+    r = _start(launcher_build)
+    assert r.returncode == 0, r.stderr
+    assert _lines(r.stdout, "arg") == VECTOR
+
+
+def test_a_changed_file_is_refused_the_entry_the_dapp_s_backend_and_a_standard_library_module(launcher_build):
+    tree = launcher_build["tree"]
+    for rel in ("securelock.py", "serverless/backend.py", "json/__init__.py"):
+        path = tree / rel
+        was = path.read_bytes()
+        _refused_at(launcher_build, tree, lambda: path.write_text("import os\n"), lambda: path.write_bytes(was))
+
+
+def test_an_added_file_is_refused_sitecustomize_a_pth_file_a_module_a_package_and_a_zip(launcher_build):
+    tree, absent = launcher_build["tree"], launcher_build["absent"]
+    for rel in ("sitecustomize.py", "site-packages/sitecustomize.py", "site-packages/added.pth", "json.py",
+                "cryptography/__init__.py"):
+        path = tree / rel
+
+        def add(path=path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("import os\n")
+
+        def undo(path=path, rel=rel):
+            shutil.rmtree(tree / "cryptography") if rel.startswith("cryptography/") else path.unlink()
+
+        _refused_at(launcher_build, tree, add, undo)
+    _refused_at(launcher_build, absent, lambda: absent.write_bytes(b"PK\x05\x06" + b"\0" * 18), absent.unlink)
+
+
+def test_the_digests_do_not_depend_on_modes_times_or_the_order_the_entries_were_made_in(launcher_build):
+    tree, d = launcher_build["tree"], launcher_build["dir"]
+    first = _digests(launcher_build["tree_file"], d / "first")
+    assert _digests(launcher_build["tree_file"], d / "second") == first
+    kept = d / "tree-kept"
+    tree.rename(kept)
+    try:
+        _make_tree(tree, reverse=True, mode=0o600, mtime=2_000_000_000)
+        assert _digests(launcher_build["tree_file"], d / "remade") == first
+        assert _start(launcher_build).returncode == 0
+    finally:
+        shutil.rmtree(tree)
+        kept.rename(tree)

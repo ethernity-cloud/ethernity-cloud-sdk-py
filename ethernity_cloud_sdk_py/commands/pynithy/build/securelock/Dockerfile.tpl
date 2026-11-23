@@ -83,9 +83,14 @@ RUN chmod +x /etny-securelock/binary-fs-build.sh && /etny-securelock/binary-fs-b
 # vector and environment keys in fixed-start/securelock.h) is linked into the
 # extension, which the signer measures: the enclave runs the ENTRYPOINT's
 # vector with HOME=/tmp and the listed keys of its environment, whatever
-# arguments and environment its start gives it.
+# arguments and environment its start gives it, and only when the files at
+# the paths fixed-start/securelock.tree names are the binary-fs tree's. The
+# digests of that tree are written from this stage's file system, from which
+# the binary-fs above is made (fixed-start/tree_digest.sh), with the listing
+# of the entries each covers, and compiled into the launcher.
 COPY ./fixed-start/ /fixed-start/
-RUN cd /binary-fs-dir && scone gcc ./binary_fs_blob.s -O2 -fPIC -include /fixed-start/securelock.h /fixed-start/fixed_start.c ./libbinary_fs_template.a -shared -o /libbinary-fs.so
+RUN bash /fixed-start/tree_digest.sh /fixed-start/securelock.tree /binary-fs-dir/fixed_start_tree.h /binary-fs-dir/fixed_start_tree.txt
+RUN cd /binary-fs-dir && scone gcc ./binary_fs_blob.s -O2 -fPIC -include /fixed-start/securelock.h -include /binary-fs-dir/fixed_start_tree.h /fixed-start/fixed_start.c ./libbinary_fs_template.a -shared -o /libbinary-fs.so
 
 ########################################################################
 # Stage 4 - final SCONE runtime image (lean scone python base) + sign.
