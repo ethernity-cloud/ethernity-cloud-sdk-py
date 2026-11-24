@@ -12,9 +12,10 @@
 #   /usr/local/lib/python3.14   its stdlib, both from the runtime base image
 #                               (the Dockerfile copies them to /scone-python),
 #                               without the interpreter's static archive
-#                               libpython3.14.a, which nothing loads, and
-#                               without the base's site-packages (pip,
-#                               setuptools, wheel and packaging);
+#                               libpython3.14.a, which nothing loads,
+#                               without ensurepip, which holds a wheel of
+#                               pip, and without the base's site-packages
+#                               (pip, setuptools, wheel and packaging);
 #   /usr/local/lib/python3.14/site-packages
 #                               this stage's, as pip installed the
 #                               securelock's packages and the dApp's
@@ -45,6 +46,7 @@ cp /scone-python/bin/python3 "${ROOT}/usr/local/bin/python3"
 cp -a /scone-python/lib/python3.14 "${ROOT}${STDLIB}"
 rm -rf "${ROOT}${STDLIB}/site-packages"
 find "${ROOT}${STDLIB}" -name libpython3.14.a -exec rm {} \;
+rm -rf "${ROOT}${STDLIB}/ensurepip"
 cp -a "${STDLIB}/site-packages" "${ROOT}${STDLIB}/site-packages"
 rm -rf "${ROOT}${STDLIB}/site-packages/pip" "${ROOT}${STDLIB}/site-packages"/pip-*.dist-info
 cp -a /etny-securelock "${ROOT}/etny-securelock"

@@ -131,7 +131,8 @@ The sdk has been tested on the following operating systems:
   The file tree check covers the whole file system the enclave sees.
   `scripts/enclave-root.sh` assembles the enclave's files in a new directory,
   `/enclave-root`: the SCONE interpreter and its standard library without the
-  static archive `libpython3.14.a` and without the base image's
+  static archive `libpython3.14.a`, without `ensurepip` (which holds a wheel
+  of pip) and without the base image's
   site-packages (pip, setuptools, wheel, packaging); the freeze stage's
   site-packages, as pip installed the securelock's packages and the dApp's
   `requirements.txt`, without pip; `/etny-securelock` with the dApp's

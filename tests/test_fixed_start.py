@@ -302,6 +302,7 @@ def test_enclave_root_sh_assembles_the_enclave_s_files_in_a_new_root_and_lists_i
         'cp -a /scone-python/lib/python3.14 "${ROOT}${STDLIB}"',
         'rm -rf "${ROOT}${STDLIB}/site-packages"',
         'find "${ROOT}${STDLIB}" -name libpython3.14.a -exec rm {} \\;',
+        'rm -rf "${ROOT}${STDLIB}/ensurepip"',
         'cp -a "${STDLIB}/site-packages" "${ROOT}${STDLIB}/site-packages"',
         'rm -rf "${ROOT}${STDLIB}/site-packages/pip" "${ROOT}${STDLIB}/site-packages"/pip-*.dist-info',
         f'cp -a {ENTRY_DIR} "${{ROOT}}{ENTRY_DIR}"',
@@ -323,12 +324,16 @@ def test_the_root_holds_no_pyinstaller_pip_or_static_interpreter_archive_and_no_
         assert "pyinstaller" not in "\n".join(_commands(_read(script))).lower(), script.name
     lines = _commands(_read(ENCLAVE_ROOT_SH))
     # The base's site-packages (its pip, setuptools, wheel and packaging) go
-    # before this stage's are copied, pip after, and the archive is removed.
+    # before this stage's are copied, pip after; the archive and ensurepip,
+    # whose _bundled directory holds a wheel of pip, are removed from the
+    # standard library once it is copied.
+    stdlib = lines.index('cp -a /scone-python/lib/python3.14 "${ROOT}${STDLIB}"')
     base = lines.index('rm -rf "${ROOT}${STDLIB}/site-packages"')
     own = lines.index('cp -a "${STDLIB}/site-packages" "${ROOT}${STDLIB}/site-packages"')
     pip = lines.index('rm -rf "${ROOT}${STDLIB}/site-packages/pip" "${ROOT}${STDLIB}/site-packages"/pip-*.dist-info')
-    assert lines.index('cp -a /scone-python/lib/python3.14 "${ROOT}${STDLIB}"') < base < own < pip
-    assert 'find "${ROOT}${STDLIB}" -name libpython3.14.a -exec rm {} \\;' in lines
+    assert stdlib < base < own < pip
+    assert stdlib < lines.index('find "${ROOT}${STDLIB}" -name libpython3.14.a -exec rm {} \\;')
+    assert stdlib < lines.index('rm -rf "${ROOT}${STDLIB}/ensurepip"')
 
 
 @pytest.mark.parametrize("network,image", [
