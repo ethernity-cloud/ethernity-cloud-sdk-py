@@ -14,17 +14,26 @@ without trusting the gateway.
 
 The same recipe as etny-pynithy's `v3/run/register_session.py`, which
 registers the trustedzone session from CI.
+
+The rules are posted in the form of the registry's `rules`, which the caller
+names (enums.SESSION_RULES_FORM): 1, the flat form (one measurement list for
+the session), or 2, the per-service form (the measurements of each service
+of the body's `services:`), as ethernity-cloud-sdk-js cas/session_registry.js
+posts them. Before the body is pinned, the registry's RULES_FORM() is read (a
+revert is form 1, the registries of the flat form having none), and a
+registry that states another form than the one named stops the
+registration.
 """
 import hashlib
-import json
 import os
+import re
 import time
 import warnings
 
 import requests
 from eth_abi import decode
 from web3 import Web3
-from web3.exceptions import ContractLogicError
+from web3.exceptions import BadFunctionCallOutput, ContractLogicError
 
 from ethernity_cloud_sdk_py.commands import fees
 
@@ -33,35 +42,55 @@ try:
 except Exception:
     from web3.middleware import geth_poa_middleware as _poa_middleware
 
-# `latest` and `record` name a version by its record key: a record id
-# (keccak256(abi.encode(name, sessionHash))), or the body's hash on the
-# registries that key records by it. The record holds the body's hash on both.
-ABI = json.loads("""[
- {"type":"function","name":"register","stateMutability":"nonpayable",
-  "inputs":[{"name":"sessionHash","type":"bytes32"},{"name":"name","type":"string"},
-            {"name":"bodyCid","type":"string"},
-            {"name":"imageCid","type":"string"},{"name":"hashAlgo","type":"uint8"},
-            {"name":"rulesIn","type":"tuple","components":[
-               {"name":"tolerate","type":"string[]"},
-               {"name":"ignoreAdvisories","type":"string[]"},
-               {"name":"mrenclaves","type":"string[]"},
-               {"name":"minIsvSvn","type":"uint16"},
-               {"name":"debugAllowed","type":"bool"},
-               {"name":"skipQuoteVerification","type":"bool"}]}],
-  "outputs":[{"name":"version","type":"uint32"}]},
- {"type":"function","name":"latest","stateMutability":"view",
-  "inputs":[{"name":"name","type":"string"}],"outputs":[{"type":"bytes32"}]},
- {"type":"function","name":"record","stateMutability":"view",
-  "inputs":[{"name":"id","type":"bytes32"}],
-  "outputs":[{"name":"sessionHash","type":"bytes32"},{"name":"creator","type":"address"},
-             {"name":"enclaveName","type":"string"},{"name":"version","type":"uint32"},
-             {"name":"bodyCid","type":"string"},{"name":"imageCid","type":"string"},
-             {"name":"hashAlgo","type":"uint8"},{"name":"registeredAt","type":"uint64"},
-             {"name":"exists","type":"bool"}]},
- {"type":"function","name":"linkImage","stateMutability":"nonpayable",
-  "inputs":[{"name":"id","type":"bytes32"},
-            {"name":"imageCid","type":"string"}],"outputs":[]}
-]""")
+# The forms of a SessionRegistry's `rules`, numbered as its RULES_FORM()
+# numbers them.
+FLAT_FORM = 1
+PER_SERVICE_FORM = 2
+
+# The measurements of the rules struct of each form: the flat form's lists
+# the session's (`mrenclaves`), the per-service form's each service's
+# (`services`, each a name and its measurements).
+_MEASUREMENTS = {
+    FLAT_FORM: {"name": "mrenclaves", "type": "string[]"},
+    PER_SERVICE_FORM: {"name": "services", "type": "tuple[]", "components": [
+        {"name": "name", "type": "string"}, {"name": "mrenclaves", "type": "string[]"}]},
+}
+
+
+def abi_of(form):
+    """The SessionRegistry's ABI in rules form `form`. `latest` and `record`
+    name a version by its record key: a record id (keccak256(abi.encode(name,
+    sessionHash))), or the body's hash on the registries that key records by
+    it. The record holds the body's hash on both. The calls of `latest`,
+    `record`, `linkImage` and `RULES_FORM` are the same in both forms."""
+    rules = {"name": "rulesIn", "type": "tuple", "components": [
+        {"name": "tolerate", "type": "string[]"},
+        {"name": "ignoreAdvisories", "type": "string[]"},
+        _MEASUREMENTS[form],
+        {"name": "minIsvSvn", "type": "uint16"},
+        {"name": "debugAllowed", "type": "bool"},
+        {"name": "skipQuoteVerification", "type": "bool"}]}
+    return [
+        {"type": "function", "name": "register", "stateMutability": "nonpayable",
+         "inputs": [{"name": "sessionHash", "type": "bytes32"}, {"name": "name", "type": "string"},
+                    {"name": "bodyCid", "type": "string"}, {"name": "imageCid", "type": "string"},
+                    {"name": "hashAlgo", "type": "uint8"}, rules],
+         "outputs": [{"name": "version", "type": "uint32"}]},
+        {"type": "function", "name": "latest", "stateMutability": "view",
+         "inputs": [{"name": "name", "type": "string"}], "outputs": [{"name": "", "type": "bytes32"}]},
+        {"type": "function", "name": "record", "stateMutability": "view",
+         "inputs": [{"name": "id", "type": "bytes32"}],
+         "outputs": [{"name": "sessionHash", "type": "bytes32"}, {"name": "creator", "type": "address"},
+                     {"name": "enclaveName", "type": "string"}, {"name": "version", "type": "uint32"},
+                     {"name": "bodyCid", "type": "string"}, {"name": "imageCid", "type": "string"},
+                     {"name": "hashAlgo", "type": "uint8"}, {"name": "registeredAt", "type": "uint64"},
+                     {"name": "exists", "type": "bool"}]},
+        {"type": "function", "name": "linkImage", "stateMutability": "nonpayable",
+         "inputs": [{"name": "id", "type": "bytes32"}, {"name": "imageCid", "type": "string"}], "outputs": []},
+        {"type": "function", "name": "RULES_FORM", "stateMutability": "view",
+         "inputs": [], "outputs": [{"name": "", "type": "uint8"}]},
+    ]
+
 
 HASH_ALGO_SHA256 = 1
 
@@ -72,6 +101,8 @@ ERRORS = {
     "NotImageNameOwner": ["string", "address", "address"],
     "NotAllowedPublisher": ["address"],
     "AmbiguousSecurelockName": ["string"],
+    "EmptyServiceName": ["uint256"],
+    "DuplicateService": ["string"],
 }
 
 
@@ -139,6 +170,91 @@ def parse_name_and_rules(text):
         elif line.startswith("skip_quote_verification:"):
             skip_quote = line.split(":", 1)[1].strip().strip('"').strip("'") == "true"
     return name, (tolerate, ignore_adv, mrenclaves, min_isvsvn, debug_allowed, skip_quote)
+
+
+def _unquote(text):
+    """`text` without one leading and one trailing quote, single or double."""
+    return re.sub(r"^[\"']|[\"']$", "", text)
+
+
+def parse_services(text):
+    """The services of the body's top-level `services:` list, in order, each
+    (name, measurements): the `name:` of its entry and the measurements of its
+    `mrenclaves:` line, an inline list as parse_name_and_rules reads one,
+    each kept once. A service without that line admits none. A key of an
+    entry is one at the column of the entry's first key; deeper lines are
+    nested values and are not read."""
+    services = []
+    section = None
+    item_column = None
+    key_column = None
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        column = len(raw) - len(raw.lstrip())
+        if column == 0:
+            section = line.split(":", 1)[0].strip()
+            item_column = None
+            key_column = None
+            continue
+        if section != "services":
+            continue
+        if line.startswith("- ") and (item_column is None or item_column == column):
+            item_column = column
+            entry = line[2:].lstrip()
+            key_column = column + len(line) - len(entry)
+            services.append(("", []))
+            line = entry
+        elif column != key_column or not services:
+            continue
+        at = line.find(":")
+        key = (line if at < 0 else line[:at]).strip()
+        value = "" if at < 0 else line[at + 1:]
+        measurements = services[-1][1]
+        if key == "name":
+            services[-1] = (_unquote(value.strip()), measurements)
+        elif key == "mrenclaves":
+            for m in _yaml_list(value):
+                if m and m not in measurements:
+                    measurements.append(m)
+    return services
+
+
+def rules_of(text, form):
+    """The session's name and the rules `register` takes in rules form
+    `form`: in the flat form those of parse_name_and_rules; in the
+    per-service form the same with the measurement list replaced by the
+    body's services (parse_services)."""
+    name, rules = parse_name_and_rules(text)
+    if form == FLAT_FORM:
+        return name, rules
+    tolerate, ignore_adv, _, min_isvsvn, debug_allowed, skip_quote = rules
+    return name, (tolerate, ignore_adv, parse_services(text), min_isvsvn, debug_allowed, skip_quote)
+
+
+def form_of(form):
+    """The form a rules form names, 1 or 2; exits for any other value."""
+    if type(form) is int and form in (FLAT_FORM, PER_SERVICE_FORM):
+        return form
+    raise SystemExit(f"SessionRegistry: {form!r} is not a form of a SessionRegistry's rules: "
+                     "1 is the flat form, 2 the per-service form")
+
+
+def require_form(reg, form):
+    """Exits unless the registry `reg` states rules form `form`: its
+    RULES_FORM() answer, or the flat form when that call reverts (or answers
+    nothing, as a registry without the function does). An answer that is no
+    form exits too; a read that fails for another reason raises."""
+    try:
+        stated = int(reg.functions.RULES_FORM().call())
+    except (ContractLogicError, BadFunctionCallOutput):
+        stated = FLAT_FORM
+    if stated not in (FLAT_FORM, PER_SERVICE_FORM):
+        raise SystemExit(f"SessionRegistry {reg.address} answers RULES_FORM {stated}, which is no form")
+    if stated != form:
+        raise SystemExit(f"SessionRegistry {reg.address} answers rules form {stated}, not the configured "
+                         f"{form} (SESSION_RULES_FORM)")
 
 
 def session_hash(body):
@@ -209,22 +325,25 @@ def _send(w3, network, key, fn, label):
     return txh, w3.eth.wait_for_transaction_receipt(txh, timeout=180)
 
 
-def register(network, registry_address, key, body, ipfs_api_url, image_cid="",
+def register(network, registry_address, rules_form, key, body, ipfs_api_url, image_cid="",
              ipfs_headers=None):
     """Pin `body` through the IPFS API at `ipfs_api_url`, with `ipfs_headers`
     (the IPFS client's Authorization header) on the add, and register it
     under its own `name:` on `network` (a BlockchainNetworks member: its RPC,
-    chain id and fees). Returns (name, hash_hex, cid, registered):
-    `registered` is False when the chain already held these exact bytes as
-    the name's latest version, registered by this wallet, which the contract
-    would refuse as a duplicate."""
+    chain id and fees), its rules in the registry's rules form `rules_form`
+    (1 or 2), which require_form checks before anything is pinned. Returns
+    (name, hash_hex, cid, registered): `registered` is False when the chain
+    already held these exact bytes as the name's latest version, registered
+    by this wallet, which the contract would refuse as a duplicate."""
+    form = form_of(rules_form)
     text = body.decode("utf-8", "replace")
-    name, rules = parse_name_and_rules(text)
+    name, rules = rules_of(text, form)
     if not name:
         raise SystemExit("the session body has no `name:`")
     digest = session_hash(body)
     w3 = _web3(network.rpc_url)
-    reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=ABI)
+    reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=abi_of(form))
+    require_form(reg, form)
     cid = pin_body(ipfs_api_url, body, ipfs_headers)
     latest = latest_record(reg, name)
     if latest is not None and latest[1] == digest and latest[2] == w3.eth.account.from_key(key).address:
@@ -244,7 +363,7 @@ def link_image(network, registry_address, key, name, image_cid, wait_secs=600):
     is read again every 15 seconds for `wait_secs` before it is called
     unregistered."""
     w3 = _web3(network.rpc_url)
-    reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=ABI)
+    reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=abi_of(FLAT_FORM))
     deadline = time.time() + wait_secs
     latest = latest_record(reg, name)
     while latest is None:
@@ -271,7 +390,7 @@ def wait_visible(provider_url, registry_address, name, hash_hex, timeout=180, po
     on bloxberg: registered 10:44:00, writer recorded 10:44:41, last member
     adopted 10:45:20."""
     w3 = _web3(provider_url)
-    reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=ABI)
+    reg = w3.eth.contract(address=Web3.to_checksum_address(registry_address), abi=abi_of(FLAT_FORM))
     want = hash_hex.lower().removeprefix("0x")
     deadline = time.time() + timeout
     while True:

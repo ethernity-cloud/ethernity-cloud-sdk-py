@@ -1,5 +1,7 @@
 """The session body's add carries the IPFS client's Authorization header, as
 the image upload does. No network: the HTTP POST and the chain are replaced."""
+from web3.exceptions import ContractLogicError
+
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.pynithy import session_registry
 from ethernity_cloud_sdk_py.commands.pynithy.ipfs_client import IPFSClient
@@ -50,11 +52,21 @@ class _Account:
     address = "0x" + "33" * 20
 
 
+class _FlatFormRegistry:
+    """A registry of the flat form: its RULES_FORM() reverts."""
+    address = REGISTRY
+
+    class functions:
+        class RULES_FORM:
+            def call(self):
+                raise ContractLogicError("execution reverted")
+
+
 class _Eth:
     account = type("A", (), {"from_key": staticmethod(lambda key: _Account())})()
 
     def contract(self, address, abi):
-        return object()
+        return _FlatFormRegistry()
 
 
 class _Web3:
@@ -72,7 +84,7 @@ def test_register_pins_the_body_with_the_clients_header(monkeypatch):
                         lambda url, body, headers=None: pinned.append((url, body, headers)) or CID)
     client = IPFSClient(API, "writer-token")
     name, hash_hex, cid, registered = session_registry.register(
-        NETWORK, REGISTRY, KEY, BODY, client.api_url,
+        NETWORK, REGISTRY, session_registry.FLAT_FORM, KEY, BODY, client.api_url,
         ipfs_headers=client.headers)
     assert (name, cid, registered) == ("demo_SECURELOCK_V3_1", CID, False)
     assert pinned == [(API, BODY, {"Authorization": "writer-token"})]
@@ -86,6 +98,6 @@ def test_a_client_without_a_token_adds_the_body_without_headers(monkeypatch):
     monkeypatch.setattr(session_registry, "pin_body",
                         lambda url, body, headers=None: pinned.append(headers) or CID)
     client = IPFSClient(API, None)
-    session_registry.register(NETWORK, REGISTRY, KEY, BODY, client.api_url,
+    session_registry.register(NETWORK, REGISTRY, session_registry.FLAT_FORM, KEY, BODY, client.api_url,
                               ipfs_headers=client.headers)
     assert pinned == [{}]

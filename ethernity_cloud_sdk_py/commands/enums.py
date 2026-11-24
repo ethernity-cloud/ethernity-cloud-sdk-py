@@ -437,6 +437,12 @@ class BlockchainNetworks(Enum):
         """
         return SESSION_REGISTRY_ADDRESSES.get(enum_name, "")
 
+    @classmethod
+    def get_session_rules_form(cls, enum_name):
+        """The form of the rules of the network's SessionRegistry
+        (SESSION_RULES_FORM), or None for a network without one."""
+        return SESSION_RULES_FORM.get(enum_name)
+
     @property
     def cas_provisioned(self):
         """Whether the securelock takes its certificate from a CAS session:
@@ -565,6 +571,18 @@ SESSION_REGISTRY_ADDRESSES = {
     "ETHEREUM_SEPOLIA": "0xDbB249E108d19fC1691483Bf897bA8BA0dA99c06",
     # Bound to Amoy's ECImageRegistryV3 of 2026-10-28, the same way.
     "POLYGON_AMOY": "0x059662030fEeB4Ea8Fc7b05951A578d527a827e5",
+}
+
+# The form of each SessionRegistry's rules above, as its RULES_FORM() numbers
+# it: 1, a flat measurement list (the registries that answer no
+# RULES_FORM()), or 2, a list per service (session_registry.py). Kept in sync
+# with etny-pynithy's v3/networks.yaml (session_rules_form) and with
+# ethernity-cloud-sdk-js cas/config.js SESSION_RULES_FORM.
+SESSION_RULES_FORM = {
+    "BLOXBERG_TESTNET": 1,
+    "LITVM_LITEFORGE": 1,
+    "ETHEREUM_SEPOLIA": 1,
+    "POLYGON_AMOY": 1,
 }
 
 # The -unsafe variants: networks whose enclaves run without a CAS on platforms

@@ -1167,6 +1167,7 @@ def _publish(private_key, spinner, ipfs_client, local_kubo, local_registry, reco
             session_body = f.read()
         name, session_hash_hex, body_cid, registered = session_registry.register(
             BLOCKCHAIN_CONFIG, registry_address,
+            BlockchainNetworks.get_session_rules_form(BLOCKCHAIN_NETWORK),
             private_key, session_body, ipfs_client.api_url,
             ipfs_headers=ipfs_client.headers)
         if registered:
