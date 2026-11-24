@@ -23,7 +23,7 @@ REPO = Path(__file__).resolve().parents[1]
 COPY = REPO / "ethernity_cloud_sdk_py" / "commands" / "pynithy" / "build" / "securelock" / "src" / "etny_crypto.py"
 ENV = "ETNY_PYNITHY"
 # The etny-pynithy commit the copy is compared with (feature/matching).
-COMMIT = "4d5a525"
+COMMIT = "fb8f8b4"
 SOURCE = "v3/build/trustedzone/src/etny_crypto.py"
 OWN = ["encrypt"]
 
@@ -41,7 +41,8 @@ def code(text):
 
 def functions_of(text):
     """The methods of the module's class by name, each its lines from its
-    decorator to the line before the next member or the class's end,
+    decorator to the line before the next line indented four spaces or less
+    (the next member, a class-level comment or assignment, the class's end),
     trailing white space removed."""
     lines = [re.sub(r"[ \t]+$", "", line) for line in text.split("\n")]
     found = {}
@@ -53,7 +54,7 @@ def functions_of(text):
             continue
         start = i - 1 if i > 0 and lines[i - 1] == "    @staticmethod" else i
         j = i + 1
-        while j < len(lines) and not re.match(r"^    (@|def )", lines[j]) and not (lines[j] and not lines[j].startswith(" ")):
+        while j < len(lines) and not re.match(r"^ {0,4}\S", lines[j]):
             j += 1
         found[m.group(1)] = "\n".join(lines[start:j]).rstrip("\n")
         i = j
