@@ -99,6 +99,45 @@ def clean_up_registry():
 
     return True
 
+# The name of a file src/serverless does not hold: .env or .env.<anything>.
+SERVERLESS_ENV_FILE = re.compile(r"\.env(\..*)?", re.DOTALL)
+
+
+def serverless_env_files(src_dir):
+    """The entries under `src_dir` named .env or .env.<anything> that are not
+    directories, at any depth, as sorted paths relative to `src_dir` with /
+    between the names. A link to a directory is entered, and each directory
+    once. A `src_dir` that does not exist holds none."""
+    found = []
+    entered = set()
+    for folder, folders, files in os.walk(src_dir, followlinks=True):
+        real = os.path.realpath(folder)
+        if real in entered:
+            folders[:] = []
+            continue
+        entered.add(real)
+        found.extend((Path(folder) / name).relative_to(src_dir).as_posix()
+                     for name in files if SERVERLESS_ENV_FILE.fullmatch(name))
+    return sorted(found)
+
+
+def refuse_serverless_env_files(src_dir):
+    """Ends the build with status 1 when `src_dir`, the project's
+    src/serverless, holds a .env file. The build copies the directory whole
+    into the securelock's image, which is published; its files are measured,
+    not encrypted, and the enclaves read no .env file from the image."""
+    found = serverless_env_files(src_dir)
+    if not found:
+        return
+    print("ERROR: src/serverless holds a file named .env or .env.<name>:")
+    for name in found:
+        print(f"       src/serverless/{name}")
+    print("       Everything in src/serverless is published with the enclave image and readable by anyone.")
+    print("       A secret belongs in the task's payload or input, which are encrypted for the enclave.")
+    print("       Remove each file listed from src/serverless before building.")
+    sys.exit(1)
+
+
 def copy_backend_to_build_dir(build_dir):
     # Copy serverless source code (including subdirectories) to the build directory
 
@@ -450,6 +489,9 @@ def main():
     current_dir = os.getcwd()
     # Set the build directory path
     build_dir = Path.cwd() / "build"
+
+    # Before anything is copied or built.
+    refuse_serverless_env_files(Path.cwd() / "src" / "serverless")
 
     ESR = validate_esr_config()
 

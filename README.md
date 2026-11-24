@@ -100,6 +100,11 @@ The sdk has been tested on the following operating systems:
   ecld-build
   ```
     the project will be built and the docker repository output will be stored in the `registry/` directory. This is the stage where the backend functions are added to the secure images.
+  Everything in `src/serverless` is published with the enclave image and
+  readable by anyone, so the build stops, before it copies or builds
+  anything, when the directory holds a file named `.env` or `.env.<anything>`
+  at any depth, and names each such file; a secret belongs in the task's
+  payload or input, which are encrypted for the enclave.
 
 - **Publish**: To publish the project, run:
   ```sh
