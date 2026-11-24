@@ -5,7 +5,10 @@
 # binary-fs of it whole (binary-fs-build.sh), fixed-start/tree_digest.sh
 # writes its digest, and the launcher refuses a start whose file system holds
 # another entry (fixed-start/fixed_start.c). The root holds:
-#   /usr/local/bin/python3      the static SCONE-built python 3.14, and
+#   /usr/local/bin/python3      the SCONE-built python 3.14, which holds its
+#                               extension modules and names the system
+#                               libraries they use as its needed libraries,
+#                               and
 #   /usr/local/lib/python3.14   its stdlib, both from the runtime base image
 #                               (the Dockerfile copies them to /scone-python),
 #                               without the interpreter's static archive
@@ -25,8 +28,9 @@
 #                               which holds nothing else, is that
 #                               environment's module and engine directory;
 #   the shared libraries the root's ELF files need and the root does not
-#   hold, which fixed-start/elf_needed.sh copies from this stage, where the
-#   packages were built against them.
+#   hold, which fixed-start/elf_needed.sh copies from this stage's /lib,
+#   /usr/local/lib and /usr/lib: the interpreter's needed libraries, and a
+#   package's extension module's when its wheel does not carry them.
 # mkdir fails when the root exists. The binary-fs holds no empty directory,
 # so the root holds none. The ELF files of the root, with the libraries they
 # need and their run paths, are listed in /fixed_start_elf.txt.

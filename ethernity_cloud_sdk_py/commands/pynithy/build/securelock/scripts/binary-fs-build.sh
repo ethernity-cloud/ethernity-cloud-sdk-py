@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs in the SCONE crosscompiler stage (SCONE build tools, NO SGX needed), on
 # /enclave-root: the enclave's root the pyfreeze stage assembled
-# (enclave-root.sh), copied here whole by the Dockerfile. It holds the static
+# (enclave-root.sh), copied here whole by the Dockerfile. It holds the
 # SCONE-built python 3.14 and its stdlib, the installed site-packages, the
 # rendered securelock.py with its sibling modules, the dApp's serverless
 # package and get_sgx_report.so, and the shared libraries their ELF files

@@ -63,8 +63,8 @@ ENV NETWORK_TYPE=__NETWORK_TYPE__
 ENV VALIDATOR_REGISTRY_ADDRESS=__VALIDATOR_REGISTRY_ADDRESS__
 RUN chmod +x /etny-securelock/pyfreeze.sh && /etny-securelock/pyfreeze.sh
 
-# SCONE-built static python + its stdlib, from the runtime base image, beside
-# this stage's own interpreter.
+# SCONE-built python + its stdlib, from the runtime base image, beside this
+# stage's own interpreter.
 COPY --from=etny-securelock-serverless /usr/local/bin/python3 /scone-python/bin/python3
 COPY --from=etny-securelock-serverless /usr/local/lib/python3.14 /scone-python/lib/python3.14
 # The enclave's root, /enclave-root: the SCONE python and its stdlib, this
