@@ -35,6 +35,52 @@ def seeding_refusal(address):
             "Publish once seeding is closed.")
 
 
+# The EPC need ecld-publish records for a securelock image. ECImageRegistryV4
+# (pox-smart-contract-litvm ECImageRegistryV4.sol; spec matching.md section
+# 16 item 41; D200) holds per securelock image its EPC need in units of 64
+# MiB: imageEpcUnits(ipfsHash) answers it, 0 for none recorded, and
+# setImageEpcUnits(ipfsHash, epcUnits), 1 to 65,535 units, writes it once,
+# from the wallet that registered the image while it owns the image's name.
+# A runner states at least that need in every request for the image. The
+# setting ECLD_EPC_MIB of the environment is the need in MiB, rounded up to
+# whole units; a need of one unit (64 MiB, the setting's absence) records
+# none. A need recorded already is never written again: one equal to the
+# publish's is left as it is, and one that differs stops the publish. A
+# registry without imageEpcUnits (ECImageRegistry V1 to V3) reverts the read
+# and records no need, which the developer is told. The rules and the words
+# are ethernity-cloud-sdk-js registryEpc.js's.
+EPC_SETTING = "ECLD_EPC_MIB"
+EPC_UNIT_MIB = 64
+EPC_MAX_UNITS = 65535
+EPC_MAX_MIB = EPC_MAX_UNITS * EPC_UNIT_MIB
+
+
+def epc_units_of_setting(text):
+    """The publish's EPC need in units of 64 MiB from ECLD_EPC_MIB's text: 1
+    when it is unset or empty, else the MiB rounded up to whole units. Raises
+    ValueError for a text that is not a whole number of 1 to EPC_MAX_MIB."""
+    if text is None or str(text).strip() == "":
+        return 1
+    value = str(text).strip()
+    if not (value.isascii() and value.isdigit()) or not 1 <= int(value) <= EPC_MAX_MIB:
+        raise ValueError(f"{EPC_SETTING} is the EPC the securelock needs, in MiB: a whole number of 1 to "
+                         f"{EPC_MAX_MIB}, not {json.dumps(str(text), ensure_ascii=False)}")
+    return -(-int(value) // EPC_UNIT_MIB)
+
+
+def epc_step(recorded, units):
+    """What the publish does with a need of `units` when the registry records
+    `recorded` units for the image (None: the registry has no
+    imageEpcUnits): "write" the need, "keep" the equal need recorded, "stop"
+    on a recorded need that differs, "none" when nothing is recorded or
+    written."""
+    if recorded is None:
+        return "none"
+    if recorded == 0:
+        return "write" if units > 1 else "none"
+    return "keep" if recorded == units else "stop"
+
+
 class ImageRegistry:
     def __init__(self):
         try:
@@ -528,6 +574,41 @@ class ImageRegistry:
             return bool(registry.functions.seedingOpen().call())
         except ContractLogicError:
             return False
+
+    def image_epc_units(self, ipfs_hash):
+        """The EPC need the network's registry records for `ipfs_hash`, in
+        units of 64 MiB; None for a registry whose imageEpcUnits reverts. A
+        node that does not answer raises."""
+        try:
+            return int(self.image_registry_contract.functions.imageEpcUnits(ipfs_hash).call())
+        except ContractLogicError:
+            return None
+
+    def record_epc_need(self, ipfs_hash, units):
+        """Records the publish's EPC need of `units` for the registered image
+        `ipfs_hash` (epc_step), with setImageEpcUnits from the publishing
+        wallet. Returns what the developer is told, "" for nothing; raises
+        when a need recorded already differs."""
+        address = self.image_registry_address
+        recorded = self.image_epc_units(ipfs_hash)
+        step = epc_step(recorded, units)
+        if step == "stop":
+            raise Exception(
+                f"the image registry {address} records an EPC need of {recorded} units of {EPC_UNIT_MIB} MiB "
+                f"({recorded * EPC_UNIT_MIB} MiB) for {ipfs_hash}, and this publish states {units} "
+                f"({units * EPC_UNIT_MIB} MiB, {EPC_SETTING}): the need is written once. Set {EPC_SETTING} to "
+                f"{recorded * EPC_UNIT_MIB}, or publish a new image.")
+        if step == "keep":
+            return f"The EPC need of {ipfs_hash} is recorded: {recorded} units of {EPC_UNIT_MIB} MiB."
+        if step == "write":
+            self._send(self.image_registry_contract.functions.setImageEpcUnits(ipfs_hash, units), 200000,
+                       f"Recording the EPC need of {ipfs_hash}")
+            return (f"The EPC need of {ipfs_hash} is recorded: {units} units of {EPC_UNIT_MIB} MiB "
+                    f"({units * EPC_UNIT_MIB} MiB).")
+        if recorded is None and units > 1:
+            return (f"The image registry {address} records no EPC need (imageEpcUnits reverts): the need of {units} "
+                    f"units of {EPC_UNIT_MIB} MiB ({EPC_SETTING}) is not recorded.")
+        return ""
 
     def image_name_owner(self, image_name):
         """The wallet that owns the securelock name on an ECImageRegistryV3 or

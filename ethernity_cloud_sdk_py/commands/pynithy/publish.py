@@ -23,7 +23,8 @@ from requests.packages.urllib3 import disable_warnings
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.pynithy import cas_resolver, session_registry
 import ethernity_cloud_sdk_py.commands.pynithy.run.public_key_service as public_key_service
-from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry, seeding_refusal
+from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import (EPC_SETTING, ImageRegistry,
+                                                                       epc_units_of_setting, seeding_refusal)
 from ethernity_cloud_sdk_py.commands.pynithy.ipfs_client import IPFSClient
 from ethernity_cloud_sdk_py.commands.pynithy.local_kubo import LocalKubo, exit_on_interrupt, own_endpoint, PUBLIC_IPFS_API
 from ethernity_cloud_sdk_py.commands.pynithy.local_registry import LocalRegistry
@@ -870,6 +871,14 @@ def main(private_key):
     if seeding:
         print(f"\t✖  {seeding_refusal(image_registry.image_registry_address)}")
         exit(1)
+    # ECLD_EPC_MIB, the EPC the securelock needs in MiB (image_registry
+    # epc_units_of_setting): a setting that is not a whole number of 1 to
+    # 4,194,240 ends the publish here, before anything is started.
+    try:
+        epc_units_of_setting(os.environ.get(EPC_SETTING))
+    except ValueError as e:
+        print(f"\t✖  {e}")
+        exit(1)
     project_name = config.read("PROJECT_NAME") or "publish"
     # Where the image goes. An IPFS API of the application's own
     # (ECLD_IPFS_ENDPOINT / ECLD_IPFS_TOKEN, else the stored IPFS_ENDPOINT /
@@ -925,6 +934,20 @@ def _pin_on_public_api(spinner, public_ipfs, cids):
         if not spinner.spin_till_done(f"Pinning {cid} on the public IPFS API", public_ipfs.pin, cid):
             print(f"\t✖  The public IPFS API did not pin {cid}")
             exit(1)
+
+
+def _record_epc_need(ipfs_hash):
+    """The EPC need ECLD_EPC_MIB states, recorded for the registered image
+    `ipfs_hash` (ImageRegistry.record_epc_need), and what the developer is
+    told. The publish ends when a need recorded already differs, when the
+    write is refused and when the registry's answer cannot be read."""
+    try:
+        told = image_registry.record_epc_need(ipfs_hash, epc_units_of_setting(os.environ.get(EPC_SETTING)))
+    except Exception as e:
+        print(f"\t✖  {e}")
+        exit(1)
+    if told:
+        print(f"\t   {told}")
 
 
 def _publish(private_key, spinner, ipfs_client, local_kubo, local_registry, recorded_build, public_ipfs=None):
@@ -1131,6 +1154,9 @@ def _publish(private_key, spinner, ipfs_client, local_kubo, local_registry, reco
         # certificate is on chain.
         if local_kubo is not None:
             local_kubo.serving = True
+        # The image's EPC need (ECLD_EPC_MIB), written once, after the
+        # registration and before the certificate.
+        _record_epc_need(IPFS_HASH)
 
     if not reuse_upload:
         registered_cids = (IPFS_HASH, IPFS_DOCKER_COMPOSE_HASH)
@@ -1289,6 +1315,10 @@ def _publish(private_key, spinner, ipfs_client, local_kubo, local_registry, reco
 
     print(f'\n\u276f\u276f Registering enclave on {BLOCKCHAIN_NETWORK}')
 
+    if not registry_v2:
+        # A V1 registry records no EPC need: _record_epc_need tells the
+        # developer when ECLD_EPC_MIB states one above a unit.
+        _record_epc_need(IPFS_HASH)
     try:
         if registry_v2:
             image_registry.set_image_cert(IPFS_HASH, ENCLAVE_PUBLIC_KEY)

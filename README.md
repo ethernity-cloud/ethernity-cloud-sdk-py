@@ -113,6 +113,17 @@ The sdk has been tested on the following operating systems:
   `SeedingOpen()`, before anything is started; it stops too when the
   registry's answer cannot be read. A registry without seeding (V1 to V3)
   takes the publish as before.
+  `ECLD_EPC_MIB` (the environment) is the EPC your securelock's work needs,
+  in MiB, a whole number of 1 to 4,194,240; the publish stops at its start on
+  any other value. Rounded up to units of 64 MiB, a need above one unit is
+  recorded with the image on ECImageRegistryV4 (`setImageEpcUnits`), once,
+  after the image's registration and before its certificate, and every
+  runner's request for the image states at least that need. A need of one
+  unit (64 MiB, or the setting left out) records none. The record is written
+  once: a publish of an image whose recorded need equals the setting leaves
+  it, and one whose recorded need differs stops, naming both. A registry
+  without the record (V1 to V3) records no need, and the publish says so when
+  the setting states one above a unit.
 
   What the publish measures: `ecld-build` records the securelock it pushed in
   `.config.json` (`SECURELOCK_IMAGE_DIGEST`, the digest of the pushed

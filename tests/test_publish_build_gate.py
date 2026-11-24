@@ -42,6 +42,7 @@ def _publish_module(monkeypatch, tmp_path, **changes):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ECLD_IPFS_ENDPOINT", raising=False)
     monkeypatch.delenv("ECLD_IPFS_TOKEN", raising=False)
+    monkeypatch.delenv("ECLD_EPC_MIB", raising=False)
     publish = importlib.import_module("ethernity_cloud_sdk_py.commands.pynithy.publish")
     cfg = Config(tmp_path / ".config.json")
     cfg.load()
@@ -130,11 +131,14 @@ class _TwoStepRegistry:
     registration raises `register_outcome` and the certificate's write
     `cert_outcome` when they are exceptions."""
 
-    def __init__(self, register_outcome=None, cert_outcome=None):
+    def __init__(self, register_outcome=None, cert_outcome=None, epc_outcome=None):
         self.register_outcome = register_outcome
         self.cert_outcome = cert_outcome
+        self.epc_outcome = epc_outcome
         self.registered = []
         self.certified = []
+        # The steps in order: "register", ("epc", hash, units), "cert".
+        self.steps = []
 
     def set_private_key(self, private_key):
         pass
@@ -146,11 +150,19 @@ class _TwoStepRegistry:
         if self.register_outcome is not None:
             raise self.register_outcome
         self.registered.append((ipfs_hash, docker_compose_hash, ipfs_peer))
+        self.steps.append("register")
+
+    def record_epc_need(self, ipfs_hash, units):
+        self.steps.append(("epc", ipfs_hash, units))
+        if self.epc_outcome is not None:
+            raise self.epc_outcome
+        return ""
 
     def set_image_cert(self, ipfs_hash, certificate):
         if self.cert_outcome is not None:
             raise self.cert_outcome
         self.certified.append((ipfs_hash, certificate))
+        self.steps.append("cert")
 
 
 class _IPFS:
@@ -284,6 +296,43 @@ def test_a_publish_that_ends_before_the_certificate_leaves_the_kubo_serving(monk
     assert len(registry_.registered) == 1 and registry_.certified == []
     assert "the chain refused the certificate" in capsys.readouterr().out
     assert kubo.serving is True
+
+
+def test_the_epc_need_is_recorded_after_the_registration_and_before_the_certificate(monkeypatch, tmp_path):
+    publish = _publish_module(monkeypatch, tmp_path)
+    monkeypatch.setenv("ECLD_EPC_MIB", "200")
+    registry_ = _TwoStepRegistry()
+    code, _ = _two_step_publish(monkeypatch, publish, tmp_path, registry_)
+    assert code is None
+    assert registry_.steps == ["register", ("epc", IMAGE_CID, 4), "cert"]
+    monkeypatch.delenv("ECLD_EPC_MIB")
+    registry_ = _TwoStepRegistry()
+    _two_step_publish(monkeypatch, publish, tmp_path, registry_)
+    assert registry_.steps == ["register", ("epc", IMAGE_CID, 1), "cert"]
+
+
+def test_a_recorded_epc_need_that_differs_ends_the_publish_before_the_certificate(monkeypatch, tmp_path, capsys):
+    publish = _publish_module(monkeypatch, tmp_path)
+    registry_ = _TwoStepRegistry(epc_outcome=Exception("the image registry records an EPC need of 3 units"))
+    code, kubo = _two_step_publish(monkeypatch, publish, tmp_path, registry_)
+    assert code == 1
+    assert registry_.steps == ["register", ("epc", IMAGE_CID, 1)] and registry_.certified == []
+    assert "the image registry records an EPC need of 3 units" in capsys.readouterr().out
+    assert kubo.serving is True
+
+
+@pytest.mark.parametrize("setting", ["0", "4194241", "1.5", "64M"])
+def test_an_epc_setting_out_of_its_bound_ends_the_publish_before_anything_starts(monkeypatch, tmp_path, capsys,
+                                                                                  setting):
+    publish = _publish_module(monkeypatch, tmp_path)
+    monkeypatch.setenv("ECLD_EPC_MIB", setting)
+    containers, published = _main(monkeypatch, publish, None)
+    with pytest.raises(SystemExit) as exit_:
+        publish.main(KEY)
+    assert exit_.value.code == 1
+    assert ("ECLD_EPC_MIB is the EPC the securelock needs, in MiB: a whole number of 1 to 4194240, "
+            f"not \"{setting}\"") in capsys.readouterr().out
+    assert containers == {} and published == []
 
 
 def test_a_registration_that_fails_leaves_the_kubo_serving_nothing(monkeypatch, tmp_path, capsys):
