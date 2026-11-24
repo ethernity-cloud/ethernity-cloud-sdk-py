@@ -33,7 +33,7 @@
   "taskWallet": {
     "address": "0x40680ca06d992501822586eb6bf65db227f105d8",
     "source": "result-v5.json session.taskWalletPrivateKey, the task wallet of its session example (order 4101)",
-    "swRow": "a member follows the order once the order's etny-sw row names this wallet: key etny-sw, value v1:<orderId>:<taskWallet>:<sigDerHex>, the trustedzone's ECDSA secp384r1 / SHA-256 DER signature over etny-sw|<orderId>|<taskWallet>; the DP request's dproc is the node every message must name."
+    "swRow": "a member follows the order once the order's etny-sw row names this wallet: key etny-sw, value v1:<orderId>:<taskWallet>:<sigDerHex>, the trustedzone's ECDSA secp384r1 / SHA-256 DER signature over the statement etny-sw|<orderId>|<taskWallet>, in the statement form of reserved-prefixes.json on a network whose pricing names a PoxMatching (in the plain form or the statement form elsewhere; reserved-prefixes.json statementForm.cutRule); the DP request's dproc is the node every message must name."
   },
   "examples": {
     "minute": {

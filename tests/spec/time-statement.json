@@ -1,5 +1,5 @@
 {
-  "description": "Plan amendment 7 (validator timestamps): the statement GET /validator/time answers, the byte layout of its digest preimage, the keccak256 digest, the recoverable secp256k1 signature of the validator identity and the address a verifier recovers. The same statement is timeStatements.t0 of capability-record.json.",
+  "description": "Plan amendment 7 (validator timestamps): the statement GET /validator/time answers, the byte layout of its digest preimage, the keccak256 digest, the recoverable secp256k1 signature of the validator identity and the address a verifier recovers. The same statement is timeStatements.t0 of capability-record.json; `close` is the closing statement of that record over n1, timeStatements.t1.",
   "generator": "spec/make/time-statement.js",
   "request": {
     "method": "GET",
@@ -89,5 +89,26 @@
   },
   "answerRule": "JSON object with exactly these six keys; validator, node and nonce are lower-case 0x hex, t and block are JSON numbers, sig is the 65-byte serialization.",
   "recovered": "0x2a0707de23c2c09d6ff7fadbde34c06cdb0e6278",
-  "verification": "rebuild the preimage from the answer with the baked chain id and registry, keccak256 it, recover the address from sig (ethers recoverAddress or the Rust k256 recovery), and require the lower-cased result to equal the answer.validator and a seated member of the registry."
+  "verification": "rebuild the preimage from the answer with the baked chain id and registry, keccak256 it, recover the address from sig (ethers recoverAddress or the Rust k256 recovery), and require the lower-cased result to equal the answer.validator and a seated member of the registry.",
+  "close": {
+    "rule": "the closing statement of a timed record is the same statement over n1 = keccak256(abi.encodePacked(bytes(\"ecld-close-1\"), n0, salt, keccak256(utf8(outcome)))), requested after the run with the salt the trustedzone drew after it; a reader recomputes n1 from n0, the salt and the outcome and recovers the closing signature over the statement with nonce = n1, never n0. The statement layout does not change.",
+    "n0": "0xf9324b49b24c8561481ef6b84ec6cbeabd1ccd691e3e55f109d1243ea864e569",
+    "salt": "0xb6df4b03ac8957c50dc55aa44db55bac8e28268c51ad8f7148650749b5d0b954",
+    "outcome": "250|4|heap=256M;workers=4",
+    "closeNoncePreimageHex": "0x65636c642d636c6f73652d31f9324b49b24c8561481ef6b84ec6cbeabd1ccd691e3e55f109d1243ea864e569b6df4b03ac8957c50dc55aa44db55bac8e28268c51ad8f7148650749b5d0b9546449aa12f40bffbfd9b047d86cf376adea1905f47eae1eff9290f800ece5238b",
+    "n1": "0x12de19fd7d534c530111a36e55fc94e6cecf0353569123cad7964c7e7d9dd92a",
+    "request": "/validator/time?node=0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe&nonce=0x12de19fd7d534c530111a36e55fc94e6cecf0353569123cad7964c7e7d9dd92a",
+    "preimageHex": "0x656361732d74696d652d31000000000000000000000000000000000000000000000000000000000001388270bfdf41d4061592df509b9b46f91a8457f88483470d8b388f4a0ae6bd512b74038c7e87957bb8fe12de19fd7d534c530111a36e55fc94e6cecf0353569123cad7964c7e7d9dd92a000000006901c98a0000000001ba8145",
+    "digest": "0x49545551fce3598320c690ae1530a08a6128e0920f4d8f1295219c73d1383c95",
+    "signature": "0xfaeb40e95667f04e4e09fe927e6c73b5b32221ee7c69a6e8dab279af950a6fc27fac1d554458a73b32df4db8307345366f8e18a530335fa92d1ea7dc9e75740c1b",
+    "answer": {
+      "validator": "0x2a0707de23c2c09d6ff7fadbde34c06cdb0e6278",
+      "node": "0x470d8b388f4a0ae6bd512b74038c7e87957bb8fe",
+      "nonce": "0x12de19fd7d534c530111a36e55fc94e6cecf0353569123cad7964c7e7d9dd92a",
+      "t": 1761724810,
+      "block": 29000005,
+      "sig": "0xfaeb40e95667f04e4e09fe927e6c73b5b32221ee7c69a6e8dab279af950a6fc27fac1d554458a73b32df4db8307345366f8e18a530335fa92d1ea7dc9e75740c1b"
+    },
+    "recovered": "0x2a0707de23c2c09d6ff7fadbde34c06cdb0e6278"
+  }
 }

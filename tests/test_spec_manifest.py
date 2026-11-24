@@ -1,12 +1,17 @@
 """tests/spec/ holds byte-identical copies of pox-smart-contract-litvm's
-spec/*.json and spec/metadata-keys.md with that directory's
-spec/MANIFEST.sha256 (the sha256sum text format, names sorted bytewise, LF
-lines). Every copy must hash to its manifest line, the manifest must name
-every copy and nothing else, and, where a pox-smart-contract-litvm checkout
-sits beside this repository, every copy and the manifest itself must equal
-the source bytes."""
+spec/*.json and spec/metadata-keys.md at SOURCE_COMMIT, and MANIFEST.sha256,
+the lines of that commit's spec/MANIFEST.sha256 for the copies held (the
+sha256sum text format, names sorted bytewise, LF lines; `sha256sum -c
+MANIFEST.sha256` in tests/spec checks every copy). Every copy must hash to
+its manifest line and the manifest must name every copy and nothing else.
+Where a pox-smart-contract-litvm checkout is found (POX_SMART_CONTRACT_LITVM,
+else a directory of that name beside this repository or beside any directory
+above it), every copy must equal `git show SOURCE_COMMIT:spec/<name>` and
+every manifest line that commit's line, never the checkout's working tree."""
 import hashlib
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -14,30 +19,39 @@ import pytest
 SPEC = Path(__file__).resolve().parent / "spec"
 REPO = Path(__file__).resolve().parents[1]
 MANIFEST = "MANIFEST.sha256"
+LITVM_ENV = "POX_SMART_CONTRACT_LITVM"
+SOURCE_COMMIT = "2f600f6"
 LINE = re.compile(r"^([0-9a-f]{64})  ([^\s/]+)$")
 
 
-def manifest_lines():
-    text = (SPEC / MANIFEST).read_bytes()
-    assert text.endswith(b"\n") and b"\r" not in text
-    return text.decode("ascii").rstrip("\n").split("\n")
-
-
-def manifest():
+def parse(text):
     entries = []
-    for line in manifest_lines():
+    for line in text.rstrip("\n").split("\n"):
         m = LINE.match(line)
         assert m, "manifest line is not '<sha256>  <name>': %r" % line
         entries.append((m.group(2), m.group(1)))
     return entries
 
 
-def source_dir():
-    for base in (REPO.parent, REPO.parents[1]):
-        candidate = base / "pox-smart-contract-litvm" / "spec"
-        if (candidate / MANIFEST).is_file():
-            return candidate
-    return None
+def manifest():
+    text = (SPEC / MANIFEST).read_bytes()
+    assert text.endswith(b"\n") and b"\r" not in text
+    return parse(text.decode("ascii"))
+
+
+def litvm_checkout():
+    """POX_SMART_CONTRACT_LITVM, else the first pox-smart-contract-litvm
+    beside this repository or beside a directory above it; None when none
+    holds a .git."""
+    candidates = [Path(os.environ[LITVM_ENV]).resolve()] if os.environ.get(LITVM_ENV) else []
+    candidates += [base.parent / "pox-smart-contract-litvm" for base in [REPO] + list(REPO.parents)]
+    return next((c for c in candidates if (c / ".git").exists()), None)
+
+
+def shown_at_source(checkout, name):
+    shown = subprocess.run(["git", "-C", str(checkout), "show", f"{SOURCE_COMMIT}:spec/{name}"], capture_output=True)
+    assert shown.returncode == 0, f"{checkout} holds no {SOURCE_COMMIT}:spec/{name}"
+    return shown.stdout
 
 
 def test_the_manifest_names_every_copy_once_in_bytewise_order():
@@ -53,9 +67,11 @@ def test_each_copy_hashes_to_its_manifest_line(name, digest):
     assert hashlib.sha256((SPEC / name).read_bytes()).hexdigest() == digest
 
 
-def test_the_copies_equal_the_litvm_checkout_when_present():
-    source = source_dir()
-    if source is None:
-        pytest.skip("no pox-smart-contract-litvm checkout beside this repository")
-    for name in [MANIFEST] + [name for name, _ in manifest()]:
-        assert (SPEC / name).read_bytes() == (source / name).read_bytes(), name
+def test_the_copies_and_the_manifest_lines_are_the_source_commit_s():
+    checkout = litvm_checkout()
+    if checkout is None:
+        pytest.skip(f"no pox-smart-contract-litvm checkout found (set {LITVM_ENV})")
+    lines = dict(parse(shown_at_source(checkout, MANIFEST).decode("ascii")))
+    for name, digest in manifest():
+        assert digest == lines[name], name
+        assert (SPEC / name).read_bytes() == shown_at_source(checkout, name), name
