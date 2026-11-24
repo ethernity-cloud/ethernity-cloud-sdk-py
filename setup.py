@@ -12,7 +12,7 @@ setup(
     description="Ethernity Cloud SDK Python",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    packages=find_packages(),
+    packages=find_packages(exclude=["tests", "tests.*"]),
     include_package_data=True,
     package_data={
         "ethernity_cloud_sdk_py.templates": ["src/**/*"],
