@@ -2,3 +2,8 @@
 # Byte-identical copies of pox-smart-contract-litvm/spec, checked against
 # tests/spec/MANIFEST.sha256: no line-ending conversion on any platform.
 tests/spec/** -text
+# Byte-identical in @ethernity-cloud/sdk-js, each checked against a pinned
+# SHA-256 (tests/test_cas_client_key.py): no line-ending conversion on any
+# platform.
+docs/cas-client-key.md -text
+tests/vectors/** -text

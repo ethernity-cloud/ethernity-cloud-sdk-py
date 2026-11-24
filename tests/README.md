@@ -11,6 +11,20 @@ re-serialised, and `.gitattributes` exempts them from line-ending conversion.
 bytes with the source. Regenerate the source fixtures there (`spec/make/`,
 `manifest.js` last), then copy the changed files and the manifest here.
 
+## `vectors/cas-client-key.json` — shared with @ethernity-cloud/sdk-js
+
+The test wallets of the CAS client key derivation (`docs/cas-client-key.md`),
+each with the public key it derives. The file and the specification are
+byte-identical in @ethernity-cloud/sdk-js (`test/vectors/cas-client-key.json`,
+`docs/cas-client-key.md`): `.gitattributes` exempts both from line-ending
+conversion, and `test_cas_client_key.py` pins the SHA-256 of each, as
+`test/casClientKey.test.js` does there. A change to either file is made in
+both repositories, with both pins.
+
+`cas_stand_in.py` is the stand-in for the CAS's session endpoint that
+`test_scontain_session.py` posts to, on a loopback port; no test contacts
+scone-cas.cf.
+
 ## `e2e_testnet_cas.sh` — the CAS-attested testnet, end to end
 
 Builds a securelock with this SDK, publishes it against the ethernity-cas

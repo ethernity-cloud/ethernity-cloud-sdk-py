@@ -11,17 +11,10 @@ import yaml
 from os.path import join, dirname
 from dotenv import load_dotenv
 import os
-from datetime import datetime, timedelta
-from cryptography import x509
-from cryptography.x509.oid import NameOID, ExtensionOID
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.asymmetric import rsa
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
-from requests.packages.urllib3 import disable_warnings
 
 
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
-from ethernity_cloud_sdk_py.commands.pynithy import cas_resolver, session_registry
+from ethernity_cloud_sdk_py.commands.pynithy import cas_resolver, scontain_session, session_registry
 import ethernity_cloud_sdk_py.commands.pynithy.run.public_key_service as public_key_service
 from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
 from ethernity_cloud_sdk_py.commands.pynithy.ipfs_client import IPFSClient
@@ -717,113 +710,24 @@ def check_public_key_certificate():
         # shutil.copy("certificate.securelock.crt", registry_path)
         # shutil.copy("certificate.trustedzone.crt", registry_path)
 
-def generate_certificates():
-    # Generate a key pair
-    private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=4096,
-    )
-
-    # Get the public key
-    public_key = private_key.public_key()
-
-    # Get SECURELOCK_SESSION from environment variable or default value
-    organization_name = config.read(
-        "SECURELOCK_SESSION"
-    )
-
-    # Build subject and issuer names (self-signed certificate)
-    subject = issuer = x509.Name(
-        [
-            x509.NameAttribute(NameOID.COUNTRY_NAME, "AU"),
-            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Some-State"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization_name),
-        ]
-    )
-
-    # Set validity period (not before one year ago, not after two years from now)
-    valid_from = datetime.utcnow() - timedelta(days=365)
-    valid_to = valid_from + timedelta(days=3 * 365)  # Valid for 3 years total
-
-    # Serial number (use 1 for consistency)
-    serial_number = 1
-
-    # Build the certificate
-    builder = x509.CertificateBuilder()
-    builder = builder.subject_name(subject)
-    builder = builder.issuer_name(issuer)
-    builder = builder.public_key(public_key)
-    builder = builder.serial_number(serial_number)
-    builder = builder.not_valid_before(valid_from)
-    builder = builder.not_valid_after(valid_to)
-
-    # Add extensions
-    # 1. Subject Key Identifier
-    builder = builder.add_extension(
-        x509.SubjectKeyIdentifier.from_public_key(public_key), critical=False
-    )
-
-    # 2. Authority Key Identifier
-    builder = builder.add_extension(
-        x509.AuthorityKeyIdentifier.from_issuer_public_key(public_key),
-        critical=False,
-    )
-
-    # 3. Basic Constraints (mark as CA)
-    builder = builder.add_extension(
-        x509.BasicConstraints(ca=True, path_length=None), critical=True
-    )
-
-    # Self-sign the certificate
-    certificate = builder.sign(
-        private_key=private_key,
-        algorithm=hashes.SHA256(),
-    )
-
-    # Serialize private key to PEM format (PKCS8)
-    private_key_pem = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-
-    # Serialize certificate to PEM format
-    certificate_pem = certificate.public_bytes(
-        encoding=serialization.Encoding.PEM,
-    )
-
-    # Write private key and certificate to files
-    with open(certs_dir / "key.pem", "wb") as f:
-        f.write(private_key_pem)
-
-    with open(certs_dir / "cert.pem", "wb") as f:
-        f.write(certificate_pem)
-
-    return True
-
-def update_cas_session():
-    # Read certificates and data
-    with open("etny-securelock-test.yaml", "rb") as f:
-        yaml_data = f.read()
-
-    # Set up the request headers
-    headers = {"Content-Type": "application/octet-stream"}
-
-    # Perform the HTTPS POST request
+def update_cas_session(wallet_key, log):
+    """Posts the securelock's session to the Scontain CAS under the CAS
+    client key of the publishing wallet, which is derived from `wallet_key`
+    and kept in no file of the project. A project whose build/certs holds the
+    key.pem and cert.pem of an SDK up to 1.9.1 hands its session over to that
+    key first (scontain_session.py). `log` takes the lines the upload
+    reports."""
     try:
-
-
-        # Disable only the InsecureRequestWarning
-        disable_warnings(InsecureRequestWarning)
-
-        # Create a session to manage certificates and SSL settings
-        session = requests.Session()
-        session.verify = False  # Equivalent to rejectUnauthorized: false
-        session.cert = (certs_dir / "cert.pem", certs_dir / "key.pem")  # Provide the client cert and key
-
-        # Perform the POST request
-        response = session.post(
-            "https://scone-cas.cf:8081/session", data=yaml_data, headers=headers
+        response = scontain_session.upload(
+            url=scontain_session.SESSION_URL,
+            session_file="etny-securelock-test.yaml",
+            predecessor=config.read("PREDECESSOR_HASH_SECURELOCK") != "",
+            legacy_dir=certs_dir,
+            recorded=config.read(scontain_session.RECORD),
+            wallet_key=wallet_key,
+            organization=config.read("SECURELOCK_SESSION"),
+            write_record=lambda value: config.write(scontain_session.RECORD, value),
+            log=log,
         )
 
         with open("predecessor.json", "w", encoding="utf-8") as f:
@@ -935,7 +839,6 @@ def _publish(private_key, spinner, ipfs_client, local_kubo, local_registry, reco
 
     # make sure it exists
     os.makedirs(build_dir, exist_ok=True)
-    os.makedirs(certs_dir, exist_ok=True)
     run_dir = Path(__file__).resolve().parent / "run"
     registry_path = local_registry.tree
     config.write("REGISTRY_PATH", registry_path)
@@ -1018,17 +921,11 @@ def _publish(private_key, spinner, ipfs_client, local_kubo, local_registry, reco
         # MR_ENCLAVE, and a CAS-issued SERVER_CERT would not match the key it
         # generates.
         if BLOCKCHAIN_CONFIG.network_type == 'mainnet':
-            # Generate certificates if needed
-            key_pem_path = certs_dir / "key.pem"
-            cert_pem_path = certs_dir / "cert.pem"
-
-            if (
-                not os.path.exists(key_pem_path)
-                or not os.path.exists(cert_pem_path)
-            ):
-                spinner.spin_till_done("Generating certificate for session registration", generate_certificates)
-
-            spinner.spin_till_done("Registering session into CAS", update_cas_session)
+            # What the upload reports is printed once the spinner has ended.
+            reported = []
+            if spinner.spin_till_done("Registering session into CAS", update_cas_session, private_key, reported.append):
+                for line in reported:
+                    print(f"\t✔  {line}")
         elif not BLOCKCHAIN_CONFIG.cas_provisioned:
             print("\t✔  Testnet: skipping CAS session registration (enclave self-signs from MR_ENCLAVE)")
 

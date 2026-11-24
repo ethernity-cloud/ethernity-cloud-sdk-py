@@ -136,6 +136,50 @@ The sdk has been tested on the following operating systems:
   wallet unless `REWARD_ADDRESS` names another one; the image's owner can
   change it later with the registry's `changeImageRewardAddress`.
 
+  Who may update the securelock session: on the mainnets and the testnet PoX
+  1.0 networks the publish posts the session to Scontain's CAS over TLS under
+  a client key, and the CAS lets that key alone read and update the session.
+  The key belongs to your publishing wallet: the publish derives it from the
+  wallet's private key at each upload (an RSA-4096 key,
+  `docs/cas-client-key.md`; a few seconds of computation) and presents it
+  with a self-signed certificate made for that upload. The certificate and
+  the key reach the TLS library as files: they are written to a directory of
+  their own in the system's temporary directory, which your user alone can
+  read, and that directory is removed when the upload ends, however it ends.
+  Nothing of the key is written under the project or the installed package.
+  @ethernity-cloud/sdk-js derives the same key from the same wallet. So:
+  - Whoever publishes with the wallet can update the session, from any
+    machine, from a fresh checkout of the project and from either SDK.
+  - Losing the project folder does not lose the update right. Losing the
+    wallet's private key does, and a publish with another wallet cannot
+    update a session this wallet holds.
+  - `.config.json` records which key holds the session as `CAS_CLIENT_KEY`:
+    `wallet` once an upload under the wallet's key succeeded.
+
+  What a project published with an SDK up to 1.9.1 sees at its next publish:
+  those versions made a random key at a project's first publish and kept it
+  as `build/certs/key.pem` and `build/certs/cert.pem`.
+  - `ecld-build` names a new session at every build, so the publish after a
+    build posts a new session. It goes under the wallet's key, and the
+    publish says once that `key.pem` and `cert.pem` are no longer used.
+  - A publish that updates a session the old key holds
+    (`PREDECESSOR_HASH_SECURELOCK` is set in `.config.json`) sends that
+    update under the old key once more, with an access policy that gives the
+    session's read and update rights to the wallet's key, and writes
+    `CAS_CLIENT_KEY` `handover`. Every later publish posts under the wallet's
+    key; the first that succeeds writes `wallet` and says once that the two
+    files are no longer used. A project whose `.config.json` has no
+    `CAS_CLIENT_KEY` is one whose session is still to be handed over:
+    removing the key makes the next such publish post under the old key
+    again.
+  - Without the files, such an update is posted under the wallet's key. The
+    CAS takes it when the session is already the wallet's; a session that an
+    old key holds stays with that key, and the publish ends as it did before
+    ("Session predecessor is lost and cannot be recovered. Please run
+    ecld-build to increment the version number"): the session the next build
+    names is the wallet's.
+  - The publish never deletes or changes the two files.
+
   How the image reaches the network: unless `.config.json` names an IPFS API
   of your own (`IPFS_ENDPOINT`, or `ECLD_IPFS_ENDPOINT` in the environment),
   the publish runs its own IPFS node in docker (`ipfs/kubo`), adds the image
