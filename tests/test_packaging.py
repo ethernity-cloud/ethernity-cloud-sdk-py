@@ -1,8 +1,8 @@
 """setup.py packages ethernity_cloud_sdk_py and its subpackages and not the
 test suite: the wheel installs no top-level tests package. The release is
-0.10.8, a release of the PoX 2.0 line, and it requires runner-py 0.5.38 or
-later. setup() is replaced by a recorder of its arguments, so nothing is
-built."""
+2.0.0b1, a prerelease of 2.0.0 on the PoX 2.0 line (the 0.x and 1.x lines
+are PoX 1.0), and it requires runner-py 0.5.38 or later. setup() is
+replaced by a recorder of its arguments, so nothing is built."""
 import os
 import runpy
 
@@ -19,9 +19,9 @@ def _setup_arguments(monkeypatch):
     return given
 
 
-def test_the_release_is_0_10_8_and_requires_runner_0_5_38_or_later(monkeypatch):
+def test_the_release_is_2_0_0b1_and_requires_runner_0_5_38_or_later(monkeypatch):
     given = _setup_arguments(monkeypatch)
-    assert given["version"] == "0.10.8"
+    assert given["version"] == "2.0.0b1"
     runners = [requirement for requirement in given["install_requires"]
                if requirement.startswith("ethernity-cloud-runner-py")]
     assert runners == ["ethernity-cloud-runner-py>=0.5.38"]
