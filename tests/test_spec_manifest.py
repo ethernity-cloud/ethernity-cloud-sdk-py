@@ -9,18 +9,15 @@ else a directory of that name beside this repository or beside any directory
 above it), every copy must equal `git show SOURCE_COMMIT:spec/<name>` and
 every manifest line that commit's line, never the checkout's working tree."""
 import hashlib
-import os
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
 
+from tests.litvm_checkout import LITVM_ENV, SOURCE_COMMIT, litvm_checkout, shown_at
+
 SPEC = Path(__file__).resolve().parent / "spec"
-REPO = Path(__file__).resolve().parents[1]
 MANIFEST = "MANIFEST.sha256"
-LITVM_ENV = "POX_SMART_CONTRACT_LITVM"
-SOURCE_COMMIT = "2f600f6"
 LINE = re.compile(r"^([0-9a-f]{64})  ([^\s/]+)$")
 
 
@@ -39,19 +36,10 @@ def manifest():
     return parse(text.decode("ascii"))
 
 
-def litvm_checkout():
-    """POX_SMART_CONTRACT_LITVM, else the first pox-smart-contract-litvm
-    beside this repository or beside a directory above it; None when none
-    holds a .git."""
-    candidates = [Path(os.environ[LITVM_ENV]).resolve()] if os.environ.get(LITVM_ENV) else []
-    candidates += [base.parent / "pox-smart-contract-litvm" for base in [REPO] + list(REPO.parents)]
-    return next((c for c in candidates if (c / ".git").exists()), None)
-
-
 def shown_at_source(checkout, name):
-    shown = subprocess.run(["git", "-C", str(checkout), "show", f"{SOURCE_COMMIT}:spec/{name}"], capture_output=True)
-    assert shown.returncode == 0, f"{checkout} holds no {SOURCE_COMMIT}:spec/{name}"
-    return shown.stdout
+    shown = shown_at(checkout, f"spec/{name}")
+    assert shown is not None, f"{checkout} holds no {SOURCE_COMMIT}:spec/{name}"
+    return shown
 
 
 def test_the_manifest_names_every_copy_once_in_bytewise_order():
