@@ -25,12 +25,10 @@ setup(
         "requests_toolbelt",
         "cryptography",
         "typing-extensions",
-        # 0.5.16: run(input_data=...) and the ERROR status of a non-zero task code,
-        # which ecld-run's --input and exit code rely on, and artefacts of any
-        # size through the payload intake. 0.5.38: Polygon mainnet's fee
-        # ceiling of 500 gwei and the variable ECLD_MAX_FEE_PER_GAS, which
-        # ecld-run's sends are bounded by.
-        "ethernity-cloud-runner-py>=0.5.38",
+        # The runner of the PoX 2.0 line: 2.0.0b1 up to below 3.0.0. A
+        # requirement that names a prerelease lets pip install prereleases
+        # for it.
+        "ethernity-cloud-runner-py>=2.0.0b1,<3.0.0",
         "pyyaml",
         # Add other dependencies here
     ],

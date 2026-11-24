@@ -227,7 +227,8 @@ The sdk has been tested on the following operating systems:
   `ecld-run` and the dApp's `src/ethernity_task.py` send through the runner
   (ethernity-cloud-runner-py), which bounds the fee of its own transactions:
   500 gwei on Polygon mainnet by default, and the same variable for another
-  ceiling. This package requires runner 0.5.38, the first that does both.
+  ceiling. Runner 0.5.38 is the first that does both; this package requires
+  the runner of the PoX 2.0 line, 2.0.0b1 up to below 3.0.0.
 
 - **Test (local, no chain)**: To run your backend locally with the enclave's own
   executor — no SGX, no gas, instant — run:
