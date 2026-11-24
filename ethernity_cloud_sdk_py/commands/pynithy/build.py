@@ -188,12 +188,13 @@ def copy_from_module_to_build_dir(build_dir):
     dest_file = build_dir / "securelock" / "scripts" / "binary-fs-build.sh"
     shutil.copy(src_file, dest_file)
 
-    # pyfreeze.sh runs PyInstaller off-SCONE in the pyfreeze build stage; it must
-    # be copied into the build dir alongside binary-fs-build.sh or the build
-    # fails ("pyfreeze.sh: not found").
-    src_file = module_dir / "build" / "securelock" / "scripts" / "pyfreeze.sh"
-    dest_file = build_dir / "securelock" / "scripts" / "pyfreeze.sh"
-    shutil.copy(src_file, dest_file)
+    # pyfreeze.sh renders securelock.py and compiles site-packages' bytecode,
+    # and enclave-root.sh assembles the enclave's root, both in the pyfreeze
+    # build stage; the Dockerfile runs them from the build dir's scripts/.
+    for script in ("pyfreeze.sh", "enclave-root.sh"):
+        src_file = module_dir / "build" / "securelock" / "scripts" / script
+        dest_file = build_dir / "securelock" / "scripts" / script
+        shutil.copy(src_file, dest_file)
 
     # The fixed start the binfs stage links into the extension.
     src_file = module_dir / "build" / "securelock" / "fixed-start"
@@ -261,6 +262,10 @@ def render_base_dockerfile(template, docker_repo_url, base_image_tag):
     return template.replace("__DOCKER_REPO_URL__", docker_repo_url).replace("__BASE_IMAGE_TAG__", base_image_tag)
 
 
+# A securelock's CAS session name, as render_securelock_dockerfile takes it.
+SESSION_NAME = re.compile(r"[A-Za-z0-9._-]+")
+
+
 def render_securelock_dockerfile(template, blockchain_network, securelock_session, trusted_zone_image, memory, esr,
                                  production):
     """The securelock's Dockerfile from Dockerfile.tpl, as ecld-build builds it.
@@ -268,7 +273,16 @@ def render_securelock_dockerfile(template, blockchain_network, securelock_sessio
     blockchain_network is the BlockchainNetworks name of the build's network,
     memory its SCONE_HEAP, esr validate_esr_config()'s answer and production
     whether the securelock is signed --production (a CAS-provisioned one).
+
+    securelock_session is the securelock's CAS session name. The link line
+    gives it to the launcher as a C string literal inside a shell word
+    (FIXED_START_SESSION), and it names the directories the session places
+    its files in: a name that is not letters, digits, dots, dashes and
+    underscores alone raises ValueError.
     """
+    if not SESSION_NAME.fullmatch(securelock_session):
+        raise ValueError(f"the session name {securelock_session!r} is not letters, digits, dots, dashes and "
+                         "underscores alone")
     network = BlockchainNetworks.get_details_by_enum_name(blockchain_network)
     content = (
         template.replace("__SECURELOCK_SESSION__", securelock_session)

@@ -111,29 +111,50 @@ The sdk has been tested on the following operating systems:
   the extension the signer measures (`/lib/libbinary-fs.so`) with the
   securelock's header `securelock.h`: the enclave's interpreter is called with
   the ENTRYPOINT's vector (`/usr/local/bin/python -I
-  /etny-securelock/securelock.py`) and with `HOME=/tmp` and the first entry of
+  /etny-securelock/securelock.py`), in the working directory
+  `/etny-securelock`, and with `HOME=/tmp`,
+  `OPENSSL_CONF=/etny-securelock/fixed-start/openssl.cnf`, `OPENSSL_MODULES`
+  and `OPENSSL_ENGINES` at `/etny-securelock/fixed-start` (an empty file of
+  the image and the directory that holds it alone) and the first entry of
   each of `ETNY_ORDER_ID`, `ECAS_ATTEST_SESSION`, `ECAS_ENCLAVE_NONCE`,
   `ECAS_CAS_QUOTE` and `ESR_CONTRACT_ADDRESS` its start's environment holds,
-  and nothing else; the arguments and environment of the compose or of a CAS
-  session reach neither the interpreter nor the securelock. A start that did
-  not come through the launcher ends with status 78. Before it calls the
-  interpreter's main the launcher checks the file tree: for each path of
-  `fixed-start/securelock.tree` (`/etny-securelock` with the dApp's
-  `serverless` package, `/usr/local/lib/python3.14` with `site-packages`, and
-  the names the tree does not hold and the interpreter reads: the zip archive
-  on `sys.path` and, beside the interpreter, the `._pth` file, `pyvenv.cfg`,
-  `pybuilddir.txt` and the standard library's landmarks) it computes the
-  digest of the tree at that path as the enclave sees it (every regular file
-  with its size and SHA-256, every symbolic link with its target, in a fixed
-  order; `fixed_start.c` and `fixed-start/tree_digest.sh` state the records)
-  and ends with status 78 (`the file tree is not the image's at <path>`) when
-  one differs from the digest the binfs stage wrote with `tree_digest.sh` after
-  the binary-fs was made, which the link line compiles into the measured
-  extension. A file at such a path that is not the tree's changes the digest;
-  a file at another path (`/tmp`, `/app`, `/etc`) is not checked. The freeze stage compiles
-  site-packages with `unchecked-hash` bytecode headers and `binary-fs-build.sh`
-  leaves PyInstaller's output (`build/`, `dist/`) out of the binary-fs, so that
-  two builds of the same sources bake the same binary-fs.
+  and nothing else; the arguments, the environment and the working directory
+  of the compose or of a CAS session reach neither the interpreter nor the
+  securelock. A start that did not come through the launcher ends with status
+  78.
+
+  The file tree check covers the whole file system the enclave sees.
+  `scripts/enclave-root.sh` assembles the enclave's files in a new directory,
+  `/enclave-root`: the SCONE interpreter and its standard library without the
+  static archive `libpython3.14.a` and without the base image's
+  site-packages (pip, setuptools, wheel, packaging); the freeze stage's
+  site-packages, as pip installed the securelock's packages and the dApp's
+  `requirements.txt`, without pip; `/etny-securelock` with the dApp's
+  `serverless` package; the empty OpenSSL configuration; and the shared
+  libraries the root's ELF files need and the root does not hold, which
+  `fixed-start/elf_needed.sh` copies from the freeze stage's `/lib`,
+  `/usr/local/lib` and `/usr/lib` and lists, with every ELF file's needed
+  libraries and run paths, in the build's log. The build runs no PyInstaller.
+  `binary-fs-build.sh` makes the binary-fs of that directory whole, and
+  `fixed-start/tree_digest.sh` writes its digest, which the link line compiles
+  into the measured extension with the session's name. Before it calls the
+  interpreter's main the launcher reads the file system from `/` down and
+  ends with status 78 (`the file tree is not the image's at <path>`) unless
+  every entry is one the digest covers (a record per directory, per regular
+  file with its size and SHA-256 and per symbolic link with its target, in a
+  fixed order; `fixed_start.c` and `tree_digest.sh` state the records) or one
+  the header excepts: `/dev` and `/proc`, which are not read; `/etc` with
+  `hosts` and `resolv.conf` and no other name; `/app/<session>` with `ca.pem`
+  and `cert.pem` and `/private/<session>` with `key.pem`, the files the CAS
+  session places, and no other name. An added, removed or changed file, link
+  or directory anywhere else is refused, as is an entry more than 64 names
+  below `/`. The binary-fs holds no empty directory, so an empty directory of
+  `src/serverless` is not in the image; a file that is neither a regular file
+  nor a symbolic link, and a tree deeper than 64 names, fail the build. The
+  session's name is letters, digits, dots, dashes and underscores alone
+  (`build.render_securelock_dockerfile` raises `ValueError` otherwise). The
+  freeze stage compiles site-packages with `unchecked-hash` bytecode headers,
+  so that two builds of the same sources bake the same binary-fs.
 
   The securelock reads no `.env` file of its file system: it takes the order
   id from its environment and from the `.env` object of its store bucket

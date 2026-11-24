@@ -8,9 +8,9 @@
  * of the program's main. The C library calls fixed_start_main once the
  * constructors of every object have run, with the arguments and the
  * environment the runtime took from the host or from a CAS session.
- * fixed_start_main checks the file tree, drops those arguments and that
- * environment, and calls the program's main with the argument vector and the
- * environment of this object.
+ * fixed_start_main checks the file tree, changes to the working directory
+ * FIXED_START_PWD, drops those arguments and that environment, and calls the
+ * program's main with the argument vector and the environment of this object.
  *
  * The constructor runs before the program's own constructors. It ends the
  * process with status 78 when the start did not come through the
@@ -24,28 +24,40 @@
  * environment it finds, fixed_start_main again from the environment the C
  * library hands it.
  *
- * The file tree check. FIXED_START_TREE names paths, each with the digest of
- * the tree at that path in the build stage that made the binary-fs, written
- * by tree_digest.sh. fixed_start_main computes the digest of each path as the
- * enclave sees it, through the C library's lstat, opendir, readdir, readlink,
- * open and read, before it calls the program's main, and ends the process with
- * status 78 when one differs. The digest of a path P is the SHA-256 of these
- * records, written in order:
- *   - P does not exist:      'A' P NUL
- *   - otherwise, for P and, when P is a directory, every entry below it at
- *     every depth, without following symbolic links, in depth-first order
- *     with the entries of each directory in increasing bytewise order of
- *     their names:
+ * The file tree check. fixed_start_main reads the file system the enclave
+ * sees, from / down, through the C library's lstat, opendir, readdir,
+ * readlink, open and read, before it calls the program's main, and ends the
+ * process with status 78 unless every entry is the image's or one
+ * FIXED_START_EXCEPT names.
+ *
+ * FIXED_START_EXCEPT names the entries that are not the image's, a record
+ * each:
+ *   { 'S', path, NULL }    the entry at path is not read, nor anything below
+ *                          it;
+ *   { 'N', path, names }   the entry at path, when there is one, is a
+ *                          directory, and each of its entries bears one of
+ *                          names. Such an entry with a record of its own
+ *                          follows that record; any other is not a directory
+ *                          and is not read.
+ * Neither enters the digest.
+ *
+ * Every other entry enters the digest of the root, the SHA-256 of these
+ * records, written depth first from /, the entries of each directory in
+ * increasing bytewise order of their names, without following symbolic
+ * links:
+ *       a directory:          'D' path NUL, then the records of its entries
  *       a regular file:       'F' path NUL size NUL sha256 NUL
  *       a symbolic link:      'L' path NUL target NUL
- *       a directory:          no record
  *       any other entry:      'O' path NUL
- *     path is the entry's absolute path (P, '/', the names below P joined
- *     with '/'), size the number of bytes the file holds in decimal, sha256
- *     the SHA-256 of those bytes in lowercase hexadecimal, target the link's
- *     content.
- * An entry that cannot be read, a path longer than FIXED_START_PATH_MAX and
- * a directory the launcher cannot hold in memory are refused with status 78.
+ * path is the entry's absolute path, size the number of bytes the file holds
+ * in decimal, sha256 the SHA-256 of those bytes in lowercase hexadecimal,
+ * target the link's content; / itself has no record. The start is refused
+ * unless the digest is FIXED_START_ROOT_DIGEST, which tree_digest.sh writes
+ * from the root the binary-fs is made of.
+ *
+ * An entry that cannot be read, an entry more than FIXED_START_DEPTH_MAX
+ * names below /, a path of FIXED_START_PATH_MAX bytes or more and a directory
+ * the launcher cannot hold in memory are refused with status 78.
  *
  * The enclave's header, given to the compiler with -include, defines:
  *   FIXED_START_ARGS     the argument vector: string literals, one per
@@ -53,11 +65,15 @@
  *   FIXED_START_ENV      the fixed variables: "KEY=VALUE" string literals,
  *                        each followed by a comma, or nothing;
  *   FIXED_START_ALLOWED  the keys passed through: string literals, each
- *                        followed by a comma.
+ *                        followed by a comma;
+ *   FIXED_START_PWD      the working directory, a string literal;
+ *   FIXED_START_EXCEPT   the records of the entries that are not the image's,
+ *                        each followed by a comma; the names of an 'N' record
+ *                        are string literals back to back, each ended by
+ *                        "\0".
  * The generated header tree_digest.sh writes, given with a second -include,
  * defines:
- *   FIXED_START_TREE     the paths checked: { "path", "digest" } pairs, each
- *                        followed by a comma.
+ *   FIXED_START_ROOT_DIGEST  the digest of the root, a string literal.
  */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -71,17 +87,19 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#if !defined(FIXED_START_ARGS) || !defined(FIXED_START_ENV) || !defined(FIXED_START_ALLOWED)
-#error "the enclave's header defines FIXED_START_ARGS, FIXED_START_ENV and FIXED_START_ALLOWED"
+#if !defined(FIXED_START_ARGS) || !defined(FIXED_START_ENV) || !defined(FIXED_START_ALLOWED) \
+    || !defined(FIXED_START_PWD) || !defined(FIXED_START_EXCEPT)
+#error "the enclave's header defines FIXED_START_ARGS, FIXED_START_ENV, FIXED_START_ALLOWED, FIXED_START_PWD and FIXED_START_EXCEPT"
 #endif
-#if !defined(FIXED_START_TREE)
-#error "the header tree_digest.sh writes defines FIXED_START_TREE"
+#if !defined(FIXED_START_ROOT_DIGEST)
+#error "the header tree_digest.sh writes defines FIXED_START_ROOT_DIGEST"
 #endif
 
 #define FIXED_START_EXIT_REFUSED 78
 #define FIXED_START_SPACE 32768
 #define FIXED_START_MAX_ARGS 8
 #define FIXED_START_PATH_MAX 4096
+#define FIXED_START_DEPTH_MAX 64
 #define FIXED_START_READ_SIZE 65536
 
 extern char **environ;
@@ -95,12 +113,15 @@ typedef int (*fixed_start_libc_fn)(fixed_start_main_fn, int, char **,
 static char fixed_start_args[] = FIXED_START_ARGS;
 static const char *const fixed_start_env[] = { FIXED_START_ENV NULL };
 static const char *const fixed_start_allowed[] = { FIXED_START_ALLOWED NULL };
+static const char fixed_start_pwd[] = FIXED_START_PWD;
+static const char fixed_start_root_digest[] = FIXED_START_ROOT_DIGEST;
 
-struct fixed_start_tree_path {
+struct fixed_start_exception {
+    char kind;
     const char *path;
-    const char *digest;
+    const char *names;
 };
-static const struct fixed_start_tree_path fixed_start_tree[] = { FIXED_START_TREE { NULL, NULL } };
+static const struct fixed_start_exception fixed_start_except[] = { FIXED_START_EXCEPT { 0, NULL, NULL } };
 
 #define FIXED_START_ENV_SLOTS \
     (sizeof fixed_start_env / sizeof fixed_start_env[0] \
@@ -112,6 +133,9 @@ static char *fixed_start_environ[FIXED_START_ENV_SLOTS];
 static char fixed_start_space[FIXED_START_SPACE];
 static fixed_start_main_fn fixed_start_program_main;
 static unsigned char fixed_start_read_buf[FIXED_START_READ_SIZE];
+/* The path of the entry the check is at, and the content of a link. */
+static char fixed_start_path[FIXED_START_PATH_MAX];
+static char fixed_start_link[FIXED_START_PATH_MAX];
 
 static void fixed_start_refuse2(const char *reason, const char *detail)
 {
@@ -141,6 +165,11 @@ static void fixed_start_refuse2(const char *reason, const char *detail)
 static void fixed_start_refuse(const char *reason)
 {
     fixed_start_refuse2(reason, NULL);
+}
+
+static void fixed_start_not_the_images(const char *path)
+{
+    fixed_start_refuse2("the file tree is not the image's at ", path);
 }
 
 /* SHA-256 (FIPS 180-4). */
@@ -315,105 +344,177 @@ static int fixed_start_name_order(const void *x, const void *y)
     return strcmp(*(char *const *)x, *(char *const *)y);
 }
 
-/* Records the entry at path (len bytes, in a buffer of FIXED_START_PATH_MAX
-   bytes) and, for a directory, every entry below it. */
-static void fixed_start_record_entry(struct fixed_start_sha256 *s, char *path, size_t len)
+/* The names of the entries of the directory at path, . and .. aside, in
+   increasing bytewise order; *count is their number. */
+static char **fixed_start_names(const char *path, size_t *count)
 {
-    struct stat st;
+    DIR *dir = opendir(path);
+    struct dirent *e;
+    char **names = NULL;
+    size_t n = 0;
+    size_t cap = 0;
 
-    if (lstat(path, &st) != 0)
-        fixed_start_refuse2("an entry of the tree cannot be read: ", path);
-    if (S_ISREG(st.st_mode)) {
-        fixed_start_record_file(s, path);
-    } else if (S_ISLNK(st.st_mode)) {
-        char target[FIXED_START_PATH_MAX];
-        ssize_t n = readlink(path, target, sizeof target);
+    if (dir == NULL)
+        fixed_start_refuse2("a directory of the tree cannot be read: ", path);
+    for (;;) {
+        errno = 0;
+        e = readdir(dir);
+        if (e == NULL)
+            break;
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+            continue;
+        if (n == cap) {
+            char **grown;
 
-        if (n < 0 || (size_t)n >= sizeof target)
-            fixed_start_refuse2("a link of the tree cannot be read: ", path);
-        target[n] = '\0';
-        fixed_start_record(s, 'L', path, target, NULL);
-    } else if (S_ISDIR(st.st_mode)) {
-        DIR *dir = opendir(path);
-        struct dirent *e;
-        char **names = NULL;
-        size_t count = 0;
-        size_t cap = 0;
-        size_t i;
-
-        if (dir == NULL)
-            fixed_start_refuse2("a directory of the tree cannot be read: ", path);
-        for (;;) {
-            errno = 0;
-            e = readdir(dir);
-            if (e == NULL)
-                break;
-            if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
-                continue;
-            if (count == cap) {
-                char **grown;
-
-                cap = cap == 0 ? 64 : cap * 2;
-                grown = realloc(names, cap * sizeof *names);
-                if (grown == NULL)
-                    fixed_start_refuse2("a directory of the tree does not fit the launcher's memory: ", path);
-                names = grown;
-            }
-            names[count] = strdup(e->d_name);
-            if (names[count] == NULL)
+            cap = cap == 0 ? 64 : cap * 2;
+            grown = realloc(names, cap * sizeof *names);
+            if (grown == NULL)
                 fixed_start_refuse2("a directory of the tree does not fit the launcher's memory: ", path);
-            count++;
+            names = grown;
         }
-        if (errno != 0)
-            fixed_start_refuse2("a directory of the tree cannot be read: ", path);
-        closedir(dir);
-        if (count > 1)
-            qsort(names, count, sizeof *names, fixed_start_name_order);
-        for (i = 0; i < count; i++) {
-            size_t name = strlen(names[i]);
-
-            if (len + 1 + name >= FIXED_START_PATH_MAX)
-                fixed_start_refuse2("a path of the tree is longer than the launcher takes: ", path);
-            path[len] = '/';
-            memcpy(path + len + 1, names[i], name + 1);
-            fixed_start_record_entry(s, path, len + 1 + name);
-            path[len] = '\0';
-            free(names[i]);
-        }
-        free(names);
-    } else {
-        fixed_start_record(s, 'O', path, NULL, NULL);
+        names[n] = strdup(e->d_name);
+        if (names[n] == NULL)
+            fixed_start_refuse2("a directory of the tree does not fit the launcher's memory: ", path);
+        n++;
     }
+    if (errno != 0)
+        fixed_start_refuse2("a directory of the tree cannot be read: ", path);
+    closedir(dir);
+    if (n > 1)
+        qsort(names, n, sizeof *names, fixed_start_name_order);
+    *count = n;
+    return names;
 }
 
-/* Ends the process with status 78 unless every path of FIXED_START_TREE has
-   the digest the build wrote for it. */
-static void fixed_start_check_tree(void)
+/* Appends /name to fixed_start_path, which holds len bytes (0 for /), and
+   returns the new length. depth is the number of names the new path holds. */
+static size_t fixed_start_descend(size_t len, const char *name, unsigned depth)
+{
+    size_t n = strlen(name);
+
+    if (len + 1 + n >= FIXED_START_PATH_MAX)
+        fixed_start_refuse2("a path of the tree is longer than the launcher takes: ", len == 0 ? "/" : fixed_start_path);
+    fixed_start_path[len] = '/';
+    memcpy(fixed_start_path + len + 1, name, n + 1);
+    if (depth > FIXED_START_DEPTH_MAX)
+        fixed_start_refuse2("a path of the tree is deeper than the launcher takes: ", fixed_start_path);
+    return len + 1 + n;
+}
+
+/* The record of FIXED_START_EXCEPT for path, or NULL. */
+static const struct fixed_start_exception *fixed_start_excepted(const char *path)
 {
     size_t k;
 
-    for (k = 0; fixed_start_tree[k].path != NULL; k++) {
-        static char path[FIXED_START_PATH_MAX];
-        struct fixed_start_sha256 s;
-        struct stat st;
-        char hex[65];
-        size_t len = strlen(fixed_start_tree[k].path);
-
-        if (len >= sizeof path)
-            fixed_start_refuse2("a path of the tree is longer than the launcher takes: ", fixed_start_tree[k].path);
-        memcpy(path, fixed_start_tree[k].path, len + 1);
-        fixed_start_sha256_init(&s);
-        if (lstat(path, &st) != 0) {
-            if (errno != ENOENT)
-                fixed_start_refuse2("an entry of the tree cannot be read: ", path);
-            fixed_start_record(&s, 'A', path, NULL, NULL);
-        } else {
-            fixed_start_record_entry(&s, path, len);
-        }
-        fixed_start_sha256_hex(&s, hex);
-        if (strcmp(hex, fixed_start_tree[k].digest) != 0)
-            fixed_start_refuse2("the file tree is not the image's at ", fixed_start_tree[k].path);
+    for (k = 0; fixed_start_except[k].path != NULL; k++) {
+        if (strcmp(path, fixed_start_except[k].path) == 0)
+            return &fixed_start_except[k];
     }
+    return NULL;
+}
+
+/* Whether name is one of names: strings back to back, an empty one last. */
+static int fixed_start_named(const char *names, const char *name)
+{
+    const char *p;
+
+    for (p = names; *p != '\0'; p += strlen(p) + 1) {
+        if (strcmp(p, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* Checks the entry at fixed_start_path (len bytes, depth names) against its
+   record x of FIXED_START_EXCEPT. */
+static void fixed_start_check_excepted(const struct fixed_start_exception *x, size_t len, unsigned depth)
+{
+    struct stat st;
+    char **names;
+    size_t count;
+    size_t i;
+
+    if (x->kind != 'N')
+        return;
+    if (lstat(fixed_start_path, &st) != 0)
+        fixed_start_refuse2("an entry of the tree cannot be read: ", fixed_start_path);
+    if (!S_ISDIR(st.st_mode))
+        fixed_start_not_the_images(fixed_start_path);
+    names = fixed_start_names(fixed_start_path, &count);
+    for (i = 0; i < count; i++) {
+        size_t child = fixed_start_descend(len, names[i], depth + 1);
+        const struct fixed_start_exception *y;
+
+        if (!fixed_start_named(x->names, names[i]))
+            fixed_start_not_the_images(fixed_start_path);
+        y = fixed_start_excepted(fixed_start_path);
+        if (y != NULL) {
+            fixed_start_check_excepted(y, child, depth + 1);
+        } else {
+            if (lstat(fixed_start_path, &st) != 0)
+                fixed_start_refuse2("an entry of the tree cannot be read: ", fixed_start_path);
+            if (S_ISDIR(st.st_mode))
+                fixed_start_not_the_images(fixed_start_path);
+        }
+        fixed_start_path[len] = '\0';
+        free(names[i]);
+    }
+    free(names);
+}
+
+/* Records the entries of the image's directory at fixed_start_path (len
+   bytes, 0 for /; depth names) and everything below them, and checks the
+   entries FIXED_START_EXCEPT names. */
+static void fixed_start_record_directory(struct fixed_start_sha256 *s, size_t len, unsigned depth)
+{
+    size_t count;
+    char **names = fixed_start_names(len == 0 ? "/" : fixed_start_path, &count);
+    size_t i;
+
+    for (i = 0; i < count; i++) {
+        size_t child = fixed_start_descend(len, names[i], depth + 1);
+        const struct fixed_start_exception *x = fixed_start_excepted(fixed_start_path);
+        struct stat st;
+
+        if (x != NULL) {
+            fixed_start_check_excepted(x, child, depth + 1);
+        } else if (lstat(fixed_start_path, &st) != 0) {
+            fixed_start_refuse2("an entry of the tree cannot be read: ", fixed_start_path);
+        } else if (S_ISDIR(st.st_mode)) {
+            fixed_start_record(s, 'D', fixed_start_path, NULL, NULL);
+            fixed_start_record_directory(s, child, depth + 1);
+        } else if (S_ISREG(st.st_mode)) {
+            fixed_start_record_file(s, fixed_start_path);
+        } else if (S_ISLNK(st.st_mode)) {
+            ssize_t n = readlink(fixed_start_path, fixed_start_link, sizeof fixed_start_link);
+
+            if (n < 0 || (size_t)n >= sizeof fixed_start_link)
+                fixed_start_refuse2("a link of the tree cannot be read: ", fixed_start_path);
+            fixed_start_link[n] = '\0';
+            fixed_start_record(s, 'L', fixed_start_path, fixed_start_link, NULL);
+        } else {
+            fixed_start_record(s, 'O', fixed_start_path, NULL, NULL);
+        }
+        fixed_start_path[len] = '\0';
+        free(names[i]);
+    }
+    free(names);
+}
+
+/* Ends the process with status 78 unless the file system from / down holds
+   the entries FIXED_START_ROOT_DIGEST was written for and, beside them, the
+   entries FIXED_START_EXCEPT names alone. */
+static void fixed_start_check_tree(void)
+{
+    struct fixed_start_sha256 s;
+    char hex[65];
+
+    fixed_start_sha256_init(&s);
+    fixed_start_path[0] = '\0';
+    fixed_start_record_directory(&s, 0, 0);
+    fixed_start_sha256_hex(&s, hex);
+    if (strcmp(hex, fixed_start_root_digest) != 0)
+        fixed_start_not_the_images("/");
 }
 
 static void fixed_start_build_args(void)
@@ -474,6 +575,8 @@ static int fixed_start_main(int argc, char **argv, char **envp)
     (void)argc;
     (void)argv;
     fixed_start_check_tree();
+    if (chdir(fixed_start_pwd) != 0)
+        fixed_start_refuse2("the working directory cannot be entered: ", fixed_start_pwd);
     fixed_start_build_args();
     if (envp != fixed_start_environ)
         fixed_start_install(envp);

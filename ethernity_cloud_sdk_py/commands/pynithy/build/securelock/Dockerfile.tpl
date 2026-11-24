@@ -1,9 +1,13 @@
 # syntax=docker/dockerfile:1
 #
-# Securelock enclave build. The whole build is SGX-free: heavy Python work
-# (pip installs + PyInstaller freeze) runs on a STOCK python:3.14-alpine with
-# no SCONE and no SGX; only the binary-fs packaging and signing use the SCONE
-# build tools, which run in simulation/build mode without an SGX device.
+# Securelock enclave build. The whole build is SGX-free: the Python packages
+# are installed on a STOCK python:3.14-alpine with no SCONE and no SGX; only
+# the binary-fs packaging and signing use the SCONE build tools, which run in
+# simulation/build mode without an SGX device.
+#
+# The binary-fs is made of /enclave-root, a directory that holds the enclave's
+# files and nothing else (scripts/enclave-root.sh); the launcher refuses a
+# start whose file system holds another entry (fixed-start/fixed_start.c).
 
 ########################################################################
 # Stage 1 - SGX report helper (unchanged, crosscompiler build tool)
@@ -23,20 +27,20 @@ FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/
 COPY src/get_sgx_report.so /etny-securelock/get_sgx_report.so
 
 ########################################################################
-# Stage 2 - PyInstaller freeze on a NORMAL python 3.14 (no SCONE / no SGX)
-# Installs the user's requirements.txt + PyInstaller, renders securelock.py,
-# and runs pyinstaller to produce the frozen COLLECT dir. Same python
-# version + musl as the SCONE runtime python, so the output is compatible.
+# Stage 2 - the enclave's root, on a NORMAL python 3.14 (no SCONE / no SGX)
+# Installs the securelock's packages and the user's requirements.txt, renders
+# securelock.py and assembles the enclave's files in /enclave-root. Same
+# python version + musl as the SCONE runtime python, so the installed
+# packages are compatible.
 ########################################################################
 FROM python:3.14-alpine AS pyfreeze
 RUN apk add --no-cache bash gcc g++ musl-dev libffi-dev openssl-dev rust cargo make libsodium-dev zlib-dev binutils
 ENV SODIUM_INSTALL=system
 WORKDIR /etny-securelock
 
-# Core securelock runtime deps + PyInstaller (built here, off-SCONE, where pip
-# and native builds work normally).
+# Core securelock runtime deps (built here, off-SCONE, where pip and native
+# builds work normally).
 RUN pip install --no-cache-dir \
-      pyinstaller \
       "web3>=6" cryptography ecdsa pyasn1 tinyec minio pynacl
 
 # User-supplied additional modules (the customization hook).
@@ -47,7 +51,7 @@ COPY ./src /etny-securelock/
 COPY ./scripts/* /etny-securelock/
 COPY --from=build-sgx-module /etny-securelock/get_sgx_report.so /etny-securelock/get_sgx_report.so
 
-# Render securelock.py from the template, then run PyInstaller (off-SCONE).
+# Render securelock.py from the template and compile site-packages' bytecode.
 ENV SECURELOCK_SESSION=__SECURELOCK_SESSION__
 ENV BUCKET_NAME=__BUCKET_NAME__
 ENV SMART_CONTRACT_ADDRESS=__SMART_CONTRACT_ADDRESS__
@@ -59,38 +63,43 @@ ENV NETWORK_TYPE=__NETWORK_TYPE__
 ENV VALIDATOR_REGISTRY_ADDRESS=__VALIDATOR_REGISTRY_ADDRESS__
 RUN chmod +x /etny-securelock/pyfreeze.sh && /etny-securelock/pyfreeze.sh
 
+# SCONE-built static python + its stdlib, from the runtime base image, beside
+# this stage's own interpreter.
+COPY --from=etny-securelock-serverless /usr/local/bin/python3 /scone-python/bin/python3
+COPY --from=etny-securelock-serverless /usr/local/lib/python3.14 /scone-python/lib/python3.14
+# The enclave's root, /enclave-root: the SCONE python and its stdlib, this
+# stage's site-packages and /etny-securelock (the rendered securelock.py, its
+# sibling modules etny_crypto.py, etny_exec.py, models.py,
+# swift_stream_service.py, the abi/ dir, get_sgx_report.so, the dApp's
+# serverless package, the scripts), and the shared libraries their ELF files
+# need, which fixed-start/elf_needed.sh takes from this stage and lists in
+# /fixed_start_elf.txt (scripts/enclave-root.sh).
+COPY ./fixed-start/ /fixed-start/
+RUN bash /etny-securelock/enclave-root.sh
+
 ########################################################################
 # Stage 3 - binary-fs packaging with the SCONE build tools (no SGX).
-# Assembles the SCONE python + stdlib + the (off-SCONE) installed site-packages
-# + the rendered securelock.py + PyInstaller's collected .so list, and bakes
-# them into the measured binary-fs.
+# Makes the measured binary-fs of the enclave's root, whole, writes the root's
+# digest, then cross-compiles the binary-fs to libbinary-fs.so.
 ########################################################################
 FROM registry.ethernity.cloud:443/debuggingdelight/ethernity-cloud-sdk-registry/sconecuratedimages/crosscompilers:alpine-scone6.0.7 AS binfs
-RUN mkdir -p /binary-fs-dir /etny-securelock
-# SCONE-built static python + its stdlib, from the runtime base image
-COPY --from=etny-securelock-serverless /usr/local/bin/python3 /usr/local/bin/python3
-COPY --from=etny-securelock-serverless /usr/local/lib/python3.14 /usr/local/lib/python3.14
-# The ENTIRE /etny-securelock tree (rendered securelock.py + its sibling modules
-# etny_crypto.py, etny_exec.py, models.py, swift_stream_service.py, the abi/
-# dir, get_sgx_report.so, scripts) - all must be baked into binary-fs or the
-# enclave fails at import (ModuleNotFoundError: No module named 'etny_crypto').
-# site-packages + COLLECT toc also come from the OFF-SCONE pyfreeze stage.
-COPY --from=pyfreeze /etny-securelock /etny-securelock
-COPY --from=pyfreeze /etny-securelock/build/securelock/COLLECT-00.toc /etny-securelock/COLLECT-00.toc
-COPY --from=pyfreeze /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
-RUN chmod +x /etny-securelock/binary-fs-build.sh && /etny-securelock/binary-fs-build.sh
+COPY --from=pyfreeze /enclave-root /enclave-root
+COPY --from=pyfreeze /fixed_start_elf.txt /binary-fs-dir/fixed_start_elf.txt
+RUN bash /enclave-root/etny-securelock/binary-fs-build.sh
 # The fixed start (fixed-start/fixed_start.c, with the securelock's argument
-# vector and environment keys in fixed-start/securelock.h) is linked into the
-# extension, which the signer measures: the enclave runs the ENTRYPOINT's
-# vector with HOME=/tmp and the listed keys of its environment, whatever
-# arguments and environment its start gives it, and only when the files at
-# the paths fixed-start/securelock.tree names are the binary-fs tree's. The
-# digests of that tree are written from this stage's file system, from which
-# the binary-fs above is made (fixed-start/tree_digest.sh), with the listing
-# of the entries each covers, and compiled into the launcher.
+# vector, environment, working directory and excepted entries in
+# fixed-start/securelock.h and the name of its CAS session in
+# FIXED_START_SESSION) is linked into the extension, which the signer
+# measures: the enclave runs the ENTRYPOINT's vector with the header's
+# variables and the listed keys of its environment, whatever arguments and
+# environment its start gives it, and only when its file system holds the
+# entries of /enclave-root and, beside them, the excepted entries alone. The
+# digest of the root is written here, from the directory the binary-fs above
+# is made of (fixed-start/tree_digest.sh, the last step that reads the root),
+# with the listing of the entries it covers, and compiled into the launcher.
 COPY ./fixed-start/ /fixed-start/
-RUN bash /fixed-start/tree_digest.sh /fixed-start/securelock.tree /binary-fs-dir/fixed_start_tree.h /binary-fs-dir/fixed_start_tree.txt
-RUN cd /binary-fs-dir && scone gcc ./binary_fs_blob.s -O2 -fPIC -include /fixed-start/securelock.h -include /binary-fs-dir/fixed_start_tree.h /fixed-start/fixed_start.c ./libbinary_fs_template.a -shared -o /libbinary-fs.so
+RUN bash /fixed-start/tree_digest.sh /enclave-root /binary-fs-dir/fixed_start_tree.h /binary-fs-dir/fixed_start_tree.txt
+RUN cd /binary-fs-dir && scone gcc ./binary_fs_blob.s -O2 -fPIC -DFIXED_START_SESSION='"__SECURELOCK_SESSION__"' -include /fixed-start/securelock.h -include /binary-fs-dir/fixed_start_tree.h /fixed-start/fixed_start.c ./libbinary_fs_template.a -shared -o /libbinary-fs.so
 
 ########################################################################
 # Stage 4 - final SCONE runtime image (lean scone python base) + sign.

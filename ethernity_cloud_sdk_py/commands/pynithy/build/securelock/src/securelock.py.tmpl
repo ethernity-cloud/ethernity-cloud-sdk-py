@@ -38,9 +38,8 @@ from web3.middleware import ExtraDataToPOAMiddleware
 from etny_exec import execute_task_v3, TaskStatus
 from models import *
 from swift_stream_service import SwiftStreamService
-# Static import so PyInstaller's dependency analysis bundles it into binary-fs
-# (a lazy import inside a function is invisible to the freeze and would fail
-# only at runtime, inside the enclave, where it cannot be diagnosed).
+# Imported at load, not inside a function: a module that does not import
+# ends the start, before a task runs.
 import esr_wallet
 import securelock_probe
 from log_text import error_class, result_digest

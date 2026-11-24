@@ -221,7 +221,7 @@ def test_the_dockerfiles_and_the_build_scripts_name_no_dotenv_file():
     ("# cat .env", False),
     ("COPY ./src /etny-securelock/", False),
     ('echo "${NODE_ENV}"', False),
-    ("      pyinstaller \\", False),
+    ('      "web3>=6" cryptography ecdsa pyasn1 tinyec minio pynacl', False),
 ])
 def test_the_line_check_finds_a_dotenv_file_on_a_build_line(line, names):
     assert bool(_env_file_lines(line)) is names
