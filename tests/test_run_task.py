@@ -256,3 +256,83 @@ def test_relays_per_hour_is_printed_from_the_execution_and_a_given_value_wins(ec
     assert "relays/h  : 6" in capsys.readouterr().out
     assert ecld_run("--relays-per-hour", "20") == 0
     assert "relays/h  : 20" in capsys.readouterr().out
+
+
+# The claims settings of the resources (ethernity-cloud-runner-py run()).
+CLAIMS_KEYS = {"max_price_per_cu_hour_wei", "max_bid_per_cu_hour_wei", "escrow_wei", "required_gflops",
+               "gas_level", "epc_mib", "max_gflops", "relays_per_hour", "min_node_score", "allow_marked_image"}
+
+
+def _claims():
+    return {key: value for key, value in _resources().items() if key in CLAIMS_KEYS}
+
+
+def test_without_a_claims_flag_the_resources_carry_no_claims_setting(ecld_run):
+    assert ecld_run("--max-gflops", "150", "--relays-per-hour", "3") == 0
+    assert _claims() == {}
+
+
+def test_bid_wei_adds_the_v2_terms_with_the_gflops_ceiling_and_the_relays_and_each_flag_reaches_its_key(ecld_run):
+    assert ecld_run("--bid-wei", "1200000000000000000") == 0
+    assert _claims() == {"max_price_per_cu_hour_wei": 1200000000000000000, "max_gflops": 0, "relays_per_hour": 2}
+    assert ecld_run("--bid-wei", str(2**128 - 1), "--bid-ceiling-wei", "2000000000000000000",
+                    "--escrow-wei", "5000000000000000000", "--required-gflops", "250",
+                    "--gas-level", "2000000000000000000", "--epc-mib", "256", "--max-gflops", "400",
+                    "--relays-per-hour", "7", "--min-node-score", "0.5", "--allow-marked-image") == 0
+    assert _claims() == {
+        "max_price_per_cu_hour_wei": 2**128 - 1, "max_bid_per_cu_hour_wei": 2000000000000000000,
+        "escrow_wei": 5000000000000000000, "required_gflops": 250, "gas_level": 2000000000000000000,
+        "epc_mib": 256, "max_gflops": 400, "relays_per_hour": 7, "min_node_score": 0.5, "allow_marked_image": True}
+    assert ecld_run("--bid-wei", "1", "--expected-inputs", "5") == 0
+    assert _claims()["relays_per_hour"] == 6
+    assert ecld_run("--min-node-score", "0") == 0
+    assert _claims() == {"min_node_score": 0.0}
+
+
+@pytest.mark.parametrize("args", [
+    ("--bid-wei", "0"), ("--bid-wei", "1.5"), ("--bid-wei", str(2**128)), ("--bid-wei", "-1"),
+    ("--bid-wei", "1", "--bid-ceiling-wei", "0"), ("--bid-wei", "1", "--escrow-wei", "0"),
+    ("--bid-wei", "1", "--gas-level", str(10**18 - 1)), ("--bid-wei", "1", "--required-gflops", "65536"),
+    ("--bid-wei", "1", "--epc-mib", "0"), ("--bid-wei", "1", "--epc-mib", "4194241"),
+    ("--min-node-score", "5.01"), ("--min-node-score", "-1"), ("--min-node-score", "x"), ("--min-node-score", ".5"),
+])
+def test_a_claims_flag_outside_the_runners_bounds_is_a_usage_error(ecld_run, args, capsys):
+    with pytest.raises(SystemExit) as raised:
+        ecld_run(*args)
+    assert raised.value.code == 2
+    assert args[-2] in capsys.readouterr().err
+    assert _Runner.run_args is None
+
+
+def test_the_bounds_admit_their_ends(ecld_run):
+    assert ecld_run("--bid-wei", "1", "--epc-mib", "4194240", "--gas-level", str(10**18),
+                    "--required-gflops", "65535") == 0
+    assert (_claims()["epc_mib"], _claims()["gas_level"], _claims()["required_gflops"]) == (4194240, 10**18, 65535)
+
+
+@pytest.mark.parametrize("flag", ["--bid-ceiling-wei", "--escrow-wei", "--gas-level", "--required-gflops",
+                                  "--epc-mib"])
+def test_a_v2_term_without_bid_wei_is_a_usage_error(ecld_run, flag, capsys):
+    with pytest.raises(SystemExit) as raised:
+        ecld_run(flag, str(10**18) if flag == "--gas-level" else "64")
+    assert raised.value.code == 2
+    assert (f"{flag} states a V2 term of the request, which is added with V2 terms only with --bid-wei"
+            in capsys.readouterr().err)
+    assert _Runner.run_args is None
+
+
+def test_min_node_score_and_allow_marked_image_stand_alone(ecld_run):
+    assert ecld_run("--allow-marked-image") == 0
+    assert _claims() == {"allow_marked_image": True}
+
+
+REFUSAL = ("This network serves DO requests by claims (PoxMatching's claimsOn() is true), so a request is added "
+           "with V2 terms: give the task setting max_price_per_cu_hour_wei (the bid per CU-hour, wei), above 0; "
+           "escrow_wei, when given, is the most addDORequestV2 may pull, above 0.")
+
+
+def test_the_runners_refusal_of_a_request_without_a_bid_ends_ecld_run_with_exit_1_and_its_message(ecld_run, capsys):
+    assert ecld_run(outcome=({"status": "ERROR", "progress": "INIT", "last_error": REFUSAL}, None)) == 1
+    err = capsys.readouterr().err
+    assert "status    : ERROR" in err
+    assert f"error     : {REFUSAL}" in err

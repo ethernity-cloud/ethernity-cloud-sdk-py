@@ -34,8 +34,16 @@ before the runner is constructed and passed nested as resources["execution"],
 with the flat resources["duration"] a runner without the PoX 2.0 execution
 object reads. An EXEC_* variable outside execution.ENV_KEYS and an unknown
 option are usage errors.
---relays-per-hour replaces the default execution.relays_per_hour computes;
-the runner takes neither until it carries the execution object.
+--relays-per-hour replaces the default execution.relays_per_hour computes.
+
+The claims flags go to the runner's claims settings in the resources
+(_claims_resources): with --bid-wei the request's V2 terms
+(max_price_per_cu_hour_wei, the execution's maxGflops as max_gflops, the
+relays per hour as relays_per_hour, and --bid-ceiling-wei, --escrow-wei,
+--required-gflops, --gas-level and --epc-mib when given, each of which needs
+--bid-wei); --min-node-score and --allow-marked-image beside them. On a
+network that serves requests by claims the runner refuses a request without
+a bid before anything is sent, and ecld-run prints that refusal and exits 1.
 
 Usage, from the project root (where .config.json lives):
 
@@ -44,6 +52,7 @@ Usage, from the project root (where .config.json lives):
     ecld-run --input data.json 'process(___etny_data_set___)'
     ecld-run --network BLOXBERG_TESTNET --task-price 2.5 'esr_increment()'
     ecld-run --mode session --expected-inputs 5 --duration-hours 2 'serve()'
+    ecld-run --bid-wei 1200000000000000000 --bid-ceiling-wei 2000000000000000000 --epc-mib 256 'hello("World")'
     ecld-run --json 'hello("World")'      # machine-readable result
 
 Exit code 0 on a SUCCESS task result, 1 otherwise.
@@ -52,6 +61,7 @@ Exit code 0 on a SUCCESS task result, 1 otherwise.
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from decimal import Decimal, InvalidOperation
@@ -233,11 +243,12 @@ def _build_execution(args, cfg, env):
     return execution.validate(block)
 
 
-def _build_resources(args, run_execution):
+def _build_resources(args, run_execution, relays_per_hour):
     """The resources object run() expects: the flat keys from the flags, the
-    validated execution nested, and its durationHours as the flat duration a
-    runner without the PoX 2.0 execution object reads."""
-    return {
+    validated execution nested, its durationHours as the flat duration a
+    runner without the PoX 2.0 execution object reads, and the claims
+    settings (_claims_resources)."""
+    resources = {
         "taskPrice": args.task_price,
         "cpu": args.cpu,
         "memory": args.memory,
@@ -247,6 +258,82 @@ def _build_resources(args, run_execution):
         "validators": args.validators,
         "execution": run_execution,
     }
+    resources.update(_claims_resources(args, run_execution, relays_per_hour))
+    return resources
+
+
+# The bounds of the claims flags, the runners' (ethernity-cloud-runner-py
+# resources, ethernity-cloud-runner-js options.v2): a bid and a bid ceiling
+# per CU-hour 1 to 2^128 - 1 wei and a gas level 1e18 to 2^128 - 1 (the PoX
+# 2.0's MAX_PRICE and MAX_GAS_LEVEL; the pricing refuses a gas level below
+# 1e18), a required GFLOPS figure 0 to 65,535, an EPC figure 1 to 4,194,240
+# MiB (65,535 units of 64 MiB, which the runner rounds the figure up to) and
+# a minimum node score 0 to 5.00 points.
+UINT128_MAX = 2**128 - 1
+UINT256_MAX = 2**256 - 1
+GAS_LEVEL_MIN = 10**18
+REQUIRED_GFLOPS_MAX = 65_535
+EPC_MIB_MAX = 65_535 * 64
+SCORE_MAX = Decimal(5)
+
+# (flag, dest, the runner's resources key, lowest, highest) of each claims
+# flag that states a V2 term of the request; each needs --bid-wei.
+CLAIMS_FLAGS = (
+    ("--bid-wei", "bid_wei", "max_price_per_cu_hour_wei", 1, UINT128_MAX),
+    ("--bid-ceiling-wei", "bid_ceiling_wei", "max_bid_per_cu_hour_wei", 1, UINT128_MAX),
+    ("--escrow-wei", "escrow_wei", "escrow_wei", 1, UINT256_MAX),
+    ("--required-gflops", "required_gflops", "required_gflops", 0, REQUIRED_GFLOPS_MAX),
+    ("--gas-level", "gas_level", "gas_level", GAS_LEVEL_MIN, UINT128_MAX),
+    ("--epc-mib", "epc_mib", "epc_mib", 1, EPC_MIB_MAX),
+)
+
+
+def _whole_in(flag, low, high):
+    """The argparse type of a whole-number flag from `low` to `high`."""
+    def parse(text):
+        if not re.fullmatch(r"[0-9]+", text.strip()):
+            raise argparse.ArgumentTypeError(f"{flag} takes a whole number, got {text!r}")
+        value = int(text.strip())
+        if not low <= value <= high:
+            raise argparse.ArgumentTypeError(f"{flag} takes a whole number from {low} to {high}, got {value}")
+        return value
+    return parse
+
+
+def _score(text):
+    """--min-node-score: points, a plain decimal from 0 to 5.00."""
+    if not re.fullmatch(r"[0-9]+(\.[0-9]+)?", text.strip()) or Decimal(text.strip()) > SCORE_MAX:
+        raise argparse.ArgumentTypeError(f"--min-node-score takes a score from 0 to 5.00, got {text!r}")
+    return float(text.strip())
+
+
+def _claims_resources(args, run_execution, relays_per_hour):
+    """The claims settings run()'s resources take: with --bid-wei the
+    request's V2 terms (the bid, the execution's maxGflops as the GFLOPS
+    ceiling, the relays per hour and each claims flag given);
+    --min-node-score and --allow-marked-image when given. Without a claims
+    flag, none."""
+    found = {}
+    if args.bid_wei is not None:
+        found["max_gflops"] = run_execution["maxGflops"]
+        found["relays_per_hour"] = relays_per_hour
+        for _, dest, key, _, _ in CLAIMS_FLAGS:
+            value = getattr(args, dest)
+            if value is not None:
+                found[key] = value
+    if args.min_node_score is not None:
+        found["min_node_score"] = args.min_node_score
+    if args.allow_marked_image:
+        found["allow_marked_image"] = True
+    return found
+
+
+def _unbid_flag(args):
+    """The first claims flag given without --bid-wei, or None: a request is
+    added with V2 terms only with a bid."""
+    if args.bid_wei is not None:
+        return None
+    return next((flag for flag, dest, _, _, _ in CLAIMS_FLAGS if getattr(args, dest) is not None), None)
 
 
 def _relays_per_hour(args, run_execution, cfg):
@@ -373,12 +460,34 @@ def build_parser():
                     help="state commits the dApp expects to relay per order, 0-100")
     ex.add_argument("--relays-per-hour", dest="relays_per_hour", type=_positive_int, metavar="N",
                     help="relays the order needs per hour (default: 1 + expected inputs, + 10 with ESR)")
+    # Claims flags (the runner's claims settings in run()'s resources).
+    cl = parser.add_argument_group(
+        "claims", "the request's V2 terms and the claims path's options; a network that serves requests by "
+                  "claims takes none without --bid-wei")
+    helps = {
+        "--bid-wei": "the bid per CU-hour, in wei of the network token: the request is added with V2 terms, "
+                     "with --max-gflops as its GFLOPS ceiling and --relays-per-hour",
+        "--bid-ceiling-wei": "the most a raise of the bid goes to, wei per CU-hour",
+        "--escrow-wei": "the most the request's add pulls, in wei",
+        "--required-gflops": "the GFLOPS the request requires, 0 to 65535 (0: one CU)",
+        "--gas-level": "the chain fee's gas level, 1e18 to 2^128 - 1 (default 1e18)",
+        "--epc-mib": "the EPC the task needs, in MiB; the runner states it in units of 64 MiB",
+    }
+    for flag, dest, _, low, high in CLAIMS_FLAGS:
+        cl.add_argument(flag, dest=dest, type=_whole_in(flag, low, high), metavar="N", help=helps[flag])
+    cl.add_argument("--min-node-score", dest="min_node_score", type=_score, metavar="POINTS",
+                    help="the minimum score of the node whose claim is approved, 0 to 5.00 (0: no test)")
+    cl.add_argument("--allow-marked-image", dest="allow_marked_image", action="store_true",
+                    help="send the request when the image is marked likely broken")
     return parser
 
 
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    unbid = _unbid_flag(args)
+    if unbid is not None:
+        parser.error(f"{unbid} states a V2 term of the request, which is added with V2 terms only with --bid-wei")
 
     # dotenv, if present, so ENC_PRIVATE_KEY / NETWORK_* are available.
     try:
@@ -487,7 +596,7 @@ def main(argv=None):
             runner.set_storage_ipfs(_ipfs_api_url(args.ipfs), ipfs_token)
         runner.connect()
 
-        resources = _build_resources(args, run_execution)
+        resources = _build_resources(args, run_execution, relays_per_hour)
         print(f"resources : {resources}")
         print("submitting order... (this places an on-chain request and costs gas)")
 
