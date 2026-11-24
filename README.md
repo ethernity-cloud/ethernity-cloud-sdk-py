@@ -106,6 +106,13 @@ The sdk has been tested on the following operating systems:
   ecld-publish
   ```
   Required after build, to build and integrate the secure certificates that will be used during executions and to register the project to the Ethernity Cloud Image Register.
+  The publish first reads whether the network's image registry is seeding
+  the owners of its securelock names (ECImageRegistryV4's `seedingOpen()`):
+  such a registry refuses every securelock registration with `SeedingOpen()`
+  until its owner closes seeding, so the publish stops there, naming
+  `SeedingOpen()`, before anything is started; it stops too when the
+  registry's answer cannot be read. A registry without seeding (V1 to V3)
+  takes the publish as before.
 
   What the publish measures: `ecld-build` records the securelock it pushed in
   `.config.json` (`SECURELOCK_IMAGE_DIGEST`, the digest of the pushed

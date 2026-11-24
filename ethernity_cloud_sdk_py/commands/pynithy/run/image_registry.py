@@ -20,6 +20,21 @@ from ethernity_cloud_sdk_py.commands.spinner import Spinner
 config = Config(Path(".config.json").resolve())
 config.load()
 
+# ECImageRegistryV4's seedingOpen() (pox-smart-contract-litvm
+# ECImageRegistryV4.sol): true while the registry imports the owners of the
+# securelock names from its seed source, when registerImage and addImage
+# revert SeedingOpen(), until its owner calls closeSeeding.
+SEEDING_ABI = [{"type": "function", "name": "seedingOpen", "stateMutability": "view",
+                "inputs": [], "outputs": [{"name": "", "type": "bool"}]}]
+
+
+def seeding_refusal(address):
+    """Why a publish on the registry at `address` stops while it is seeding."""
+    return (f"The image registry {address} is seeding its securelock name owners (seedingOpen() answers true): "
+            "it refuses registerImage and addImage with SeedingOpen() until its owner closes seeding. "
+            "Publish once seeding is closed.")
+
+
 class ImageRegistry:
     def __init__(self):
         try:
@@ -498,6 +513,19 @@ class ImageRegistry:
         try:
             self.image_registry_contract.functions.pendingImages().call()
             return True
+        except ContractLogicError:
+            return False
+
+    def seeding_open(self):
+        """Whether the network's registry is seeding its securelock name
+        owners (SEEDING_ABI), so that it refuses the securelock's
+        registration. A registry without seeding (ECImageRegistry V1 to V3)
+        has no seedingOpen() and reverts: False. A node that does not answer
+        raises."""
+        registry = self.provider.eth.contract(address=to_checksum_address(self.image_registry_address),
+                                              abi=SEEDING_ABI)
+        try:
+            return bool(registry.functions.seedingOpen().call())
         except ContractLogicError:
             return False
 

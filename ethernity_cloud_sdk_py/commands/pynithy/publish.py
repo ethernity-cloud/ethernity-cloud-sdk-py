@@ -23,7 +23,7 @@ from requests.packages.urllib3 import disable_warnings
 from ethernity_cloud_sdk_py.commands.enums import BlockchainNetworks
 from ethernity_cloud_sdk_py.commands.pynithy import cas_resolver, session_registry
 import ethernity_cloud_sdk_py.commands.pynithy.run.public_key_service as public_key_service
-from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry
+from ethernity_cloud_sdk_py.commands.pynithy.run.image_registry import ImageRegistry, seeding_refusal
 from ethernity_cloud_sdk_py.commands.pynithy.ipfs_client import IPFSClient
 from ethernity_cloud_sdk_py.commands.pynithy.local_kubo import LocalKubo, exit_on_interrupt, own_endpoint, PUBLIC_IPFS_API
 from ethernity_cloud_sdk_py.commands.pynithy.local_registry import LocalRegistry
@@ -858,6 +858,18 @@ def main(private_key):
     spinner = Spinner()
     recorded_build = recorded_securelock_build()
     image_registry.set_private_key(private_key)
+    # A registry seeding its securelock name owners (ECImageRegistryV4 while
+    # seedingOpen() answers true) refuses the securelock's registration with
+    # SeedingOpen(): the publish stops here, before anything is started, as
+    # it does when the registry's answer cannot be read.
+    try:
+        seeding = image_registry.seeding_open()
+    except Exception as e:
+        print(f"\t✖  Could not read whether the image registry is seeding: {e}")
+        exit(1)
+    if seeding:
+        print(f"\t✖  {seeding_refusal(image_registry.image_registry_address)}")
+        exit(1)
     project_name = config.read("PROJECT_NAME") or "publish"
     # Where the image goes. An IPFS API of the application's own
     # (ECLD_IPFS_ENDPOINT / ECLD_IPFS_TOKEN, else the stored IPFS_ENDPOINT /

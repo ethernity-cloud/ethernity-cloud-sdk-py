@@ -105,10 +105,21 @@ class _Kubo:
 
 
 class _NoChain:
-    """An image registry whose first read ends the run."""
+    """An image registry that is not seeding, whose next read ends the run.
+    With `seeding` its seeding_open answers it, an exception raised."""
+
+    image_registry_address = "0x" + "aa" * 20
+
+    def __init__(self, seeding=False):
+        self.seeding = seeding
 
     def set_private_key(self, private_key):
         pass
+
+    def seeding_open(self):
+        if isinstance(self.seeding, Exception):
+            raise self.seeding
+        return self.seeding
 
     def is_v2(self):
         raise Exception("no chain in this test")
@@ -285,11 +296,12 @@ def test_a_registration_that_fails_leaves_the_kubo_serving_nothing(monkeypatch, 
     assert kubo.serving is False
 
 
-def _main(monkeypatch, publish, outcome, kubo_start=None):
+def _main(monkeypatch, publish, outcome, kubo_start=None, seeding=False):
     """publish.main with the containers replaced, the Kubo's start ending in
-    `kubo_start` and _publish in `outcome`: an exception raised, or None for
-    one that completes. Returns the containers by name and the list of
-    _publish calls."""
+    `kubo_start`, _publish in `outcome` (an exception raised, or None for
+    one that completes) and the image registry's seeding_open answering
+    `seeding`. Returns the containers by name and the list of _publish
+    calls."""
     containers = {}
     published = []
     # The signal handlers are the process's; `exit_on_interrupt` is checked on
@@ -298,7 +310,7 @@ def _main(monkeypatch, publish, outcome, kubo_start=None):
     monkeypatch.setattr(publish, "LocalKubo", lambda name: containers.setdefault("kubo", _Kubo(name, kubo_start)))
     monkeypatch.setattr(publish, "LocalRegistry",
                         lambda name, tree: containers.setdefault("registry", _Registry(name, tree)))
-    monkeypatch.setattr(publish, "image_registry", _NoChain())
+    monkeypatch.setattr(publish, "image_registry", _NoChain(seeding))
 
     def _publish(*args, **kwargs):
         published.append(args)
@@ -391,4 +403,27 @@ def test_a_build_by_an_older_sdk_ends_the_publish_before_anything_starts(monkeyp
     assert "Error: this build records no SECURELOCK_IMAGE_DIGEST and MRENCLAVE_SECURELOCK_SIGNED." in out
     assert ("The securelock was built by an SDK older than these records; "
             "run ecld-build with the current SDK, then publish again.") in out
+    assert containers == {} and published == []
+
+
+def test_a_registry_seeding_its_name_owners_ends_the_publish_before_anything_starts(monkeypatch, tmp_path, capsys):
+    publish = _publish_module(monkeypatch, tmp_path)
+    containers, published = _main(monkeypatch, publish, None, seeding=True)
+    with pytest.raises(SystemExit) as exit_:
+        publish.main(KEY)
+    out = capsys.readouterr().out
+    assert exit_.value.code == 1
+    assert (f"The image registry {_NoChain.image_registry_address} is seeding its securelock name owners "
+            "(seedingOpen() answers true): it refuses registerImage and addImage with SeedingOpen()") in out
+    assert containers == {} and published == []
+
+
+def test_a_registry_whose_seeding_cannot_be_read_ends_the_publish_before_anything_starts(monkeypatch, tmp_path,
+                                                                                          capsys):
+    publish = _publish_module(monkeypatch, tmp_path)
+    containers, published = _main(monkeypatch, publish, None, seeding=Exception("503 Service Unavailable"))
+    with pytest.raises(SystemExit) as exit_:
+        publish.main(KEY)
+    assert exit_.value.code == 1
+    assert "Could not read whether the image registry is seeding: 503 Service Unavailable" in capsys.readouterr().out
     assert containers == {} and published == []
