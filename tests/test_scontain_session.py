@@ -213,7 +213,8 @@ def test_the_stand_in_requires_a_client_certificate_and_holds_a_session_for_its_
     assert post(cas.url, update, owner.write(tmp_path / "owner"))[0] == 201
 
 
-def test_a_new_session_is_posted_under_the_wallets_key_from_files_in_a_directory_of_their_own(cas, tmp_path, temp_root):
+def test_a_new_session_is_posted_under_the_wallets_key_from_files_in_a_directory_of_their_own(
+        cas, tmp_path, temp_root, monkeypatch):
     project = tmp_path / "project"
     (project / "build" / "securelock" / "run").mkdir(parents=True)
     session_file = project / "build" / "securelock" / "run" / "etny-securelock-test.yaml"
@@ -255,13 +256,22 @@ def test_a_new_session_is_posted_under_the_wallets_key_from_files_in_a_directory
     assert records == ["wallet"]
     assert lines == [UPLOADED]
 
-    # The update of that session: the same key under another certificate.
+    # The update of that session, a day later by the clock: the same key
+    # under a certificate built then.
+    class Tomorrow(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.now(tz) + timedelta(days=1)
+
+    monkeypatch.setattr(scontain_session, "datetime", Tomorrow)
     update = render(session_file, response.json()["hash"])
     response, records, lines = upload(cas, session_file, project / "build" / "certs", recorded="wallet", predecessor=True)
     assert response.status_code == 201
     assert cas.requests[1]["key"] == WALLET_CAS_KEY
     assert cas.requests[1]["body"] == update
-    assert cas.requests[1]["certificate"] != certificate
+    later = cas.requests[1]["certificate"]
+    assert later.not_valid_before_utc - certificate.not_valid_before_utc > timedelta(hours=20)
+    assert later.not_valid_after_utc - certificate.not_valid_after_utc > timedelta(hours=20)
     assert (records, lines) == ([], [UPLOADED])
     assert list(temp_root.iterdir()) == []
 
